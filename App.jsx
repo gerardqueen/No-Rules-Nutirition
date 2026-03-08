@@ -73994,24 +73994,30 @@ function LoginScreen({ onLogin }) {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     setError("");
     if (!email || !password) {
       setError("Please enter your email and password.");
       return;
     }
     setLoading(true);
-    setTimeout(() => {
-      const account = ACCOUNTS.find(
-        (a) => a.email === email.trim().toLowerCase() && a.password === password
-      );
-      if (account) {
-        onLogin(account);
+    try {
+      const res = await fetch("https://no-rules-api-production.up.railway.app/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        localStorage.setItem("nrn_token", data.token);
+        onLogin(data.user);
       } else {
-        setError("Incorrect email or password. Try a demo account below.");
+        setError(data.error || "Incorrect email or password.");
       }
-      setLoading(false);
-    }, 700);
+    } catch (err) {
+      setError("Could not connect to server. Please try again.");
+    }
+    setLoading(false);
   };
 
   return (
@@ -74230,110 +74236,6 @@ function LoginScreen({ onLogin }) {
           </div>
         </div>
 
-        {/* Demo accounts */}
-        <div
-          style={{
-            marginTop: 20,
-            background: T.surface,
-            border: `1px solid ${T.border}`,
-            borderRadius: 16,
-            padding: 20,
-          }}
-        >
-          <div
-            style={{
-              fontFamily: "DM Sans",
-              fontSize: 11,
-              color: T.muted,
-              letterSpacing: 1,
-              textTransform: "uppercase",
-              marginBottom: 12,
-            }}
-          >
-            Demo accounts — click to fill
-          </div>
-          {ACCOUNTS.map((a) => (
-            <button
-              key={a.email}
-              onClick={() => {
-                setEmail(a.email);
-                setPassword(a.password);
-                setError("");
-              }}
-              style={{
-                width: "100%",
-                textAlign: "left",
-                background: T.card,
-                border: `1px solid ${T.border}`,
-                borderRadius: 10,
-                padding: "10px 14px",
-                marginBottom: 8,
-                cursor: "pointer",
-                transition: "all 0.2s",
-              }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.borderColor = T.accent)
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.borderColor = T.border)
-              }
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: "DM Sans",
-                    fontSize: 13,
-                    color: T.text,
-                    fontWeight: 500,
-                  }}
-                >
-                  {a.name}
-                </span>
-                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  {a.mfpUsername && (
-                    <span
-                      style={{
-                        fontFamily: "JetBrains Mono",
-                        fontSize: 9,
-                        color: "#fff",
-                        background: `linear-gradient(135deg, ${T.mfp}, #0066cc)`,
-                        borderRadius: 4,
-                        padding: "2px 6px",
-                      }}
-                    >
-                      MFP ✓
-                    </span>
-                  )}
-                  <span
-                    style={{
-                      fontFamily: "JetBrains Mono",
-                      fontSize: 10,
-                      color: T.muted,
-                    }}
-                  >
-                    {a.sport}
-                  </span>
-                </div>
-              </div>
-              <div
-                style={{
-                  fontFamily: "JetBrains Mono",
-                  fontSize: 10,
-                  color: T.muted,
-                  marginTop: 2,
-                }}
-              >
-                {a.email}
-              </div>
-            </button>
-          ))}
-        </div>
       </div>
     </div>
   );
