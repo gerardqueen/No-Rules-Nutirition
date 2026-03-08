@@ -74008,8 +74008,7 @@ function LoginScreen({ onLogin }) {
         body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
       });
       const data = await res.json();
-      if (res.ok) {
-        localStorage.setItem("nrn_token", data.token);
+      if (res.ok && data.user) {
         onLogin(data.user);
       } else {
         setError(data.error || "Incorrect email or password.");
@@ -74235,6 +74234,7 @@ function LoginScreen({ onLogin }) {
             </span>
           </div>
         </div>
+
 
       </div>
     </div>
@@ -83782,138 +83782,56 @@ export default function App() {
       const dateStr = `${today.getFullYear()}-${String(
         today.getMonth() + 1
       ).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      const diaryUrl = `https://www.myfitnesspal.com/en/food/diary/${username}?date=${dateStr}`;
 
-      // ── Attempt 1: MFP public JSON endpoint (no auth needed for public diaries) ──
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 2000,
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+          messages: [
+            {
+              role: "user",
+              content: `You are a data extraction assistant. Fetch the MyFitnessPal public food diary at this exact URL and extract all logged nutrition data:
+
+URL: ${diaryUrl}
+
+Instructions:
+1. Use web_search to retrieve the content of: ${diaryUrl}
+2. Also try: https://www.myfitnesspal.com/food/diary/${username}
+3. Look for: total calories, protein (g), carbs (g), fat (g), fibre (g), water (ml), exercise calories burned, net calories, and individual meal entries with their calorie totals.
+
+Return ONLY this JSON structure (no markdown fences, no other text):
+{"profileFound":true,"username":"${username}","date":"${dateStr}","source":"live","calories":REPLACE,"protein":REPLACE,"carbs":REPLACE,"fat":REPLACE,"fibre":REPLACE,"water":REPLACE,"exerciseCalories":REPLACE,"netCalories":REPLACE,"meals":[{"name":"Breakfast","calories":REPLACE,"logged":true},{"name":"Lunch","calories":REPLACE,"logged":true},{"name":"Dinner","calories":REPLACE,"logged":true},{"name":"Snacks","calories":REPLACE,"logged":true}],"weekAdherence":[85,90,78,95,82,88,76]}
+
+Replace every REPLACE with the actual integer value from the diary. If the diary page is inaccessible (login required, private, or empty today), return exactly: {"profileFound":false}`,
+            },
+          ],
+        }),
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const apiData = await response.json();
+
+      // Extract text blocks (web_search returns tool_use + text blocks)
+      const allText = (apiData.content || [])
+        .filter((b) => b.type === "text")
+        .map((b) => b.text)
+        .join("\n")
+        .replace(/```json\s*/gi, "")
+        .replace(/```/g, "")
+        .trim();
+
+      // Find the outermost JSON object
+      const jsonMatch = allText.match(/\{[\s\S]*\}/);
       let parsed = null;
-      const proxies = [
-        `https://corsproxy.io/?${encodeURIComponent(`https://www.myfitnesspal.com/food/diary/${username}.json?date=${dateStr}`)}`,
-        `https://api.allorigins.win/get?url=${encodeURIComponent(`https://www.myfitnesspal.com/food/diary/${username}?date=${dateStr}`)}`,
-        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(`https://www.myfitnesspal.com/food/diary/${username}?date=${dateStr}`)}`,
-      ];
-
-      for (const proxyUrl of proxies) {
-        if (parsed) break;
-        try {
-          const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 7000);
-          const res = await fetch(proxyUrl, { signal: ctrl.signal });
-          clearTimeout(timer);
-          if (!res.ok) continue;
-          const raw = await res.text();
-
-          // Try JSON parse first (MFP .json endpoint)
-          try {
-            const j = JSON.parse(raw);
-            const items = j?.items || j?.diary?.items || [];
-            if (items.length > 0) {
-              let cal = 0, prot = 0, carb = 0, fat = 0, fibre = 0;
-              items.forEach(i => {
-                cal   += i.nutritional_contents?.energy?.value || 0;
-                prot  += i.nutritional_contents?.protein || 0;
-                carb  += i.nutritional_contents?.carbohydrates || 0;
-                fat   += i.nutritional_contents?.fat || 0;
-                fibre += i.nutritional_contents?.fiber || 0;
-              });
-              if (cal > 0) {
-                parsed = { profileFound: true, username, date: dateStr, source: "live",
-                  calories: Math.round(cal), protein: Math.round(prot),
-                  carbs: Math.round(carb), fat: Math.round(fat), fibre: Math.round(fibre),
-                  water: 0, exerciseCalories: 0, netCalories: Math.round(cal),
-                  meals: [
-                    { name: "Breakfast", calories: 0, logged: true },
-                    { name: "Lunch", calories: 0, logged: true },
-                    { name: "Dinner", calories: 0, logged: true },
-                    { name: "Snacks", calories: 0, logged: true },
-                  ],
-                  weekAdherence: [85, 90, 78, 95, 82, 88, 76],
-                };
-                break;
-              }
-            }
-          } catch (_) { /* not JSON, try HTML */ }
-
-          // Try HTML scraping
-          const html = raw.includes("{") && raw.includes("contents") 
-            ? (JSON.parse(raw).contents || "") 
-            : raw;
-          if (html.length > 500) {
-            const getN = (re) => { const m = html.match(re); return m ? parseInt(m[1].replace(/,/g,""),10) : 0; };
-            // MFP embeds nutrition data as JSON-LD or window.__data
-            const dataMatch = html.match(/"energy"[^}]*"value"\s*:\s*(\d+)/) ||
-                              html.match(/class="[^"]*total[^"]*calories[^"]*"[^>]*>[\s\S]{0,100}?(\d{3,4})/i);
-            const cal = getN(/"energy"[^}]{0,50}"value"\s*:\s*(\d+)/) ||
-                        getN(/total[^<]{0,50}calories[^<]{0,50}>([0-9,]{3,5})/i) ||
-                        getN(/"calories"\s*:\s*(\d+)/i);
-            const prot = getN(/"protein"\s*:\s*([\d.]+)/i);
-            const carb = getN(/"carbohydrates"\s*:\s*([\d.]+)/i) || getN(/"carbs"\s*:\s*([\d.]+)/i);
-            const fat  = getN(/"fat"\s*:\s*([\d.]+)/i);
-            if (cal > 50 && (prot > 0 || carb > 0)) {
-              parsed = { profileFound: true, username, date: dateStr, source: "live",
-                calories: cal, protein: prot, carbs: carb, fat,
-                fibre: getN(/"fiber"\s*:\s*([\d.]+)/i),
-                water: 0, exerciseCalories: 0, netCalories: cal,
-                meals: [
-                  { name: "Breakfast", calories: 0, logged: html.toLowerCase().includes("breakfast") },
-                  { name: "Lunch", calories: 0, logged: html.toLowerCase().includes("lunch") },
-                  { name: "Dinner", calories: 0, logged: html.toLowerCase().includes("dinner") },
-                  { name: "Snacks", calories: 0, logged: html.toLowerCase().includes("snack") },
-                ],
-                weekAdherence: [85, 90, 78, 95, 82, 88, 76],
-              };
-            }
-          }
-        } catch (_proxyErr) { /* try next proxy */ }
+      try {
+        parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+      } catch {
+        parsed = null;
       }
-
-      // ── Attempt 2: Use Claude AI with web_search to read the public diary ──
-      if (!parsed || !parsed.profileFound || !parsed.calories) {
-        const response = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 2000,
-            tools: [{ type: "web_search_20250305", name: "web_search" }],
-            messages: [
-              {
-                role: "user",
-                content: `TASK: Fetch this public MyFitnessPal diary page and return the nutrition totals as JSON.
-
-URL to fetch: https://www.myfitnesspal.com/food/diary/${username}?date=${dateStr}
-
-The diary is PUBLIC (no login needed). Use web_search to retrieve it.
-
-Look for the daily totals row showing: Calories, Protein (g), Carbs (g), Fat (g). These appear at the bottom of the food diary table.
-
-Return ONLY this exact JSON (fill in real numbers, no markdown, no text):
-{"profileFound":true,"username":"${username}","date":"${dateStr}","source":"live","calories":0,"protein":0,"carbs":0,"fat":0,"fibre":0,"water":0,"exerciseCalories":0,"netCalories":0,"meals":[{"name":"Breakfast","calories":0,"logged":false},{"name":"Lunch","calories":0,"logged":false},{"name":"Dinner","calories":0,"logged":false},{"name":"Snacks","calories":0,"logged":false}],"weekAdherence":[85,90,78,95,82,88,76]}
-
-If the page requires login or is private, return ONLY: {"profileFound":false}`,
-              },
-            ],
-          }),
-        });
-
-        if (response.ok) {
-          const apiData = await response.json();
-          const allText = (apiData.content || [])
-            .filter((b) => b.type === "text")
-            .map((b) => b.text)
-            .join("\n")
-            .replace(/```json\s*/gi, "")
-            .replace(/```/g, "")
-            .trim();
-          const jsonMatch = allText.match(/\{[\s\S]*\}/);
-          try {
-            parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-          } catch {
-            parsed = null;
-          }
-        }
-      }
-
-      // ── Compatibility shim ────────────────────────────────────────────────
-      const jsonMatch = null; // already parsed above
 
       // ── Use live data if we got real numbers ──────────────────────────────
       if (
@@ -84151,8 +84069,6 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
       }}
     >
       <style>{`
-        html, body { width:100%; min-height:100vh; margin:0; padding:0; }
-        #root { width:100% !important; max-width:100% !important; margin:0 !important; padding:0 !important; text-align:left !important; }
         * { box-sizing:border-box; margin:0; padding:0; }
         ::-webkit-scrollbar { width:4px; }
         ::-webkit-scrollbar-track { background:${T.surface}; }
@@ -84319,9 +84235,9 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
       {/* Content */}
       <div
         style={{
-          padding: "28px 32px",
-          width: "100%",
-          boxSizing: "border-box",
+          padding: 28,
+          maxWidth: 1280,
+          margin: "0 auto",
           animation: "fadeUp 0.3s ease",
         }}
       >
