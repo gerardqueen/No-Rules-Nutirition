@@ -73994,24 +73994,30 @@ function LoginScreen({ onLogin }) {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     setError("");
     if (!email || !password) {
       setError("Please enter your email and password.");
       return;
     }
     setLoading(true);
-    setTimeout(() => {
-      const account = ACCOUNTS.find(
-        (a) => a.email === email.trim().toLowerCase() && a.password === password
-      );
-      if (account) {
-        onLogin(account);
+    try {
+      const res = await fetch("https://no-rules-api-production.up.railway.app/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        localStorage.setItem("nrn_token", data.token);
+        onLogin(data.user);
       } else {
-        setError("Incorrect email or password. Try a demo account below.");
+        setError(data.error || "Incorrect email or password.");
       }
-      setLoading(false);
-    }, 700);
+    } catch (err) {
+      setError("Could not connect to server. Please try again.");
+    }
+    setLoading(false);
   };
 
   return (
