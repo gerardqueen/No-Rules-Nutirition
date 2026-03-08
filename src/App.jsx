@@ -83880,56 +83880,89 @@ export default function App() {
       const dateStr = `${today.getFullYear()}-${String(
         today.getMonth() + 1
       ).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-      const diaryUrl = `https://www.myfitnesspal.com/en/food/diary/${username}?date=${dateStr}`;
+      const diaryUrl = `https://www.myfitnesspal.com/food/diary/${username}?date=${dateStr}`;
 
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 2000,
-          tools: [{ type: "web_search_20250305", name: "web_search" }],
-          messages: [
-            {
-              role: "user",
-              content: `You are a data extraction assistant. Fetch the MyFitnessPal public food diary at this exact URL and extract all logged nutrition data:
-
-URL: ${diaryUrl}
-
-Instructions:
-1. Use web_search to retrieve the content of: ${diaryUrl}
-2. Also try: https://www.myfitnesspal.com/food/diary/${username}
-3. Look for: total calories, protein (g), carbs (g), fat (g), fibre (g), water (ml), exercise calories burned, net calories, and individual meal entries with their calorie totals.
-
-Return ONLY this JSON structure (no markdown fences, no other text):
-{"profileFound":true,"username":"${username}","date":"${dateStr}","source":"live","calories":REPLACE,"protein":REPLACE,"carbs":REPLACE,"fat":REPLACE,"fibre":REPLACE,"water":REPLACE,"exerciseCalories":REPLACE,"netCalories":REPLACE,"meals":[{"name":"Breakfast","calories":REPLACE,"logged":true},{"name":"Lunch","calories":REPLACE,"logged":true},{"name":"Dinner","calories":REPLACE,"logged":true},{"name":"Snacks","calories":REPLACE,"logged":true}],"weekAdherence":[85,90,78,95,82,88,76]}
-
-Replace every REPLACE with the actual integer value from the diary. If the diary page is inaccessible (login required, private, or empty today), return exactly: {"profileFound":false}`,
-            },
-          ],
-        }),
-      });
-
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const apiData = await response.json();
-
-      // Extract text blocks (web_search returns tool_use + text blocks)
-      const allText = (apiData.content || [])
-        .filter((b) => b.type === "text")
-        .map((b) => b.text)
-        .join("\n")
-        .replace(/```json\s*/gi, "")
-        .replace(/```/g, "")
-        .trim();
-
-      // Find the outermost JSON object
-      const jsonMatch = allText.match(/\{[\s\S]*\}/);
+      // ── Step 1: Try direct CORS proxy fetch of public MFP diary ─────────
       let parsed = null;
       try {
-        parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-      } catch {
-        parsed = null;
+        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(diaryUrl)}`;
+        const proxyRes = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
+        if (proxyRes.ok) {
+          const proxyData = await proxyRes.json();
+          const html = proxyData.contents || "";
+          const extractNum = (pattern) => {
+            const m = html.match(pattern);
+            return m ? parseInt(m[1].replace(/,/g, ""), 10) : 0;
+          };
+          // Try multiple MFP HTML patterns for nutrition totals
+          const calories = extractNum(/total-calories[^>]*>\s*([\d,]+)/i) ||
+                          extractNum(/"calories":\s*(\d+)/i) ||
+                          extractNum(/Calories<\/[^>]+>[^<]*<[^>]+>([\d,]+)/i);
+          const protein  = extractNum(/protein[^>]*>\s*([\d,]+)/i) ||
+                          extractNum(/"protein":\s*(\d+)/i);
+          const carbs    = extractNum(/carbohydrates[^>]*>\s*([\d,]+)/i) ||
+                          extractNum(/"carbohydrates":\s*(\d+)/i) ||
+                          extractNum(/"carbs":\s*(\d+)/i);
+          const fat      = extractNum(/\"fat\":\s*(\d+)/i) ||
+                          extractNum(/total.fat[^>]*>\s*([\d,]+)/i);
+          if (calories > 0 && (protein > 0 || carbs > 0)) {
+            parsed = {
+              profileFound: true, username, date: dateStr, source: "live",
+              calories, protein, carbs, fat,
+              fibre: extractNum(/fiber[^>]*>\s*([\d,]+)/i),
+              water: 0,
+              exerciseCalories: extractNum(/exercise[^<]*([\d,]+)\s*cal/i),
+              netCalories: calories,
+              meals: [
+                { name: "Breakfast", calories: 0, logged: html.toLowerCase().includes("breakfast") },
+                { name: "Lunch", calories: 0, logged: html.toLowerCase().includes("lunch") },
+                { name: "Dinner", calories: 0, logged: html.toLowerCase().includes("dinner") },
+                { name: "Snacks", calories: 0, logged: html.toLowerCase().includes("snack") },
+              ],
+              weekAdherence: [85, 90, 78, 95, 82, 88, 76],
+            };
+          }
+        }
+      } catch (_proxyErr) { /* proxy failed, fall through */ }
+
+      // ── Step 2: If CORS proxy didn't get real data, use AI + web_search ──
+      if (!parsed || !parsed.profileFound || !parsed.calories) {
+        const response = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 2000,
+            tools: [{ type: "web_search_20250305", name: "web_search" }],
+            messages: [
+              {
+                role: "user",
+                content: `You are a nutrition data extraction assistant. The MFP user "${username}" has their diary set to PUBLIC. Fetch their diary for ${dateStr} and extract all nutrition totals.\n\nFetch: ${diaryUrl}\nAlso try: https://www.myfitnesspal.com/en/food/diary/${username}?date=${dateStr}\n\nReturn ONLY valid JSON (no markdown):\n{"profileFound":true,"username":"${username}","date":"${dateStr}","source":"live","calories":0,"protein":0,"carbs":0,"fat":0,"fibre":0,"water":0,"exerciseCalories":0,"netCalories":0,"meals":[{"name":"Breakfast","calories":0,"logged":false},{"name":"Lunch","calories":0,"logged":false},{"name":"Dinner","calories":0,"logged":false},{"name":"Snacks","calories":0,"logged":false}],"weekAdherence":[85,90,78,95,82,88,76]}\n\nReplace zeros with actual values from the diary. If diary is private or inaccessible, return: {"profileFound":false}`,
+              },
+            ],
+          }),
+        });
+
+        if (response.ok) {
+          const apiData = await response.json();
+          const allText = (apiData.content || [])
+            .filter((b) => b.type === "text")
+            .map((b) => b.text)
+            .join("\n")
+            .replace(/```json\s*/gi, "")
+            .replace(/```/g, "")
+            .trim();
+          const jsonMatch = allText.match(/\{[\s\S]*\}/);
+          try {
+            parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+          } catch {
+            parsed = null;
+          }
+        }
       }
+
+      // ── Compatibility shim so rest of code works unchanged ────────────────
+      const jsonMatch = null; // already parsed above
 
       // ── Use live data if we got real numbers ──────────────────────────────
       if (
@@ -84333,9 +84366,9 @@ Replace every REPLACE with the actual integer value from the diary. If the diary
       {/* Content */}
       <div
         style={{
-          padding: 28,
-          maxWidth: 1280,
-          margin: "0 auto",
+          padding: "28px 32px",
+          width: "100%",
+          boxSizing: "border-box",
           animation: "fadeUp 0.3s ease",
         }}
       >
