@@ -34,13 +34,13 @@ const T = {
   danger: "#ef4444",
 };
 
-// ── Demo accounts removed (LIVE auth only) ─────────────────────────────────────
+// ── Demo accounts removed (LIVE data only) ───────────────────────────────────
 
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
 const MEALS = ["Breakfast", "Lunch", "Dinner", "Snack"];
-const macroGoals = { calories: 3200, protein: 200, carbs: 380, fat: 90 };
+const DEFAULT_MACRO_GOALS = { calories: 3200, protein: 200, carbs: 380, fat: 90 };
 
 // ── USDA FoodData Central Database (8,200+ foods) ────────────────────────────
 // Fields: n=name, c=calories/100g, p=protein/100g, b=carbs/100g, f=fat/100g, s=[[servingLabel,grams],...]
@@ -73902,12 +73902,6 @@ const initWeekPlan = () => {
       plan[d][m] = [];
     });
   });
-  plan["MON"]["Breakfast"] = [sampleFoods[5], sampleFoods[2]];
-  plan["MON"]["Lunch"] = [sampleFoods[0], sampleFoods[1]];
-  plan["MON"]["Dinner"] = [sampleFoods[7], sampleFoods[8]];
-  plan["TUE"]["Breakfast"] = [sampleFoods[3], sampleFoods[4]];
-  plan["TUE"]["Lunch"] = [sampleFoods[0], sampleFoods[1], sampleFoods[6]];
-  plan["TUE"]["Snack"] = [sampleFoods[9]];
   return plan;
 };
 
@@ -73944,13 +73938,12 @@ function LoginScreen({ onLoggedIn }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
       });
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok || !data.token) {
-        setError(data.error || "Incorrect email or password.");
-      } else {
+      const data = await res.json();
+      if (res.ok && data.token) {
         localStorage.setItem(TOKEN_KEY, data.token);
         onLoggedIn(data.token);
+      } else {
+        setError(data.error || "Incorrect email or password.");
       }
     } catch (err) {
       setError("Could not connect to server. Please try again.");
@@ -74712,19 +74705,19 @@ function MacroBar({ label, value, goal, color }) {
 }
 
 // ── Coach Messaging Panel ─────────────────────────────────────────────────────
-function CoachPanel({ plan, selectedDay, profile }) {
+function CoachPanel({ plan, selectedDay, profile, goals }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef(null);
 
   const tot = dayTotals(plan[selectedDay]);
-  const calPct = Math.round((tot.calories / macroGoals.calories) * 100);
-  const protPct = Math.round((tot.protein / macroGoals.protein) * 100);
-  const carbsPct = Math.round((tot.carbs / macroGoals.carbs) * 100);
-  const fatPct = Math.round((tot.fat / macroGoals.fat) * 100);
+  const calPct = Math.round((tot.calories / goals.calories) * 100);
+  const protPct = Math.round((tot.protein / goals.protein) * 100);
+  const carbsPct = Math.round((tot.carbs / goals.carbs) * 100);
+  const fatPct = Math.round((tot.fat / goals.fat) * 100);
 
-  const systemPrompt = `You are Sarah Mitchell, a professional nutrition coach. You are in a 1-on-1 chat with ${profile.name}, a ${profile.sport} athlete (goal: ${profile.goal}). Live macro data for ${selectedDay}: Calories ${tot.calories}/${macroGoals.calories} (${calPct}%), Protein ${tot.protein}/${macroGoals.protein}g (${protPct}%), Carbs ${tot.carbs}/${macroGoals.carbs}g (${carbsPct}%), Fat ${tot.fat}/${macroGoals.fat}g (${fatPct}%). Be warm, concise, and data-driven — like a real coach text. Reference their numbers when relevant. Sign off as "Sarah" occasionally.`;
+  const systemPrompt = `You are Sarah Mitchell, a professional nutrition coach. You are in a 1-on-1 chat with ${profile.name}, a ${profile.sport} athlete (goal: ${profile.goal}). Live macro data for ${selectedDay}: Calories ${tot.calories}/${goals.calories} (${calPct}%), Protein ${tot.protein}/${goals.protein}g (${protPct}%), Carbs ${tot.carbs}/${goals.carbs}g (${carbsPct}%), Fat ${tot.fat}/${goals.fat}g (${fatPct}%). Be warm, concise, and data-driven — like a real coach text. Reference their numbers when relevant. Sign off as "Sarah" occasionally.`;
 
   useEffect(() => {
     if (messages.length === 0) {
@@ -74933,28 +74926,28 @@ function CoachPanel({ plan, selectedDay, profile }) {
           {
             label: "Calories",
             val: tot.calories,
-            goal: macroGoals.calories,
+            goal: goals.calories,
             unit: "kcal",
             color: T.accent,
           },
           {
             label: "Protein",
             val: tot.protein,
-            goal: macroGoals.protein,
+            goal: goals.protein,
             unit: "g",
             color: T.protein,
           },
           {
             label: "Carbs",
             val: tot.carbs,
-            goal: macroGoals.carbs,
+            goal: goals.carbs,
             unit: "g",
             color: T.carbs,
           },
           {
             label: "Fat",
             val: tot.fat,
-            goal: macroGoals.fat,
+            goal: goals.fat,
             unit: "g",
             color: T.fat,
           },
@@ -76394,28 +76387,28 @@ function MFPPanel({
             {
               label: "Calories",
               mfp: mfpData.calories,
-              goal: macroGoals.calories,
+              goal: goals.calories,
               unit: "kcal",
               color: T.accent,
             },
             {
               label: "Protein",
               mfp: mfpData.protein,
-              goal: macroGoals.protein,
+              goal: goals.protein,
               unit: "g",
               color: T.protein,
             },
             {
               label: "Carbs",
               mfp: mfpData.carbs,
-              goal: macroGoals.carbs,
+              goal: goals.carbs,
               unit: "g",
               color: T.carbs,
             },
             {
               label: "Fat",
               mfp: mfpData.fat,
-              goal: macroGoals.fat,
+              goal: goals.fat,
               unit: "g",
               color: T.fat,
             },
@@ -79325,8 +79318,19 @@ const WEIGHT_SEED = (() => {
   }, {});
 })();
 
-function WeightTracker() {
-  const [weightLog, setWeightLog] = useState(WEIGHT_SEED);
+function WeightTracker({ weights, onAddWeight }) {
+  const [weightLog, setWeightLog] = useState({});
+
+  useEffect(() => {
+    const map = {};
+    (weights || []).forEach((w) => {
+      const d = new Date(w.date);
+      const idx = d.getDay() === 0 ? 6 : d.getDay() - 1;
+      const key = DAYS[idx];
+      map[key] = { weight: Number(w.kg), time: "07:00", timestamp: w.date };
+    });
+    setWeightLog(map);
+  }, [weights]);
   const [inputWeight, setInputWeight] = useState("");
   const [inputTime, setInputTime] = useState(() => {
     const now = new Date();
@@ -79349,6 +79353,7 @@ function WeightTracker() {
     const val = parseFloat(inputWeight);
     if (!val || val <= 0) return;
     const kg = fromDisplay(val);
+    onAddWeight?.({ date: new Date().toISOString().slice(0,10), kg });
     setWeightLog((prev) => ({
       ...prev,
       [todayKey]: {
@@ -79749,16 +79754,14 @@ function WeightTracker() {
 }
 
 // ── Dashboard (main landing page) ─────────────────────────────────────────────
-function Dashboard({
-  plan,
+function Dashboard({plan,
   profile,
   onNavigate,
   selectedDay,
   moodLog,
   setMoodLog,
   threads,
-  setThreads,
-}) {
+  setThreads,, goals}) {
   // Aggregate totals across the whole week for the overview
   const weekTotals = DAYS.reduce(
     (acc, d) => {
@@ -79777,10 +79780,10 @@ function Dashboard({
     DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
   const todayData = dayTotals(plan[todayKey] || plan["MON"]);
   const weekGoal = {
-    calories: macroGoals.calories * 7,
-    protein: macroGoals.protein * 7,
-    carbs: macroGoals.carbs * 7,
-    fat: macroGoals.fat * 7,
+    calories: goals.calories * 7,
+    protein: goals.protein * 7,
+    carbs: goals.carbs * 7,
+    fat: goals.fat * 7,
   };
 
   const firstName = profile.name.split(" ")[0];
@@ -79792,7 +79795,7 @@ function Dashboard({
     {
       label: "CALORIES",
       today: todayData.calories,
-      goal: macroGoals.calories,
+      goal: goals.calories,
       week: weekTotals.calories,
       weekGoal: weekGoal.calories,
       unit: "kcal",
@@ -79801,7 +79804,7 @@ function Dashboard({
     {
       label: "PROTEIN",
       today: todayData.protein,
-      goal: macroGoals.protein,
+      goal: goals.protein,
       week: weekTotals.protein,
       weekGoal: weekGoal.protein,
       unit: "g",
@@ -79810,7 +79813,7 @@ function Dashboard({
     {
       label: "CARBS",
       today: todayData.carbs,
-      goal: macroGoals.carbs,
+      goal: goals.carbs,
       week: weekTotals.carbs,
       weekGoal: weekGoal.carbs,
       unit: "g",
@@ -79819,7 +79822,7 @@ function Dashboard({
     {
       label: "FAT",
       today: todayData.fat,
-      goal: macroGoals.fat,
+      goal: goals.fat,
       week: weekTotals.fat,
       weekGoal: weekGoal.fat,
       unit: "g",
@@ -80292,7 +80295,7 @@ function Dashboard({
             >
               {DAYS.map((d) => {
                 const cal = dayTotals(plan[d]).calories;
-                const h = Math.max((cal / macroGoals.calories) * 100, 4);
+                const h = Math.max((cal / goals.calories) * 100, 4);
                 const isToday = d === todayKey;
                 return (
                   <div
@@ -80485,7 +80488,20 @@ function Dashboard({
       <MoodTracker moodLog={moodLog} setMoodLog={setMoodLog} />
 
       {/* ── Weight Tracker ── */}
-      <WeightTracker />
+      <WeightTracker weights={weights} onAddWeight={async ({ date, kg }) => {
+            try {
+              const res = await fetch(`${API_BASE}/weights/${profile.id}`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ date, kg }),
+              });
+              const data = await res.json().catch(() => []);
+              if (res.ok && Array.isArray(data)) setWeights(data);
+            } catch {}
+          }} />
 
       {/* ── Coach Videos (full width below) ── */}
       <div
@@ -80903,7 +80919,7 @@ function WeeklyPlanner({
       <div style={{ display: "flex", gap: 8 }}>
         {DAYS.map((d) => {
           const tot = dayTotals(plan[d]);
-          const pct = Math.min(tot.calories / macroGoals.calories, 1);
+          const pct = Math.min(tot.calories / goals.calories, 1);
           return (
             <button
               key={d}
@@ -82230,7 +82246,7 @@ function WeeklyPlanner({
 }
 
 // ── Macro Tracker ─────────────────────────────────────────────────────────────
-function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
+function MacroTracker({plan, selectedDay, mfpData, mfpConnected, goals}) {
   const tot = dayTotals(plan[selectedDay]);
   const hasMfp = mfpConnected && mfpData;
 
@@ -82238,7 +82254,7 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
     {
       key: "calories",
       label: "Calories",
-      goal: macroGoals.calories,
+      goal: goals.calories,
       plan: tot.calories,
       mfp: hasMfp ? mfpData.calories : null,
       color: T.accent,
@@ -82247,7 +82263,7 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
     {
       key: "protein",
       label: "Protein",
-      goal: macroGoals.protein,
+      goal: goals.protein,
       plan: tot.protein,
       mfp: hasMfp ? mfpData.protein : null,
       color: T.protein,
@@ -82256,7 +82272,7 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
     {
       key: "carbs",
       label: "Carbs",
-      goal: macroGoals.carbs,
+      goal: goals.carbs,
       plan: tot.carbs,
       mfp: hasMfp ? mfpData.carbs : null,
       color: T.carbs,
@@ -82265,7 +82281,7 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
     {
       key: "fat",
       label: "Fat",
-      goal: macroGoals.fat,
+      goal: goals.fat,
       plan: tot.fat,
       mfp: hasMfp ? mfpData.fat : null,
       color: T.fat,
@@ -82757,9 +82773,9 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
             const mfpCal =
               hasMfp && d === selectedDay ? mfpData.calories : null;
             const maxCal = Math.max(planCal, mfpCal || 0, 1);
-            const hPlan = Math.max((planCal / macroGoals.calories) * 100, 4);
+            const hPlan = Math.max((planCal / goals.calories) * 100, 4);
             const hMfp = mfpCal
-              ? Math.max((mfpCal / macroGoals.calories) * 100, 4)
+              ? Math.max((mfpCal / goals.calories) * 100, 4)
               : 0;
             const isActive = d === selectedDay;
             return (
@@ -82868,7 +82884,7 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
 }
 
 // ── Inbox Page (full-page inbox with multi-coach + company threads) ───────────
-function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
+function InboxPage({plan, selectedDay, profile, threads, setThreads, goals}) {
   const [activeId, setActiveId] = useState(null);
   const [chatMsgs, setChatMsgs] = useState({}); // keyed by senderId
   const [input, setInput] = useState("");
@@ -82905,7 +82921,7 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
       const firstName = profile.name.split(" ")[0];
       let greeting = "";
       if (id === "coach-sarah") {
-        const calPct = Math.round((tot.calories / macroGoals.calories) * 100);
+        const calPct = Math.round((tot.calories / goals.calories) * 100);
         greeting = `Hey ${firstName}! 👋 I can see your macros for ${selectedDay} — you're at ${calPct}% of your calorie goal. How are you feeling today?`;
       } else if (id === "coach-james") {
         greeting = `Hey ${firstName}! 💪 Ready to talk training? What's on the programme today?`;
@@ -82946,7 +82962,7 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
     setLoading(true);
     const sysPrompt =
       senderId === "coach-sarah"
-        ? coachCfg.systemPrompt(profile, tot, macroGoals)
+        ? coachCfg.systemPrompt(profile, tot, goals)
         : coachCfg.systemPrompt(profile);
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -83648,7 +83664,7 @@ export default function App() {
   const [selectedDay, setSelectedDay] = useState("MON");
   const [threads, setThreads] = useState(MSG_SEED);
 
-  // ✅ Restore session using /auth/me (token -> profile)
+  // ✅ Restore session using /auth/me
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
@@ -83674,7 +83690,7 @@ export default function App() {
           setProfile(data);
           setBootError("");
         }
-      } catch (e) {
+      } catch {
         if (!cancelled) setBootError("Could not connect to server.");
       }
     })();
@@ -83690,6 +83706,78 @@ export default function App() {
     setProfile(null);
     setBootError("");
   };
+
+  // ✅ Live data from backend
+  const [macroByDay, setMacroByDay] = useState({});
+  const [weights, setWeights] = useState([]);
+
+  const loadMacroPlans = async (athleteId) => {
+    try {
+      const res = await fetch(`${API_BASE}/macro-plans/${athleteId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const rows = await res.json().catch(() => []);
+      if (!res.ok) return;
+      const map = {};
+      (rows || []).forEach((r) => {
+        const d = String(r.day_of_week || "").toUpperCase();
+        map[d] = {
+          calories: r.calories ?? DEFAULT_MACRO_GOALS.calories,
+          protein: r.protein_g ?? DEFAULT_MACRO_GOALS.protein,
+          carbs: r.carbs_g ?? DEFAULT_MACRO_GOALS.carbs,
+          fat: r.fat_g ?? DEFAULT_MACRO_GOALS.fat,
+        };
+      });
+      setMacroByDay(map);
+    } catch {}
+  };
+
+  const loadMealPlan = async (athleteId) => {
+    try {
+      const res = await fetch(`${API_BASE}/meal-plans/${athleteId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.plan) setPlan(data.plan);
+    } catch {}
+  };
+
+  const loadWeights = async (athleteId) => {
+    try {
+      const res = await fetch(`${API_BASE}/weights/${athleteId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => []);
+      if (res.ok && Array.isArray(data)) setWeights(data);
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (!token || !profile?.id) return;
+    loadMacroPlans(profile.id);
+    loadMealPlan(profile.id);
+    loadWeights(profile.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, profile?.id]);
+
+  // ✅ Debounced save of meal plan to backend so coach can see it
+  useEffect(() => {
+    if (!token || !profile?.id) return;
+    if (!plan) return;
+    const t = setTimeout(async () => {
+      try {
+        await fetch(`${API_BASE}/meal-plans/${profile.id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ plan }),
+        });
+      } catch {}
+    }, 900);
+    return () => clearTimeout(t);
+  }, [plan, token, profile?.id]);
 
 
   // ── MFP Live Sync State ───────────────────────────────────────────────────
@@ -84112,7 +84200,6 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
       <LoginScreen
         onLoggedIn={(t) => {
           setToken(t);
-          setBootError("");
           setTab("dashboard");
         }}
       />
@@ -84197,6 +84284,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
               logout();
               setPlan(initWeekPlan());
               setTab("dashboard");
+              setMoodLog({});
             }}
             onNavigate={setTab}
           />
@@ -84260,18 +84348,18 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
           {[
             {
               label: "CAL",
-              val: macroGoals.calories,
+              val: goals.calories,
               unit: "kcal",
               color: T.accent,
             },
             {
               label: "PRO",
-              val: macroGoals.protein,
+              val: goals.protein,
               unit: "g",
               color: T.protein,
             },
-            { label: "CARB", val: macroGoals.carbs, unit: "g", color: T.carbs },
-            { label: "FAT", val: macroGoals.fat, unit: "g", color: T.fat },
+            { label: "CARB", val: goals.carbs, unit: "g", color: T.carbs },
+            { label: "FAT", val: goals.fat, unit: "g", color: T.fat },
           ].map((g) => (
             <div key={g.label} style={{ textAlign: "center" }}>
               <div
@@ -84310,7 +84398,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
         }}
       >
         {tab === "dashboard" && (
-          <Dashboard
+          <Dashboard goals={macroByDay[selectedDay] || DEFAULT_MACRO_GOALS}
             plan={plan}
             profile={profile}
             onNavigate={setTab}
@@ -84341,7 +84429,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
           />
         )}
         {tab === "tracker" && (
-          <MacroTracker
+          <MacroTracker goals={macroByDay[selectedDay] || DEFAULT_MACRO_GOALS}
             plan={plan}
             selectedDay={selectedDay}
             mfpData={mfpData}
@@ -84373,7 +84461,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
                 visibility of your macros
               </div>
             </div>
-            <InboxPage
+            <InboxPage goals={macroByDay[selectedDay] || DEFAULT_MACRO_GOALS}
               plan={plan}
               selectedDay={selectedDay}
               profile={profile}
