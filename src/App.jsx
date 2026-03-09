@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 
+// ✅ LIVE API BASE + TOKEN STORAGE
+const API_BASE = import.meta.env.VITE_API_URL || "https://no-rules-api-production.up.railway.app";
+const TOKEN_KEY = "nrn_token";
+
 // ── Google Fonts ──────────────────────────────────────────────────────────────
 const fontLink = document.createElement("link");
 fontLink.rel = "stylesheet";
@@ -30,75 +34,8 @@ const T = {
   danger: "#ef4444",
 };
 
-// ── Demo accounts ─────────────────────────────────────────────────────────────
-const ACCOUNTS = [
-  {
-    email: "alex@norules.com",
-    password: "athlete1",
-    name: "Alex Morgan",
-    sport: "Triathlon",
-    goal: "Performance",
-    weight: "78kg",
-    trainingDays: 5,
-    nextCheckIn: 3,
-    mfpUsername: null,
-  },
-  {
-    email: "jamie@norules.com",
-    password: "athlete2",
-    name: "Jamie Clarke",
-    sport: "Powerlifting",
-    goal: "Strength",
-    weight: "92kg",
-    trainingDays: 4,
-    nextCheckIn: 6,
-    mfpUsername: null,
-  },
-  {
-    email: "sam@norules.com",
-    password: "athlete3",
-    name: "Sam Torres",
-    sport: "CrossFit",
-    goal: "Fat Loss",
-    weight: "65kg",
-    trainingDays: 5,
-    nextCheckIn: 1,
-    mfpUsername: null,
-  },
-  {
-    email: "gerard@norules.com",
-    password: "gerard1",
-    name: "Gerard Queen",
-    sport: "General",
-    goal: "Performance",
-    weight: "80kg",
-    trainingDays: 5,
-    nextCheckIn: 2,
-    mfpUsername: "gerardqueen",
-  },
-  {
-    email: "esme@norules.com",
-    password: "esme1",
-    name: "Esme",
-    sport: "Running",
-    goal: "Fat Loss",
-    weight: "62kg",
-    trainingDays: 4,
-    nextCheckIn: 3,
-    mfpUsername: null,
-  },
-  {
-    email: "luke@norules.com",
-    password: "luke1",
-    name: "Luke Bastick",
-    sport: "Weightlifting",
-    goal: "Strength",
-    weight: "88kg",
-    trainingDays: 5,
-    nextCheckIn: 5,
-    mfpUsername: null,
-  },
-];
+// ── Demo accounts removed (LIVE auth only) ─────────────────────────────────────
+
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
@@ -73987,7 +73924,7 @@ const sumMacros = (foods) =>
 const dayTotals = (dayPlan) => sumMacros(Object.values(dayPlan).flat());
 
 // ── Login Screen ──────────────────────────────────────────────────────────────
-function LoginScreen({ onLogin }) {
+function LoginScreen({ onLoggedIn }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -74002,16 +73939,18 @@ function LoginScreen({ onLogin }) {
     }
     setLoading(true);
     try {
-      const res = await fetch("https://no-rules-api-production.up.railway.app/auth/login", {
+      const res = await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
       });
-      const data = await res.json();
-      if (res.ok && data.user) {
-        onLogin(data.user);
-      } else {
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.token) {
         setError(data.error || "Incorrect email or password.");
+      } else {
+        localStorage.setItem(TOKEN_KEY, data.token);
+        onLoggedIn(data.token);
       }
     } catch (err) {
       setError("Could not connect to server. Please try again.");
@@ -83701,11 +83640,57 @@ const mfpMealToPlan = (name) => {
 };
 
 export default function App() {
+  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY));
   const [profile, setProfile] = useState(null);
+  const [bootError, setBootError] = useState("");
   const [tab, setTab] = useState("dashboard");
   const [plan, setPlan] = useState(initWeekPlan);
   const [selectedDay, setSelectedDay] = useState("MON");
   const [threads, setThreads] = useState(MSG_SEED);
+
+  // ✅ Restore session using /auth/me (token -> profile)
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          localStorage.removeItem(TOKEN_KEY);
+          if (!cancelled) {
+            setToken(null);
+            setProfile(null);
+            setBootError(data.error || "Session expired — please log in again");
+          }
+          return;
+        }
+
+        if (!cancelled) {
+          setProfile(data);
+          setBootError("");
+        }
+      } catch (e) {
+        if (!cancelled) setBootError("Could not connect to server.");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  const logout = () => {
+    localStorage.removeItem(TOKEN_KEY);
+    setToken(null);
+    setProfile(null);
+    setBootError("");
+  };
+
 
   // ── MFP Live Sync State ───────────────────────────────────────────────────
   const [mfpConnected, setMfpConnected] = useState(false);
@@ -84122,11 +84107,12 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
     return seed;
   });
 
-  if (!profile)
+  if (!token || !profile)
     return (
       <LoginScreen
-        onLogin={(acc) => {
-          setProfile(acc);
+        onLoggedIn={(t) => {
+          setToken(t);
+          setBootError("");
           setTab("dashboard");
         }}
       />
@@ -84208,10 +84194,9 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
           <ProfileMenu
             profile={profile}
             onLogout={() => {
-              setProfile(null);
+              logout();
               setPlan(initWeekPlan());
               setTab("dashboard");
-              setMoodLog({});
             }}
             onNavigate={setTab}
           />
