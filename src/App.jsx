@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 
-// ✅ LIVE API BASE + TOKEN STORAGE (prevents 'token is not defined')
-const API_BASE = import.meta.env.VITE_API_URL || '${API_BASE}';
+// ✅ LIVE API BASE + TOKEN STORAGE (prevents 'cannot connect' + token issues)
+const API_BASE = import.meta.env.VITE_API_URL || 'https://no-rules-api-production.up.railway.app';
 const TOKEN_KEY = 'nrn_token';
 const getToken = () => localStorage.getItem(TOKEN_KEY) || '';
 const authHeaders = (extra = {}) => {
@@ -53,7 +53,6 @@ const T = {
 };
 
 // ── Demo accounts removed (LIVE data only) ───────────────────────────────────
-
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
@@ -73956,10 +73955,10 @@ function LoginScreen({ onLoggedIn }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok && data.token) {
         localStorage.setItem(TOKEN_KEY, data.token);
-        onLoggedIn(data.token);
+        onLoggedIn?.(data.token);
       } else {
         setError(data.error || "Incorrect email or password.");
       }
@@ -74785,7 +74784,7 @@ function CoachPanel({ plan, selectedDay, profile }) {
           messages: newMsgs.map((m) => ({ role: m.role, content: m.content })),
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       const reply =
         data.content?.map((b) => b.text || "").join("") ||
         "Sorry, missed that!";
@@ -78042,7 +78041,7 @@ const MOODS = [
   { id: 1, emoji: "😩", label: "Terrible", color: "#ef4444" },
 ];
 
-function MoodTracker({ moodLog, setMoodLog }) {
+function MoodTracker({ moodLog, setMoodLog, athleteId }) {
   const todayKey =
     DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
   const [note, setNote] = useState(moodLog[todayKey]?.note || "");
@@ -78057,6 +78056,19 @@ function MoodTracker({ moodLog, setMoodLog }) {
       [todayKey]: { ...mood, note, timestamp: new Date().toISOString() },
     }));
     setSaved(false);
+
+    // Save to backend
+    if (athleteId) {
+      (async () => {
+        try {
+          const date = new Date().toISOString().slice(0, 10);
+          await apiFetch(`/moods/${athleteId}`, {
+            method: "POST",
+            body: JSON.stringify({ date, ...mood, note }),
+          });
+        } catch {}
+      })();
+    }
   };
 
   const saveNote = () => {
@@ -78068,6 +78080,19 @@ function MoodTracker({ moodLog, setMoodLog }) {
     }
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+
+    if (athleteId && moodLog[todayKey]) {
+      (async () => {
+        try {
+          const date = new Date().toISOString().slice(0, 10);
+          const m = moodLog[todayKey];
+          await apiFetch(`/moods/${athleteId}`, {
+            method: "POST",
+            body: JSON.stringify({ date, id: m.id, emoji: m.emoji, label: m.label, color: m.color, note }),
+          });
+        } catch {}
+      })();
+    }
   };
 
   // Build week history array
@@ -79336,8 +79361,25 @@ const WEIGHT_SEED = (() => {
   }, {});
 })();
 
-function WeightTracker() {
+function WeightTracker({ athleteId }) {
   const [weightLog, setWeightLog] = useState(WEIGHT_SEED);
+
+  useEffect(() => {
+    if (!athleteId) return;
+    (async () => {
+      try {
+        const rows = await apiFetch(`/weights/${athleteId}`);
+        const map = {};
+        (rows || []).forEach((w) => {
+          const d = new Date(w.date);
+          const idx = d.getDay() === 0 ? 6 : d.getDay() - 1;
+          const key = DAYS[idx];
+          map[key] = { weight: Number(w.kg), time: "07:00", timestamp: w.date };
+        });
+        setWeightLog(map);
+      } catch {}
+    })();
+  }, [athleteId]);
   const [inputWeight, setInputWeight] = useState("");
   const [inputTime, setInputTime] = useState(() => {
     const now = new Date();
@@ -79356,10 +79398,29 @@ function WeightTracker() {
   const fromDisplay = (v) =>
     unit === "lbs" ? parseFloat((v / 2.20462).toFixed(2)) : parseFloat(v);
 
-  const logWeight = () => {
+  const logWeight = async () => {
     const val = parseFloat(inputWeight);
     if (!val || val <= 0) return;
     const kg = fromDisplay(val);
+
+    // Save to backend
+    if (athleteId) {
+      try {
+        const date = new Date().toISOString().slice(0, 10);
+        const rows = await apiFetch(`/weights/${athleteId}`, {
+          method: "POST",
+          body: JSON.stringify({ date, kg }),
+        });
+        const map = {};
+        (rows || []).forEach((w) => {
+          const d = new Date(w.date);
+          const idx = d.getDay() === 0 ? 6 : d.getDay() - 1;
+          const key = DAYS[idx];
+          map[key] = { weight: Number(w.kg), time: "07:00", timestamp: w.date };
+        });
+        setWeightLog(map);
+      } catch {}
+    }
     setWeightLog((prev) => ({
       ...prev,
       [todayKey]: {
@@ -80493,10 +80554,10 @@ function Dashboard({
       </div>
 
       {/* ── Mood Tracker ── */}
-      <MoodTracker moodLog={moodLog} setMoodLog={setMoodLog} />
+      <MoodTracker moodLog={moodLog} setMoodLog={setMoodLog} athleteId={profile?.id} />
 
       {/* ── Weight Tracker ── */}
-      <WeightTracker />
+      <WeightTracker athleteId={profile?.id} />
 
       {/* ── Coach Videos (full width below) ── */}
       <div
@@ -82970,7 +83031,7 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
           messages: updated.map((m) => ({ role: m.role, content: m.content })),
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       const reply =
         data.content?.map((b) => b.text || "").join("") ||
         "Sorry, missed that!";
@@ -83682,6 +83743,48 @@ export default function App() {
     setBootError('');
   };
 
+  // ✅ Load live weights + moods after login
+  useEffect(() => {
+    if (!profile?.id) return;
+    // Load weights
+    (async () => {
+      try {
+        const rows = await apiFetch(`/weights/${profile.id}`);
+        // map newest weight per day-key (MON..SUN)
+        const map = {};
+        (rows || []).forEach((w) => {
+          const d = new Date(w.date);
+          const idx = d.getDay() === 0 ? 6 : d.getDay() - 1;
+          const key = DAYS[idx];
+          map[key] = { weight: Number(w.kg), time: '07:00', timestamp: w.date };
+        });
+        // If WeightTracker exists, it will load itself too; this is mainly for other UI bits
+      } catch {}
+    })();
+
+    // Load moods
+    (async () => {
+      try {
+        const rows = await apiFetch(`/moods/${profile.id}`);
+        const map = {};
+        (rows || []).forEach((m) => {
+          const d = new Date(m.date);
+          const idx = d.getDay() === 0 ? 6 : d.getDay() - 1;
+          const key = DAYS[idx];
+          map[key] = {
+            id: m.mood_id,
+            emoji: m.emoji,
+            label: m.label,
+            color: m.color,
+            note: m.note || '',
+            timestamp: m.date,
+          };
+        });
+        setMoodLog(map);
+      } catch {}
+    })();
+  }, [profile?.id]);
+
 
   // ── MFP Live Sync State ───────────────────────────────────────────────────
   const [mfpConnected, setMfpConnected] = useState(false);
@@ -84069,40 +84172,21 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
     return () => clearInterval(ticker);
   }, [mfpConnected, mfpUsername, mfpManualMode]);
 
-  const [moodLog, setMoodLog] = useState(() => {
-    // Pre-seed some mood history so the week view is meaningful from the start
-    const seed = {};
-    const seeds = [
-      { day: "MON", id: 4, emoji: "🙂", label: "Good", color: "#FF9A52" },
-      {
-        day: "TUE",
-        id: 5,
-        emoji: "😄",
-        label: "Great",
-        color: "#22c55e",
-        note: "Really nailed nutrition today",
-      },
-      {
-        day: "WED",
-        id: 3,
-        emoji: "😐",
-        label: "Neutral",
-        color: "#f97316",
-        note: "Struggled with energy mid-afternoon",
-      },
-      { day: "THU", id: 4, emoji: "🙂", label: "Good", color: "#FF9A52" },
-    ];
-    seeds.forEach((s) => {
-      seed[s.day] = { ...s, timestamp: new Date().toISOString() };
-    });
+  const [moodLog, setMoodLog] = useState({});
     return seed;
   });
 
   if (!getToken() || !profile)
     return (
       <LoginScreen
-        onLoggedIn={() => {
+        onLoggedIn={async () => {
           setTokenState(getToken());
+          try {
+            const me = await apiFetch('/auth/me');
+            setProfile(me);
+          } catch (e) {
+            setBootError(e.message);
+          }
         }}
       />
     );
