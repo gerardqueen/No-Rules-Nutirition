@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 
-// ✅ LIVE API BASE + TOKEN STORAGE
+// ✅ Live backend config + auth helpers
 const API_BASE = import.meta.env.VITE_API_URL || 'https://no-rules-api-production.up.railway.app';
 const TOKEN_KEY = 'nrn_token';
 const getToken = () => localStorage.getItem(TOKEN_KEY) || '';
@@ -18,9 +18,16 @@ async function apiFetch(path, options = {}) {
     headers: authHeaders(options.headers || {}),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  if (!res.ok) {
+    const msg = data?.error || `Request failed (${res.status})`;
+    const err = new Error(msg);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
   return data;
 }
+
 
 // ── Google Fonts ──────────────────────────────────────────────────────────────
 const fontLink = document.createElement("link");
@@ -125,7 +132,7 @@ const ACCOUNTS = [
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
 const MEALS = ["Breakfast", "Lunch", "Dinner", "Snack"];
-const macroGoals = { calories: 3200, protein: 200, carbs: 380, fat: 90 };
+let macroGoals = { calories: 3200, protein: 200, carbs: 380, fat: 90 };
 
 // ── USDA FoodData Central Database (8,200+ foods) ────────────────────────────
 // Fields: n=name, c=calories/100g, p=protein/100g, b=carbs/100g, f=fat/100g, s=[[servingLabel,grams],...]
@@ -74022,7 +74029,6 @@ function LoginScreen({ onLoggedIn }) {
       setError("Please enter your email and password.");
       return;
     }
-
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/auth/login`, {
@@ -74030,19 +74036,16 @@ function LoginScreen({ onLoggedIn }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
       });
-
       const data = await res.json().catch(() => ({}));
-
-      if (!res.ok || !data.token) {
-        setError(data.error || "Incorrect email or password.");
-      } else {
+      if (res.ok && data.token) {
         localStorage.setItem(TOKEN_KEY, data.token);
-        onLoggedIn?.(data.token);
+        onLoggedIn?.(data.user || null, data.token);
+      } else {
+        setError(data.error || "Incorrect email or password.");
       }
     } catch (err) {
       setError("Could not connect to server. Please try again.");
     }
-
     setLoading(false);
   };
 
@@ -74862,7 +74865,7 @@ function CoachPanel({ plan, selectedDay, profile }) {
           messages: newMsgs.map((m) => ({ role: m.role, content: m.content })),
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       const reply =
         data.content?.map((b) => b.text || "").join("") ||
         "Sorry, missed that!";
@@ -78119,7 +78122,7 @@ const MOODS = [
   { id: 1, emoji: "😩", label: "Terrible", color: "#ef4444" },
 ];
 
-function MoodTracker({ moodLog, setMoodLog, athleteId }) {
+function MoodTracker({ moodLog, setMoodLog }) {
   const todayKey =
     DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
   const [note, setNote] = useState(moodLog[todayKey]?.note || "");
@@ -78134,18 +78137,6 @@ function MoodTracker({ moodLog, setMoodLog, athleteId }) {
       [todayKey]: { ...mood, note, timestamp: new Date().toISOString() },
     }));
     setSaved(false);
-
-    if (athleteId) {
-      (async () => {
-        try {
-          const date = new Date().toISOString().slice(0, 10);
-          await apiFetch(`/moods/${athleteId}`, {
-            method: "POST",
-            body: JSON.stringify({ date, id: mood.id, emoji: mood.emoji, label: mood.label, color: mood.color, note }),
-          });
-        } catch {}
-      })();
-    }
   };
 
   const saveNote = () => {
@@ -78157,19 +78148,6 @@ function MoodTracker({ moodLog, setMoodLog, athleteId }) {
     }
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
-
-    if (athleteId && moodLog[todayKey]) {
-      (async () => {
-        try {
-          const date = new Date().toISOString().slice(0, 10);
-          const m = moodLog[todayKey];
-          await apiFetch(`/moods/${athleteId}`, {
-            method: "POST",
-            body: JSON.stringify({ date, id: m.id, emoji: m.emoji, label: m.label, color: m.color, note }),
-          });
-        } catch {}
-      })();
-    }
   };
 
   // Build week history array
@@ -79438,25 +79416,8 @@ const WEIGHT_SEED = (() => {
   }, {});
 })();
 
-function WeightTracker({ athleteId }) {
+function WeightTracker() {
   const [weightLog, setWeightLog] = useState(WEIGHT_SEED);
-
-  useEffect(() => {
-    if (!athleteId) return;
-    (async () => {
-      try {
-        const rows = await apiFetch(`/weights/${athleteId}`);
-        const map = {};
-        (rows || []).forEach((w) => {
-          const d = new Date(w.date);
-          const idx = d.getDay() === 0 ? 6 : d.getDay() - 1;
-          const key = DAYS[idx];
-          map[key] = { weight: Number(w.kg), time: "07:00", timestamp: w.date };
-        });
-        setWeightLog(map);
-      } catch {}
-    })();
-  }, [athleteId]);
   const [inputWeight, setInputWeight] = useState("");
   const [inputTime, setInputTime] = useState(() => {
     const now = new Date();
@@ -79475,28 +79436,10 @@ function WeightTracker({ athleteId }) {
   const fromDisplay = (v) =>
     unit === "lbs" ? parseFloat((v / 2.20462).toFixed(2)) : parseFloat(v);
 
-  const logWeight = async () => {
+  const logWeight = () => {
     const val = parseFloat(inputWeight);
     if (!val || val <= 0) return;
     const kg = fromDisplay(val);
-
-    if (athleteId) {
-      try {
-        const date = new Date().toISOString().slice(0, 10);
-        const rows = await apiFetch(`/weights/${athleteId}`, {
-          method: "POST",
-          body: JSON.stringify({ date, kg }),
-        });
-        const map = {};
-        (rows || []).forEach((w) => {
-          const d = new Date(w.date);
-          const idx = d.getDay() === 0 ? 6 : d.getDay() - 1;
-          const key = DAYS[idx];
-          map[key] = { weight: Number(w.kg), time: "07:00", timestamp: w.date };
-        });
-        setWeightLog(map);
-      } catch {}
-    }
     setWeightLog((prev) => ({
       ...prev,
       [todayKey]: {
@@ -80630,10 +80573,10 @@ function Dashboard({
       </div>
 
       {/* ── Mood Tracker ── */}
-      <MoodTracker moodLog={moodLog} setMoodLog={setMoodLog} athleteId={profile?.id} />
+      <MoodTracker moodLog={moodLog} setMoodLog={setMoodLog} />
 
       {/* ── Weight Tracker ── */}
-      <WeightTracker athleteId={profile?.id} />
+      <WeightTracker />
 
       {/* ── Coach Videos (full width below) ── */}
       <div
@@ -83107,7 +83050,7 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
           messages: updated.map((m) => ({ role: m.role, content: m.content })),
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       const reply =
         data.content?.map((b) => b.text || "").join("") ||
         "Sorry, missed that!";
@@ -83790,34 +83733,29 @@ const mfpMealToPlan = (name) => {
 export default function App() {
   const [tokenState, setTokenState] = useState(() => getToken());
   const [profile, setProfile] = useState(null);
-  const [bootError, setBootError] = useState("");
   const [tab, setTab] = useState("dashboard");
   const [plan, setPlan] = useState(initWeekPlan);
   const [selectedDay, setSelectedDay] = useState("MON");
+  const [macroGoalsState, setMacroGoalsState] = useState(() => macroGoals);
   const [threads, setThreads] = useState(MSG_SEED);
 
-  // ✅ Restore session using /auth/me
+  // ✅ Restore session using /auth/me (keeps login after refresh)
   useEffect(() => {
-    if (!getToken()) return;
+    const t = getToken();
+    if (!t) return;
     (async () => {
       try {
         const me = await apiFetch('/auth/me');
         setProfile(me);
-        setBootError('');
-      } catch (e) {
+      } catch {
         localStorage.removeItem(TOKEN_KEY);
-        logout();
-        setBootError(e.message || 'Session expired — please log in again');
+        setTokenState('');
+        localStorage.removeItem(TOKEN_KEY);
+    setTokenState('');
+    setProfile(null);
       }
     })();
   }, [tokenState]);
-
-  const logout = () => {
-    localStorage.removeItem(TOKEN_KEY);
-    setTokenState('');
-    logout();
-    setBootError('');
-  };
 
 
   // ── MFP Live Sync State ───────────────────────────────────────────────────
@@ -83831,6 +83769,36 @@ export default function App() {
   const [mfpManualMode, setMfpManualMode] = useState(false);
 
   const mfpUsername = profile?.mfpUsername || null;
+
+  // ✅ Load macro plan from backend so coach updates show in the client
+  useEffect(() => {
+    if (!profile?.id) return;
+    (async () => {
+      try {
+        const rows = await apiFetch(`/macro-plans/${profile.id}`);
+        const vals = (rows || []).filter(Boolean);
+        if (!vals.length) return;
+        const sum = vals.reduce((a, r) => ({
+          calories: a.calories + Number(r.calories || 0),
+          protein: a.protein + Number(r.protein_g || 0),
+          carbs: a.carbs + Number(r.carbs_g || 0),
+          fat: a.fat + Number(r.fat_g || 0),
+        }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+        const n = Math.max(1, vals.length);
+        const avg = {
+          calories: Math.round(sum.calories / n),
+          protein: Math.round(sum.protein / n),
+          carbs: Math.round(sum.carbs / n),
+          fat: Math.round(sum.fat / n),
+        };
+        macroGoals = avg;
+        setMacroGoalsState(avg);
+      } catch {
+        // keep defaults
+      }
+    })();
+  }, [profile?.id]);
+
   const SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 min — matches Senpro cadence
 
   // ── Realistic seed data for gerardqueen (used as base when live parse fails) ──
@@ -84206,20 +84174,42 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
     return () => clearInterval(ticker);
   }, [mfpConnected, mfpUsername, mfpManualMode]);
 
-  const [moodLog, setMoodLog] = useState({});
+  const [moodLog, setMoodLog] = useState(() => {
+    // Pre-seed some mood history so the week view is meaningful from the start
+    const seed = {};
+    const seeds = [
+      { day: "MON", id: 4, emoji: "🙂", label: "Good", color: "#FF9A52" },
+      {
+        day: "TUE",
+        id: 5,
+        emoji: "😄",
+        label: "Great",
+        color: "#22c55e",
+        note: "Really nailed nutrition today",
+      },
+      {
+        day: "WED",
+        id: 3,
+        emoji: "😐",
+        label: "Neutral",
+        color: "#f97316",
+        note: "Struggled with energy mid-afternoon",
+      },
+      { day: "THU", id: 4, emoji: "🙂", label: "Good", color: "#FF9A52" },
+    ];
+    seeds.forEach((s) => {
+      seed[s.day] = { ...s, timestamp: new Date().toISOString() };
+    });
+    return seed;
+  });
 
-  if (!getToken() || !profile)
+  if (!tokenState || !profile)
     return (
       <LoginScreen
-        onLoggedIn={async () => {
-          setTokenState(getToken());
-          try {
-            const me = await apiFetch('/auth/me');
-            setProfile(me);
-            setBootError('');
-          } catch (e) {
-            setBootError(e.message);
-          }
+        onLoggedIn={(user, token) => {
+          if (token) setTokenState(token);
+          if (user) setProfile(user);
+          setTab('dashboard');
         }}
       />
     );
@@ -84300,7 +84290,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
           <ProfileMenu
             profile={profile}
             onLogout={() => {
-              logout();
+              setProfile(null);
               setPlan(initWeekPlan());
               setTab("dashboard");
               setMoodLog({});
