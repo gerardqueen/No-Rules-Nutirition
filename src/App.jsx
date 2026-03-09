@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 
-// ✅ LIVE API BASE + TOKEN STORAGE (fixes 401 + persistence)
+// ✅ LIVE API BASE + TOKEN STORAGE
 const API_BASE = import.meta.env.VITE_API_URL || 'https://no-rules-api-production.up.railway.app';
 const TOKEN_KEY = 'nrn_token';
 const getToken = () => localStorage.getItem(TOKEN_KEY) || '';
@@ -74030,6 +74030,7 @@ function LoginScreen({ onLoggedIn }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
       });
+
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok || !data.token) {
@@ -78486,7 +78487,7 @@ function MoodTracker({ moodLog, setMoodLog, athleteId }) {
                 if (entries.length < 2) return null;
                 const step = 100 / (DAYS.length - 1);
                 const pts = entries
-                  .map((x) => `${x.i * step},${40 - (x.entry.id / 5) * 36}`)
+                  .map((x) => `${x.i * step}%,${40 - (x.entry.id / 5) * 36}`)
                   .join(" ");
                 return (
                   <>
@@ -79478,6 +79479,24 @@ function WeightTracker({ athleteId }) {
     const val = parseFloat(inputWeight);
     if (!val || val <= 0) return;
     const kg = fromDisplay(val);
+
+    if (athleteId) {
+      try {
+        const date = new Date().toISOString().slice(0, 10);
+        const rows = await apiFetch(`/weights/${athleteId}`, {
+          method: "POST",
+          body: JSON.stringify({ date, kg }),
+        });
+        const map = {};
+        (rows || []).forEach((w) => {
+          const d = new Date(w.date);
+          const idx = d.getDay() === 0 ? 6 : d.getDay() - 1;
+          const key = DAYS[idx];
+          map[key] = { weight: Number(w.kg), time: "07:00", timestamp: w.date };
+        });
+        setWeightLog(map);
+      } catch {}
+    }
     setWeightLog((prev) => ({
       ...prev,
       [todayKey]: {
@@ -79511,7 +79530,7 @@ function WeightTracker({ athleteId }) {
 
   const pointsWithData = entries.filter((e) => e.entry);
   const polyPts = pointsWithData
-    .map((e) => `${e.i * step},${toY(e.entry.weight)}`)
+    .map((e) => `${e.i * step}%,${toY(e.entry.weight)}`)
     .join(" ");
 
   const todayEntry = weightLog[todayKey];
@@ -79641,13 +79660,13 @@ function WeightTracker({ athleteId }) {
           {hasData && pointsWithData.length >= 2 && (
             <polyline
               points={[
-                `${pointsWithData[0].i * step},${chartH}`,
+                `${pointsWithData[0].i * step}%,${chartH}`,
                 ...pointsWithData.map(
-                  (e) => `${e.i * step},${toY(e.entry.weight)}`
+                  (e) => `${e.i * step}%,${toY(e.entry.weight)}`
                 ),
                 `${
                   pointsWithData[pointsWithData.length - 1].i * step
-                },${chartH}`,
+                }%,${chartH}`,
               ].join(" ")}
               fill={`${T.protein}18`}
               stroke="none"
@@ -84188,8 +84207,6 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
   }, [mfpConnected, mfpUsername, mfpManualMode]);
 
   const [moodLog, setMoodLog] = useState({});
-    
-  });
 
   if (!getToken() || !profile)
     return (
