@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 
-// ✅ LIVE API BASE + TOKEN STORAGE
+// ✅ LIVE API BASE + TOKEN STORAGE (fixes 401 + persistence)
 const API_BASE = import.meta.env.VITE_API_URL || 'https://no-rules-api-production.up.railway.app';
 const TOKEN_KEY = 'nrn_token';
 const getToken = () => localStorage.getItem(TOKEN_KEY) || '';
@@ -73987,6 +73987,12 @@ const initWeekPlan = () => {
       plan[d][m] = [];
     });
   });
+  plan["MON"]["Breakfast"] = [sampleFoods[5], sampleFoods[2]];
+  plan["MON"]["Lunch"] = [sampleFoods[0], sampleFoods[1]];
+  plan["MON"]["Dinner"] = [sampleFoods[7], sampleFoods[8]];
+  plan["TUE"]["Breakfast"] = [sampleFoods[3], sampleFoods[4]];
+  plan["TUE"]["Lunch"] = [sampleFoods[0], sampleFoods[1], sampleFoods[6]];
+  plan["TUE"]["Snack"] = [sampleFoods[9]];
   return plan;
 };
 
@@ -74024,7 +74030,6 @@ function LoginScreen({ onLoggedIn }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
       });
-
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok || !data.token) {
@@ -78481,7 +78486,7 @@ function MoodTracker({ moodLog, setMoodLog, athleteId }) {
                 if (entries.length < 2) return null;
                 const step = 100 / (DAYS.length - 1);
                 const pts = entries
-                  .map((x) => `${x.i * step}%,${40 - (x.entry.id / 5) * 36}`)
+                  .map((x) => `${x.i * step},${40 - (x.entry.id / 5) * 36}`)
                   .join(" ");
                 return (
                   <>
@@ -79506,7 +79511,7 @@ function WeightTracker({ athleteId }) {
 
   const pointsWithData = entries.filter((e) => e.entry);
   const polyPts = pointsWithData
-    .map((e) => `${e.i * step}%,${toY(e.entry.weight)}`)
+    .map((e) => `${e.i * step},${toY(e.entry.weight)}`)
     .join(" ");
 
   const todayEntry = weightLog[todayKey];
@@ -79636,13 +79641,13 @@ function WeightTracker({ athleteId }) {
           {hasData && pointsWithData.length >= 2 && (
             <polyline
               points={[
-                `${pointsWithData[0].i * step}%,${chartH}`,
+                `${pointsWithData[0].i * step},${chartH}`,
                 ...pointsWithData.map(
-                  (e) => `${e.i * step}%,${toY(e.entry.weight)}`
+                  (e) => `${e.i * step},${toY(e.entry.weight)}`
                 ),
                 `${
                   pointsWithData[pointsWithData.length - 1].i * step
-                }%,${chartH}`,
+                },${chartH}`,
               ].join(" ")}
               fill={`${T.protein}18`}
               stroke="none"
@@ -83782,7 +83787,7 @@ export default function App() {
         setBootError('');
       } catch (e) {
         localStorage.removeItem(TOKEN_KEY);
-        setProfile(null);
+        logout();
         setBootError(e.message || 'Session expired — please log in again');
       }
     })();
@@ -83791,36 +83796,9 @@ export default function App() {
   const logout = () => {
     localStorage.removeItem(TOKEN_KEY);
     setTokenState('');
-    setProfile(null);
+    logout();
     setBootError('');
   };
-
-  // ✅ Load mood history after login
-  useEffect(() => {
-    if (!profile?.id) return;
-    (async () => {
-      try {
-        const rows = await apiFetch(`/moods/${profile.id}`);
-        const map = {};
-        (rows || []).forEach((m) => {
-          const d = new Date(m.date);
-          const idx = d.getDay() === 0 ? 6 : d.getDay() - 1;
-          const key = DAYS[idx];
-          map[key] = {
-            id: m.mood_id,
-            emoji: m.emoji,
-            label: m.label,
-            color: m.color,
-            note: m.note || '',
-            timestamp: m.date,
-          };
-        });
-        setMoodLog(map);
-      } catch {
-        // ignore
-      }
-    })();
-  }, [profile?.id]);
 
 
   // ── MFP Live Sync State ───────────────────────────────────────────────────
@@ -84210,6 +84188,8 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
   }, [mfpConnected, mfpUsername, mfpManualMode]);
 
   const [moodLog, setMoodLog] = useState({});
+    
+  });
 
   if (!getToken() || !profile)
     return (
