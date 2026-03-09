@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 
-// ✅ LIVE API BASE + TOKEN STORAGE (prevents 'cannot connect' + token issues)
+// ✅ LIVE API BASE + TOKEN STORAGE
 const API_BASE = import.meta.env.VITE_API_URL || 'https://no-rules-api-production.up.railway.app';
 const TOKEN_KEY = 'nrn_token';
 const getToken = () => localStorage.getItem(TOKEN_KEY) || '';
@@ -52,7 +52,75 @@ const T = {
   danger: "#ef4444",
 };
 
-// ── Demo accounts removed (LIVE data only) ───────────────────────────────────
+// ── Demo accounts ─────────────────────────────────────────────────────────────
+const ACCOUNTS = [
+  {
+    email: "alex@norules.com",
+    password: "athlete1",
+    name: "Alex Morgan",
+    sport: "Triathlon",
+    goal: "Performance",
+    weight: "78kg",
+    trainingDays: 5,
+    nextCheckIn: 3,
+    mfpUsername: null,
+  },
+  {
+    email: "jamie@norules.com",
+    password: "athlete2",
+    name: "Jamie Clarke",
+    sport: "Powerlifting",
+    goal: "Strength",
+    weight: "92kg",
+    trainingDays: 4,
+    nextCheckIn: 6,
+    mfpUsername: null,
+  },
+  {
+    email: "sam@norules.com",
+    password: "athlete3",
+    name: "Sam Torres",
+    sport: "CrossFit",
+    goal: "Fat Loss",
+    weight: "65kg",
+    trainingDays: 5,
+    nextCheckIn: 1,
+    mfpUsername: null,
+  },
+  {
+    email: "gerard@norules.com",
+    password: "gerard1",
+    name: "Gerard Queen",
+    sport: "General",
+    goal: "Performance",
+    weight: "80kg",
+    trainingDays: 5,
+    nextCheckIn: 2,
+    mfpUsername: "gerardqueen",
+  },
+  {
+    email: "esme@norules.com",
+    password: "esme1",
+    name: "Esme",
+    sport: "Running",
+    goal: "Fat Loss",
+    weight: "62kg",
+    trainingDays: 4,
+    nextCheckIn: 3,
+    mfpUsername: null,
+  },
+  {
+    email: "luke@norules.com",
+    password: "luke1",
+    name: "Luke Bastick",
+    sport: "Weightlifting",
+    goal: "Strength",
+    weight: "88kg",
+    trainingDays: 5,
+    nextCheckIn: 5,
+    mfpUsername: null,
+  },
+];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
@@ -73948,6 +74016,7 @@ function LoginScreen({ onLoggedIn }) {
       setError("Please enter your email and password.");
       return;
     }
+
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/auth/login`, {
@@ -73955,16 +74024,19 @@ function LoginScreen({ onLoggedIn }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
       });
+
       const data = await res.json().catch(() => ({}));
-      if (res.ok && data.token) {
+
+      if (!res.ok || !data.token) {
+        setError(data.error || "Incorrect email or password.");
+      } else {
         localStorage.setItem(TOKEN_KEY, data.token);
         onLoggedIn?.(data.token);
-      } else {
-        setError(data.error || "Incorrect email or password.");
       }
     } catch (err) {
       setError("Could not connect to server. Please try again.");
     }
+
     setLoading(false);
   };
 
@@ -74784,7 +74856,7 @@ function CoachPanel({ plan, selectedDay, profile }) {
           messages: newMsgs.map((m) => ({ role: m.role, content: m.content })),
         }),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json();
       const reply =
         data.content?.map((b) => b.text || "").join("") ||
         "Sorry, missed that!";
@@ -78057,14 +78129,13 @@ function MoodTracker({ moodLog, setMoodLog, athleteId }) {
     }));
     setSaved(false);
 
-    // Save to backend
     if (athleteId) {
       (async () => {
         try {
           const date = new Date().toISOString().slice(0, 10);
           await apiFetch(`/moods/${athleteId}`, {
             method: "POST",
-            body: JSON.stringify({ date, ...mood, note }),
+            body: JSON.stringify({ date, id: mood.id, emoji: mood.emoji, label: mood.label, color: mood.color, note }),
           });
         } catch {}
       })();
@@ -79402,25 +79473,6 @@ function WeightTracker({ athleteId }) {
     const val = parseFloat(inputWeight);
     if (!val || val <= 0) return;
     const kg = fromDisplay(val);
-
-    // Save to backend
-    if (athleteId) {
-      try {
-        const date = new Date().toISOString().slice(0, 10);
-        const rows = await apiFetch(`/weights/${athleteId}`, {
-          method: "POST",
-          body: JSON.stringify({ date, kg }),
-        });
-        const map = {};
-        (rows || []).forEach((w) => {
-          const d = new Date(w.date);
-          const idx = d.getDay() === 0 ? 6 : d.getDay() - 1;
-          const key = DAYS[idx];
-          map[key] = { weight: Number(w.kg), time: "07:00", timestamp: w.date };
-        });
-        setWeightLog(map);
-      } catch {}
-    }
     setWeightLog((prev) => ({
       ...prev,
       [todayKey]: {
@@ -83031,7 +83083,7 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
           messages: updated.map((m) => ({ role: m.role, content: m.content })),
         }),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json();
       const reply =
         data.content?.map((b) => b.text || "").join("") ||
         "Sorry, missed that!";
@@ -83730,7 +83782,7 @@ export default function App() {
         setBootError('');
       } catch (e) {
         localStorage.removeItem(TOKEN_KEY);
-        logout();
+        setProfile(null);
         setBootError(e.message || 'Session expired — please log in again');
       }
     })();
@@ -83739,30 +83791,13 @@ export default function App() {
   const logout = () => {
     localStorage.removeItem(TOKEN_KEY);
     setTokenState('');
-    logout();
+    setProfile(null);
     setBootError('');
   };
 
-  // ✅ Load live weights + moods after login
+  // ✅ Load mood history after login
   useEffect(() => {
     if (!profile?.id) return;
-    // Load weights
-    (async () => {
-      try {
-        const rows = await apiFetch(`/weights/${profile.id}`);
-        // map newest weight per day-key (MON..SUN)
-        const map = {};
-        (rows || []).forEach((w) => {
-          const d = new Date(w.date);
-          const idx = d.getDay() === 0 ? 6 : d.getDay() - 1;
-          const key = DAYS[idx];
-          map[key] = { weight: Number(w.kg), time: '07:00', timestamp: w.date };
-        });
-        // If WeightTracker exists, it will load itself too; this is mainly for other UI bits
-      } catch {}
-    })();
-
-    // Load moods
     (async () => {
       try {
         const rows = await apiFetch(`/moods/${profile.id}`);
@@ -83781,7 +83816,9 @@ export default function App() {
           };
         });
         setMoodLog(map);
-      } catch {}
+      } catch {
+        // ignore
+      }
     })();
   }, [profile?.id]);
 
@@ -84173,8 +84210,6 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
   }, [mfpConnected, mfpUsername, mfpManualMode]);
 
   const [moodLog, setMoodLog] = useState({});
-    return seed;
-  });
 
   if (!getToken() || !profile)
     return (
@@ -84184,6 +84219,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
           try {
             const me = await apiFetch('/auth/me');
             setProfile(me);
+            setBootError('');
           } catch (e) {
             setBootError(e.message);
           }
