@@ -1,5 +1,34 @@
 import { useState, useEffect, useRef } from "react";
 
+// ✅ Live backend config + auth helpers
+const API_BASE = import.meta.env.VITE_API_URL || 'https://no-rules-api-production.up.railway.app';
+const TOKEN_KEY = 'nrn_token';
+const getToken = () => localStorage.getItem(TOKEN_KEY) || '';
+const authHeaders = (extra = {}) => {
+  const t = getToken();
+  return {
+    'Content-Type': 'application/json',
+    ...(t ? { Authorization: `Bearer ${t}` } : {}),
+    ...extra,
+  };
+};
+async function apiFetch(path, options = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: authHeaders(options.headers || {}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = data?.error || `Request failed (${res.status})`;
+    const err = new Error(msg);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+
 // ── Google Fonts ──────────────────────────────────────────────────────────────
 const fontLink = document.createElement("link");
 fontLink.rel = "stylesheet";
@@ -31,79 +60,12 @@ const T = {
 };
 
 // ── Demo accounts ─────────────────────────────────────────────────────────────
-const ACCOUNTS = [
-  {
-    email: "alex@norules.com",
-    password: "athlete1",
-    name: "Alex Morgan",
-    sport: "Triathlon",
-    goal: "Performance",
-    weight: "78kg",
-    trainingDays: 5,
-    nextCheckIn: 3,
-    mfpUsername: null,
-  },
-  {
-    email: "jamie@norules.com",
-    password: "athlete2",
-    name: "Jamie Clarke",
-    sport: "Powerlifting",
-    goal: "Strength",
-    weight: "92kg",
-    trainingDays: 4,
-    nextCheckIn: 6,
-    mfpUsername: null,
-  },
-  {
-    email: "sam@norules.com",
-    password: "athlete3",
-    name: "Sam Torres",
-    sport: "CrossFit",
-    goal: "Fat Loss",
-    weight: "65kg",
-    trainingDays: 5,
-    nextCheckIn: 1,
-    mfpUsername: null,
-  },
-  {
-    email: "gerard@norules.com",
-    password: "gerard1",
-    name: "Gerard Queen",
-    sport: "General",
-    goal: "Performance",
-    weight: "80kg",
-    trainingDays: 5,
-    nextCheckIn: 2,
-    mfpUsername: "gerardqueen",
-  },
-  {
-    email: "esme@norules.com",
-    password: "esme1",
-    name: "Esme",
-    sport: "Running",
-    goal: "Fat Loss",
-    weight: "62kg",
-    trainingDays: 4,
-    nextCheckIn: 3,
-    mfpUsername: null,
-  },
-  {
-    email: "luke@norules.com",
-    password: "luke1",
-    name: "Luke Bastick",
-    sport: "Weightlifting",
-    goal: "Strength",
-    weight: "88kg",
-    trainingDays: 5,
-    nextCheckIn: 5,
-    mfpUsername: null,
-  },
-];
+const ACCOUNTS = [];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
 const MEALS = ["Breakfast", "Lunch", "Dinner", "Snack"];
-const macroGoals = { calories: 3200, protein: 200, carbs: 380, fat: 90 };
+let macroGoals = { calories: 3200, protein: 200, carbs: 380, fat: 90 };
 
 // ── USDA FoodData Central Database (8,200+ foods) ────────────────────────────
 // Fields: n=name, c=calories/100g, p=protein/100g, b=carbs/100g, f=fat/100g, s=[[servingLabel,grams],...]
@@ -73987,7 +73949,7 @@ const sumMacros = (foods) =>
 const dayTotals = (dayPlan) => sumMacros(Object.values(dayPlan).flat());
 
 // ── Login Screen ──────────────────────────────────────────────────────────────
-function LoginScreen({ onLogin }) {
+function LoginScreen({ onLoggedIn }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -74002,14 +73964,15 @@ function LoginScreen({ onLogin }) {
     }
     setLoading(true);
     try {
-      const res = await fetch("https://no-rules-api-production.up.railway.app/auth/login", {
+      const res = await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
       });
-      const data = await res.json();
-      if (res.ok && data.user) {
-        onLogin(data.user);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.token) {
+        localStorage.setItem(TOKEN_KEY, data.token);
+        onLoggedIn?.(data.user || null, data.token);
       } else {
         setError(data.error || "Incorrect email or password.");
       }
@@ -74835,7 +74798,7 @@ function CoachPanel({ plan, selectedDay, profile }) {
           messages: newMsgs.map((m) => ({ role: m.role, content: m.content })),
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       const reply =
         data.content?.map((b) => b.text || "").join("") ||
         "Sorry, missed that!";
@@ -78521,114 +78484,7 @@ const COACHES_CONFIG = {
   },
 };
 
-const MSG_SEED = [
-  {
-    senderId: "coach-sarah",
-    type: "coach",
-    senderName: "Sarah Mitchell",
-    avatar: "SM",
-    subtitle: "Nutrition Coach",
-    messages: [
-      {
-        id: "s1",
-        title: "Great progress this week! 🔥",
-        body: "Alex — I've been looking over your logs and you've really nailed your protein targets 4 days running. Keep that momentum going into the weekend. Don't forget to bump carbs up on your training day Saturday.",
-        timestamp: new Date(Date.now() - 1000 * 60 * 22).toISOString(),
-        read: false,
-      },
-      {
-        id: "s2",
-        title: "Updated macro targets for your next block",
-        body: "Starting next Monday I'm increasing your daily carbs to 260g to support your training volume. Your calories stay the same — I've adjusted fat slightly down to compensate. New targets will appear in your plan automatically.",
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 27).toISOString(),
-        read: true,
-      },
-      {
-        id: "s3",
-        title: "Reminder: Check-in is tomorrow ✅",
-        body: "Just a heads-up that your weekly check-in is tomorrow. Make sure tonight's meals are logged and try to weigh in first thing in the morning for the most accurate reading. See you then!",
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 50).toISOString(),
-        read: true,
-      },
-    ],
-  },
-  {
-    senderId: "company-nrn",
-    type: "company",
-    senderName: "No Rules Nutrition",
-    avatar: "NR",
-    subtitle: "Platform Updates",
-    messages: [
-      {
-        id: "n1",
-        title: "New feature: Weight Tracker is live 📊",
-        body: "You can now log your daily weight directly from the dashboard. Your coach can see your trend alongside your nutrition data for a full picture of your progress. Try it out in the Weekly Overview section.",
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(),
-        read: false,
-      },
-      {
-        id: "n2",
-        title: "Scheduled maintenance — Sunday 2–4am",
-        body: "The platform will be briefly offline this Sunday between 2am and 4am for routine maintenance. No data will be lost. Log your meals before or after this window and everything will sync once we're back.",
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 48).toISOString(),
-        read: true,
-      },
-      {
-        id: "n3",
-        title: "Coach video drop: Carb Cycling for Performance",
-        body: "Sarah just published a new video covering carb cycling strategies for endurance athletes. It's 15 minutes and directly relevant to your current training block. Check it out in the Coach Videos section on your dashboard.",
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 72).toISOString(),
-        read: true,
-      },
-    ],
-  },
-  {
-    senderId: "coach-james",
-    type: "coach",
-    senderName: "James Carter",
-    avatar: "JC",
-    subtitle: "Strength & Conditioning",
-    messages: [
-      {
-        id: "j1",
-        title: "Training load this week 💪",
-        body: "Solid effort in the gym this week. Your nutrition timing looks good around sessions — make sure you're hitting those carbs within 60 min post-training. How's recovery feeling?",
-        timestamp: new Date(Date.now() - 1000 * 60 * 95).toISOString(),
-        read: false,
-      },
-      {
-        id: "j2",
-        title: "Saturday session — fuel up properly",
-        body: "Big strength session Saturday. I want you eating 80g+ carbs 2 hours before. This isn't the day to undereat — performance data is only as good as the fuel going in.",
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 36).toISOString(),
-        read: true,
-      },
-    ],
-  },
-  {
-    senderId: "coach-emma",
-    type: "coach",
-    senderName: "Emma Wilson",
-    avatar: "EW",
-    subtitle: "Mindset & Performance",
-    messages: [
-      {
-        id: "e1",
-        title: "Consistency > perfection 🧠",
-        body: "I saw you logged 5 out of 7 days this week — that's a win. Don't let the two missed days define the week. Progress is built in the compounding of good enough, not the pursuit of perfect.",
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(),
-        read: false,
-      },
-      {
-        id: "e2",
-        title: "How are you feeling mentally?",
-        body: "Checking in on the mindset side of things. Nutrition discipline can be tough — are you finding it restrictive or empowering right now? Would love to chat through any friction points.",
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 55).toISOString(),
-        read: true,
-      },
-    ],
-  },
-];
+const MSG_SEED = [];
 
 function timeAgo(isoString) {
   const diff = (Date.now() - new Date(isoString)) / 1000;
@@ -83020,7 +82876,7 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
           messages: updated.map((m) => ({ role: m.role, content: m.content })),
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       const reply =
         data.content?.map((b) => b.text || "").join("") ||
         "Sorry, missed that!";
@@ -83701,11 +83557,32 @@ const mfpMealToPlan = (name) => {
 };
 
 export default function App() {
+  const [tokenState, setTokenState] = useState(() => getToken());
   const [profile, setProfile] = useState(null);
   const [tab, setTab] = useState("dashboard");
   const [plan, setPlan] = useState(initWeekPlan);
   const [selectedDay, setSelectedDay] = useState("MON");
-  const [threads, setThreads] = useState(() => (typeof MSG_SEED !== "undefined" ? MSG_SEED : []));
+  const [macroGoalsState, setMacroGoalsState] = useState(() => macroGoals);
+  const [threads, setThreads] = useState(MSG_SEED);
+
+  // ✅ Restore session using /auth/me (keeps login after refresh)
+  useEffect(() => {
+    const t = getToken();
+    if (!t) return;
+    (async () => {
+      try {
+        const me = await apiFetch('/auth/me');
+        setProfile(me);
+      } catch {
+        localStorage.removeItem(TOKEN_KEY);
+        setTokenState('');
+        localStorage.removeItem(TOKEN_KEY);
+    setTokenState('');
+    setProfile(null);
+      }
+    })();
+  }, [tokenState]);
+
 
   // ── MFP Live Sync State ───────────────────────────────────────────────────
   const [mfpConnected, setMfpConnected] = useState(false);
@@ -83718,22 +83595,40 @@ export default function App() {
   const [mfpManualMode, setMfpManualMode] = useState(false);
 
   const mfpUsername = profile?.mfpUsername || null;
+
+  // ✅ Load macro plan from backend so coach updates show in the client
+  useEffect(() => {
+    if (!profile?.id) return;
+    (async () => {
+      try {
+        const rows = await apiFetch(`/macro-plans/${profile.id}`);
+        const vals = (rows || []).filter(Boolean);
+        if (!vals.length) return;
+        const sum = vals.reduce((a, r) => ({
+          calories: a.calories + Number(r.calories || 0),
+          protein: a.protein + Number(r.protein_g || 0),
+          carbs: a.carbs + Number(r.carbs_g || 0),
+          fat: a.fat + Number(r.fat_g || 0),
+        }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+        const n = Math.max(1, vals.length);
+        const avg = {
+          calories: Math.round(sum.calories / n),
+          protein: Math.round(sum.protein / n),
+          carbs: Math.round(sum.carbs / n),
+          fat: Math.round(sum.fat / n),
+        };
+        macroGoals = avg;
+        setMacroGoalsState(avg);
+      } catch {
+        // keep defaults
+      }
+    })();
+  }, [profile?.id]);
+
   const SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 min — matches Senpro cadence
 
   // ── Realistic seed data for gerardqueen (used as base when live parse fails) ──
-  const getRealisticData = (username, dayPlan) => {
-    // Slightly vary each refresh so it feels live
-    const jitter = () => Math.floor((Math.random() - 0.5) * 20);
-    const tot = dayTotals(dayPlan);
-    const base = {
-      calories: Math.max(0, Math.round(tot.calories * 0.91) + jitter()),
-      protein: Math.max(0, Math.round(tot.protein * 0.87) + jitter()),
-      carbs: Math.max(0, Math.round(tot.carbs * 0.94) + jitter()),
-      fat: Math.max(0, Math.round(tot.fat * 0.89) + jitter()),
-      fibre: 26 + Math.floor(Math.random() * 6),
-      water: 2200 + Math.floor(Math.random() * 400),
-      exerciseCalories: 380 + Math.floor(Math.random() * 120),
-    };
+  const getRealisticData = () => null; // dummy data disabled
     base.netCalories = Math.max(0, base.calories - base.exerciseCalories);
     const mealCals = base.calories;
     return {
@@ -84122,12 +84017,13 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
     return seed;
   });
 
-  if (!profile)
+  if (!tokenState || !profile)
     return (
       <LoginScreen
-        onLogin={(acc) => {
-          setProfile(acc);
-          setTab("dashboard");
+        onLoggedIn={(user, token) => {
+          if (token) setTokenState(token);
+          if (user) setProfile(user);
+          setTab('dashboard');
         }}
       />
     );
