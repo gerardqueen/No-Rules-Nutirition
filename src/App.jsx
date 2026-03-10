@@ -83629,6 +83629,7 @@ export default function App() {
 
   // ── Realistic seed data for gerardqueen (used as base when live parse fails) ──
   const getRealisticData = () => null; // dummy data disabled
+
     base.netCalories = Math.max(0, base.calories - base.exerciseCalories);
     const mealCals = base.calories;
     return {
