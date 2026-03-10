@@ -60,75 +60,6 @@ const T = {
 };
 
 // ── Demo accounts ─────────────────────────────────────────────────────────────
-const ACCOUNTS = [
-  {
-    email: "alex@norules.com",
-    password: "athlete1",
-    name: "Alex Morgan",
-    sport: "Triathlon",
-    goal: "Performance",
-    weight: "78kg",
-    trainingDays: 5,
-    nextCheckIn: 3,
-    mfpUsername: null,
-  },
-  {
-    email: "jamie@norules.com",
-    password: "athlete2",
-    name: "Jamie Clarke",
-    sport: "Powerlifting",
-    goal: "Strength",
-    weight: "92kg",
-    trainingDays: 4,
-    nextCheckIn: 6,
-    mfpUsername: null,
-  },
-  {
-    email: "sam@norules.com",
-    password: "athlete3",
-    name: "Sam Torres",
-    sport: "CrossFit",
-    goal: "Fat Loss",
-    weight: "65kg",
-    trainingDays: 5,
-    nextCheckIn: 1,
-    mfpUsername: null,
-  },
-  {
-    email: "gerard@norules.com",
-    password: "gerard1",
-    name: "Gerard Queen",
-    sport: "General",
-    goal: "Performance",
-    weight: "80kg",
-    trainingDays: 5,
-    nextCheckIn: 2,
-    mfpUsername: "gerardqueen",
-  },
-  {
-    email: "esme@norules.com",
-    password: "esme1",
-    name: "Esme",
-    sport: "Running",
-    goal: "Fat Loss",
-    weight: "62kg",
-    trainingDays: 4,
-    nextCheckIn: 3,
-    mfpUsername: null,
-  },
-  {
-    email: "luke@norules.com",
-    password: "luke1",
-    name: "Luke Bastick",
-    sport: "Weightlifting",
-    goal: "Strength",
-    weight: "88kg",
-    trainingDays: 5,
-    nextCheckIn: 5,
-    mfpUsername: null,
-  },
-];
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
 const MEALS = ["Breakfast", "Lunch", "Dinner", "Snack"];
@@ -73994,12 +73925,6 @@ const initWeekPlan = () => {
       plan[d][m] = [];
     });
   });
-  plan["MON"]["Breakfast"] = [sampleFoods[5], sampleFoods[2]];
-  plan["MON"]["Lunch"] = [sampleFoods[0], sampleFoods[1]];
-  plan["MON"]["Dinner"] = [sampleFoods[7], sampleFoods[8]];
-  plan["TUE"]["Breakfast"] = [sampleFoods[3], sampleFoods[4]];
-  plan["TUE"]["Lunch"] = [sampleFoods[0], sampleFoods[1], sampleFoods[6]];
-  plan["TUE"]["Snack"] = [sampleFoods[9]];
   return plan;
 };
 
@@ -78122,544 +78047,122 @@ const MOODS = [
   { id: 1, emoji: "😩", label: "Terrible", color: "#ef4444" },
 ];
 
-function MoodTracker({ moodLog, setMoodLog }) {
-  const todayKey =
-    DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
-  const [note, setNote] = useState(moodLog[todayKey]?.note || "");
-  const [saved, setSaved] = useState(!!moodLog[todayKey]);
-  const [showHistory, setShowHistory] = useState(false);
 
-  const todayMood = moodLog[todayKey];
+function weekStartISO(offsetWeeks = 0) {
+  const now = new Date();
+  const day = now.getDay();
+  const diffToMon = (day === 0 ? -6 : 1) - day;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + diffToMon + offsetWeeks * 7);
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+}
 
-  const selectMood = (mood) => {
-    setMoodLog((prev) => ({
-      ...prev,
-      [todayKey]: { ...mood, note, timestamp: new Date().toISOString() },
-    }));
-    setSaved(false);
-  };
+function isoDate(d) {
+  return new Date(d).toISOString().slice(0, 10);
+}
 
-  const saveNote = () => {
-    if (moodLog[todayKey]) {
-      setMoodLog((prev) => ({
-        ...prev,
-        [todayKey]: { ...prev[todayKey], note },
-      }));
+function MoodTracker({ athleteId }) {
+  const [rows, setRows] = useState([]); // [{date, mood_id, emoji, label, color, note}]
+  const [note, setNote] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [err, setErr] = useState("");
+
+  const start = weekStartISO(weekOffset);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+
+  const load = async () => {
+    if (!athleteId) return;
+    setErr("");
+    try {
+      const data = await apiFetch(`/moods/${athleteId}`);
+      setRows(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setErr(e.message || "Could not load mood history");
     }
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
   };
 
-  // Build week history array
-  const weekHistory = DAYS.map((d) => ({ day: d, entry: moodLog[d] || null }));
-  const avgScore = (() => {
-    const entries = Object.values(moodLog).filter(Boolean);
-    if (!entries.length) return null;
-    return (entries.reduce((a, e) => a + e.id, 0) / entries.length).toFixed(1);
-  })();
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [athleteId]);
 
-  const trendLabel =
-    avgScore >= 4
-      ? "Great week 🔥"
-      : avgScore >= 3
-      ? "Solid week 💪"
-      : avgScore
-      ? "Tough stretch 💙"
-      : null;
+  const MOODS = [
+    { id: 5, emoji: "😄", label: "Great", color: "#22c55e" },
+    { id: 4, emoji: "🙂", label: "Good", color: "#FF9A52" },
+    { id: 3, emoji: "😐", label: "Neutral", color: "#f97316" },
+    { id: 2, emoji: "😔", label: "Low", color: "#3b82f6" },
+    { id: 1, emoji: "😩", label: "Terrible", color: "#ef4444" },
+  ];
+
+  const weekDates = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    return isoDate(d);
+  });
+
+  const byDate = Object.fromEntries((rows || []).map((r) => [r.date, r]));
+
+  const selectMood = async (mood) => {
+    if (!athleteId) return;
+    const date = isoDate(new Date());
+    try {
+      await apiFetch(`/moods/${athleteId}`, {
+        method: "POST",
+        body: JSON.stringify({ date, id: mood.id, emoji: mood.emoji, label: mood.label, color: mood.color, note }),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+      setNote("");
+      await load();
+    } catch (e) {
+      setErr(e.message || "Could not save mood");
+    }
+  };
 
   return (
-    <div
-      style={{
-        background: T.card,
-        border: `1px solid ${T.border}`,
-        borderRadius: 16,
-        padding: 24,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 20,
-        }}
-      >
+    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div>
-          <div
-            style={{
-              fontFamily: "Bebas Neue",
-              fontSize: 22,
-              letterSpacing: 2,
-              color: T.text,
-            }}
-          >
-            MOOD LOG
-          </div>
-          <div
-            style={{
-              fontFamily: "DM Sans",
-              fontSize: 12,
-              color: T.muted,
-              marginTop: 2,
-            }}
-          >
-            How are you feeling today? Tracked week on week.
-          </div>
+          <div style={{ fontFamily: "Bebas Neue", fontSize: 22, letterSpacing: 2, color: T.text }}>MOOD LOG</div>
+          <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, marginTop: 2 }}>Saved by date · browse past weeks.</div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {avgScore && (
-            <div style={{ textAlign: "right" }}>
-              <div
-                style={{
-                  fontFamily: "JetBrains Mono",
-                  fontSize: 11,
-                  color: T.accent,
-                }}
-              >
-                {trendLabel}
-              </div>
-              <div
-                style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}
-              >
-                Avg score: {avgScore} / 5
-              </div>
-            </div>
-          )}
-          <button
-            onClick={() => setShowHistory((h) => !h)}
-            style={{
-              background: showHistory ? T.border : "none",
-              border: `1px solid ${T.border}`,
-              color: showHistory ? T.text : T.muted,
-              borderRadius: 8,
-              padding: "6px 14px",
-              fontFamily: "DM Sans",
-              fontSize: 11,
-              cursor: "pointer",
-              transition: "all 0.2s",
-            }}
-          >
-            {showHistory ? "Hide history" : "Week history"}
-          </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => setWeekOffset((w) => w - 1)} style={{ background: "none", border: `1px solid ${T.border}`, color: T.muted, borderRadius: 10, padding: "8px 12px", cursor: "pointer" }} type="button">◀</button>
+          <div style={{ fontFamily: "JetBrains Mono", fontSize: 11, color: T.muted, paddingTop: 10 }}>{isoDate(start)} → {isoDate(end)}</div>
+          <button onClick={() => setWeekOffset((w) => Math.min(0, w + 1))} style={{ background: "none", border: `1px solid ${T.border}`, color: T.muted, borderRadius: 10, padding: "8px 12px", cursor: "pointer" }} type="button">▶</button>
         </div>
       </div>
 
-      {/* Today's mood picker */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
-        {MOODS.map((m) => {
-          const isSelected = todayMood?.id === m.id;
+      {err ? <div style={{ marginBottom: 12, background: `${T.warn}18`, border: `1px solid ${T.warn}44`, borderRadius: 10, padding: "10px 14px", fontSize: 12, color: T.warn }}>{err}</div> : null}
+      {saved ? <div style={{ marginBottom: 12, background: `${T.coachGreen}18`, border: `1px solid ${T.coachGreen}44`, borderRadius: 10, padding: "10px 14px", fontSize: 12, color: T.coachGreen }}>✓ Saved</div> : null}
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+        {MOODS.map((m) => (
+          <button key={m.id} onClick={() => selectMood(m)} style={{ background: `${m.color}18`, border: `1px solid ${m.color}44`, color: m.color, borderRadius: 12, padding: "10px 12px", cursor: "pointer", fontFamily: "DM Sans" }} type="button">
+            <span style={{ fontSize: 18, marginRight: 8 }}>{m.emoji}</span>{m.label}
+          </button>
+        ))}
+      </div>
+
+      <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional note for today…" style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, color: T.text, fontFamily: "DM Sans", fontSize: 13, minHeight: 70 }} />
+
+      <div style={{ marginTop: 16, borderTop: `1px solid ${T.border}`, paddingTop: 12 }}>
+        {weekDates.map((d) => {
+          const r = byDate[d];
           return (
-            <button
-              key={m.id}
-              onClick={() => selectMood(m)}
-              style={{
-                flex: 1,
-                padding: "14px 8px",
-                borderRadius: 12,
-                cursor: "pointer",
-                transition: "all 0.2s",
-                background: isSelected ? `${m.color}22` : T.surface,
-                border: isSelected
-                  ? `2px solid ${m.color}`
-                  : `2px solid ${T.border}`,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 6,
-              }}
-              onMouseEnter={(e) => {
-                if (!isSelected)
-                  e.currentTarget.style.borderColor = m.color + "66";
-              }}
-              onMouseLeave={(e) => {
-                if (!isSelected) e.currentTarget.style.borderColor = T.border;
-              }}
-            >
-              <span style={{ fontSize: 26, lineHeight: 1 }}>{m.emoji}</span>
-              <span
-                style={{
-                  fontFamily: "DM Sans",
-                  fontSize: 10,
-                  color: isSelected ? m.color : T.muted,
-                  fontWeight: isSelected ? 600 : 400,
-                  letterSpacing: 0.3,
-                }}
-              >
-                {m.label}
-              </span>
-            </button>
+            <div key={d} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${T.border}22` }}>
+              <div style={{ fontFamily: "JetBrains Mono", fontSize: 12, color: T.muted }}>{d}</div>
+              <div style={{ fontFamily: "DM Sans", fontSize: 12, color: r?.color || T.muted }}>{r ? `${r.emoji} ${r.label}` : "—"}</div>
+            </div>
           );
         })}
       </div>
-
-      {/* Note input */}
-      <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-        <textarea
-          value={note}
-          onChange={(e) => {
-            setNote(e.target.value);
-            setSaved(false);
-          }}
-          placeholder={
-            todayMood
-              ? "Add a note about how you're feeling… (optional)"
-              : "Select a mood above, then add a note…"
-          }
-          disabled={!todayMood}
-          rows={2}
-          style={{
-            flex: 1,
-            background: T.surface,
-            border: `1px solid ${T.border}`,
-            borderRadius: 10,
-            padding: "10px 14px",
-            color: T.text,
-            fontFamily: "DM Sans",
-            fontSize: 12,
-            resize: "none",
-            outline: "none",
-            opacity: todayMood ? 1 : 0.4,
-            caretColor: T.accent,
-            lineHeight: 1.5,
-          }}
-        />
-        <button
-          onClick={saveNote}
-          disabled={!todayMood}
-          style={{
-            background: saved ? T.coachGreen : todayMood ? T.accent : T.border,
-            color: todayMood ? T.bg : T.muted,
-            border: "none",
-            borderRadius: 10,
-            padding: "10px 18px",
-            fontFamily: "Bebas Neue",
-            fontSize: 14,
-            letterSpacing: 1,
-            cursor: todayMood ? "pointer" : "default",
-            transition: "all 0.25s",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {saved ? "✓ SAVED" : "SAVE"}
-        </button>
-      </div>
-
-      {/* Week history */}
-      {showHistory && (
-        <div
-          style={{
-            marginTop: 20,
-            paddingTop: 20,
-            borderTop: `1px solid ${T.border}`,
-          }}
-        >
-          <div
-            style={{
-              fontFamily: "Bebas Neue",
-              fontSize: 14,
-              letterSpacing: 2,
-              color: T.muted,
-              marginBottom: 14,
-            }}
-          >
-            THIS WEEK
-          </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            {weekHistory.map(({ day, entry }) => (
-              <div
-                key={day}
-                style={{
-                  flex: 1,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 6,
-                }}
-              >
-                {/* Bar */}
-                <div
-                  style={{
-                    width: "100%",
-                    height: 64,
-                    display: "flex",
-                    alignItems: "flex-end",
-                    background: T.surface,
-                    borderRadius: 8,
-                    overflow: "hidden",
-                    position: "relative",
-                  }}
-                >
-                  {entry ? (
-                    <div
-                      style={{
-                        width: "100%",
-                        height: `${(entry.id / 5) * 100}%`,
-                        background: `${entry.color}55`,
-                        borderTop: `2px solid ${entry.color}`,
-                        transition: "height 0.5s ease",
-                        position: "absolute",
-                        bottom: 0,
-                      }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <span style={{ fontSize: 10, color: T.border }}>—</span>
-                    </div>
-                  )}
-                  {entry && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        inset: 0,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <span style={{ fontSize: 18 }}>{entry.emoji}</span>
-                    </div>
-                  )}
-                </div>
-                {/* Tooltip on hover if note */}
-                <div
-                  style={{
-                    fontFamily: "Bebas Neue",
-                    fontSize: 11,
-                    letterSpacing: 1,
-                    color: entry ? entry.color : T.border,
-                  }}
-                >
-                  {day}
-                </div>
-                {entry && (
-                  <div
-                    style={{
-                      fontFamily: "DM Sans",
-                      fontSize: 9,
-                      color: T.muted,
-                      textAlign: "center",
-                    }}
-                  >
-                    {entry.label}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {/* Trend line dots */}
-          <div style={{ marginTop: 16, position: "relative", height: 40 }}>
-            <svg width="100%" height="40" style={{ overflow: "visible" }}>
-              {(() => {
-                const entries = weekHistory
-                  .map((w, i) => ({ i, entry: w.entry }))
-                  .filter((x) => x.entry);
-                if (entries.length < 2) return null;
-                const step = 100 / (DAYS.length - 1);
-                const pts = entries
-                  .map((x) => `${x.i * step}%,${40 - (x.entry.id / 5) * 36}`)
-                  .join(" ");
-                return (
-                  <>
-                    <polyline
-                      points={pts}
-                      fill="none"
-                      stroke={T.accent}
-                      strokeWidth="1.5"
-                      strokeDasharray="4 3"
-                      strokeLinecap="round"
-                    />
-                    {entries.map((x) => (
-                      <circle
-                        key={x.i}
-                        cx={`${x.i * step}%`}
-                        cy={40 - (x.entry.id / 5) * 36}
-                        r="4"
-                        fill={x.entry.color}
-                        stroke={T.card}
-                        strokeWidth="2"
-                      />
-                    ))}
-                  </>
-                );
-              })()}
-            </svg>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                marginTop: 4,
-              }}
-            >
-              {DAYS.map((d) => (
-                <span
-                  key={d}
-                  style={{
-                    fontFamily: "JetBrains Mono",
-                    fontSize: 8,
-                    color: T.border,
-                    flex: 1,
-                    textAlign: "center",
-                  }}
-                >
-                  {d}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
-
-// ── Inbox / Messaging ─────────────────────────────────────────────────────────
-// Messages are keyed by senderId; each has a thread of individual messages.
-// Coaches each have their own AI persona for 2-way chat.
-const COACHES_CONFIG = {
-  "coach-sarah": {
-    name: "Sarah Mitchell",
-    role: "Nutrition Coach",
-    initials: "SM",
-    color: "#22c55e",
-    systemPrompt: (profile, tot, goals) =>
-      `You are Sarah Mitchell, a professional nutrition coach. You are messaging ${profile.name}, a ${profile.sport} athlete (goal: ${profile.goal}). Today's macros: Cal ${tot.calories}/${goals.calories} kcal, Protein ${tot.protein}/${goals.protein}g, Carbs ${tot.carbs}/${goals.carbs}g, Fat ${tot.fat}/${goals.fat}g. Be warm, concise, data-driven. Sign off as "Sarah" occasionally.`,
-  },
-  "coach-james": {
-    name: "James Carter",
-    role: "Strength & Conditioning",
-    initials: "JC",
-    color: "#3b82f6",
-    systemPrompt: (profile) =>
-      `You are James Carter, a strength and conditioning specialist. You work alongside the nutrition team for ${profile.name}, a ${profile.sport} athlete. Focus on performance, training load, recovery, and how nutrition supports training. Keep messages concise like a coach text. Sign off as "James" occasionally.`,
-  },
-  "coach-emma": {
-    name: "Emma Wilson",
-    role: "Mindset & Performance",
-    initials: "EW",
-    color: "#a855f7",
-    systemPrompt: (profile) =>
-      `You are Emma Wilson, a sports psychologist and performance mindset coach. You work with ${profile.name}, a ${profile.sport} athlete. Focus on motivation, mental resilience, habit consistency, and psychological aspects of nutrition and training. Be empathetic, encouraging, and brief. Sign off as "Emma" occasionally.`,
-  },
-};
-
-const MSG_SEED = [
-  {
-    senderId: "coach-sarah",
-    type: "coach",
-    senderName: "Sarah Mitchell",
-    avatar: "SM",
-    subtitle: "Nutrition Coach",
-    messages: [
-      {
-        id: "s1",
-        title: "Great progress this week! 🔥",
-        body: "Alex — I've been looking over your logs and you've really nailed your protein targets 4 days running. Keep that momentum going into the weekend. Don't forget to bump carbs up on your training day Saturday.",
-        timestamp: new Date(Date.now() - 1000 * 60 * 22).toISOString(),
-        read: false,
-      },
-      {
-        id: "s2",
-        title: "Updated macro targets for your next block",
-        body: "Starting next Monday I'm increasing your daily carbs to 260g to support your training volume. Your calories stay the same — I've adjusted fat slightly down to compensate. New targets will appear in your plan automatically.",
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 27).toISOString(),
-        read: true,
-      },
-      {
-        id: "s3",
-        title: "Reminder: Check-in is tomorrow ✅",
-        body: "Just a heads-up that your weekly check-in is tomorrow. Make sure tonight's meals are logged and try to weigh in first thing in the morning for the most accurate reading. See you then!",
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 50).toISOString(),
-        read: true,
-      },
-    ],
-  },
-  {
-    senderId: "company-nrn",
-    type: "company",
-    senderName: "No Rules Nutrition",
-    avatar: "NR",
-    subtitle: "Platform Updates",
-    messages: [
-      {
-        id: "n1",
-        title: "New feature: Weight Tracker is live 📊",
-        body: "You can now log your daily weight directly from the dashboard. Your coach can see your trend alongside your nutrition data for a full picture of your progress. Try it out in the Weekly Overview section.",
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(),
-        read: false,
-      },
-      {
-        id: "n2",
-        title: "Scheduled maintenance — Sunday 2–4am",
-        body: "The platform will be briefly offline this Sunday between 2am and 4am for routine maintenance. No data will be lost. Log your meals before or after this window and everything will sync once we're back.",
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 48).toISOString(),
-        read: true,
-      },
-      {
-        id: "n3",
-        title: "Coach video drop: Carb Cycling for Performance",
-        body: "Sarah just published a new video covering carb cycling strategies for endurance athletes. It's 15 minutes and directly relevant to your current training block. Check it out in the Coach Videos section on your dashboard.",
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 72).toISOString(),
-        read: true,
-      },
-    ],
-  },
-  {
-    senderId: "coach-james",
-    type: "coach",
-    senderName: "James Carter",
-    avatar: "JC",
-    subtitle: "Strength & Conditioning",
-    messages: [
-      {
-        id: "j1",
-        title: "Training load this week 💪",
-        body: "Solid effort in the gym this week. Your nutrition timing looks good around sessions — make sure you're hitting those carbs within 60 min post-training. How's recovery feeling?",
-        timestamp: new Date(Date.now() - 1000 * 60 * 95).toISOString(),
-        read: false,
-      },
-      {
-        id: "j2",
-        title: "Saturday session — fuel up properly",
-        body: "Big strength session Saturday. I want you eating 80g+ carbs 2 hours before. This isn't the day to undereat — performance data is only as good as the fuel going in.",
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 36).toISOString(),
-        read: true,
-      },
-    ],
-  },
-  {
-    senderId: "coach-emma",
-    type: "coach",
-    senderName: "Emma Wilson",
-    avatar: "EW",
-    subtitle: "Mindset & Performance",
-    messages: [
-      {
-        id: "e1",
-        title: "Consistency > perfection 🧠",
-        body: "I saw you logged 5 out of 7 days this week — that's a win. Don't let the two missed days define the week. Progress is built in the compounding of good enough, not the pursuit of perfect.",
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(),
-        read: false,
-      },
-      {
-        id: "e2",
-        title: "How are you feeling mentally?",
-        body: "Checking in on the mindset side of things. Nutrition discipline can be tough — are you finding it restrictive or empowering right now? Would love to chat through any friction points.",
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 55).toISOString(),
-        read: true,
-      },
-    ],
-  },
-];
-
 function timeAgo(isoString) {
   const diff = (Date.now() - new Date(isoString)) / 1000;
   if (diff < 60) return "just now";
@@ -79416,430 +78919,124 @@ const WEIGHT_SEED = (() => {
   }, {});
 })();
 
-function WeightTracker() {
-  const [weightLog, setWeightLog] = useState(WEIGHT_SEED);
+
+function WeightTracker({ athleteId }) {
+  const [rows, setRows] = useState([]); // [{date, kg}]
   const [inputWeight, setInputWeight] = useState("");
-  const [inputTime, setInputTime] = useState(() => {
-    const now = new Date();
-    return `${String(now.getHours()).padStart(2, "0")}:${String(
-      now.getMinutes()
-    ).padStart(2, "0")}`;
-  });
   const [saved, setSaved] = useState(false);
-  const [unit, setUnit] = useState("kg"); // "kg" | "lbs"
+  const [unit, setUnit] = useState("kg");
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [err, setErr] = useState("");
 
-  const todayKey =
-    DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
+  const start = weekStartISO(weekOffset);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
 
-  const toDisplay = (kg) =>
-    unit === "lbs" ? parseFloat((kg * 2.20462).toFixed(1)) : kg;
-  const fromDisplay = (v) =>
-    unit === "lbs" ? parseFloat((v / 2.20462).toFixed(2)) : parseFloat(v);
+  const toDisplay = (kg) => (unit === "lbs" ? parseFloat((kg * 2.20462).toFixed(1)) : kg);
+  const fromDisplay = (v) => (unit === "lbs" ? parseFloat((v / 2.20462).toFixed(2)) : parseFloat(v));
 
-  const logWeight = () => {
-    const val = parseFloat(inputWeight);
-    if (!val || val <= 0) return;
-    const kg = fromDisplay(val);
-    setWeightLog((prev) => ({
-      ...prev,
-      [todayKey]: {
-        weight: kg,
-        time: inputTime,
-        timestamp: new Date().toISOString(),
-      },
-    }));
-    setSaved(true);
-    setInputWeight("");
-    setTimeout(() => setSaved(false), 2000);
+  const load = async () => {
+    if (!athleteId) return;
+    setErr("");
+    try {
+      const data = await apiFetch(`/weights/${athleteId}`);
+      setRows(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setErr(e.message || "Could not load weights");
+    }
   };
 
-  // Build chart data
-  const entries = DAYS.map((d, i) => ({
-    day: d,
-    i,
-    entry: weightLog[d] || null,
-  }));
-  const hasData = entries.filter((e) => e.entry).length > 0;
-  const weights = entries.filter((e) => e.entry).map((e) => e.entry.weight);
-  const minW = Math.min(...weights) - 0.5;
-  const maxW = Math.max(...weights) + 0.5;
-  const range = maxW - minW || 1;
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [athleteId]);
 
-  const chartH = 80;
-  const chartW = 100; // percentage units
-  const step = chartW / (DAYS.length - 1);
+  const save = async () => {
+    const val = parseFloat(inputWeight);
+    if (!val || val <= 0 || !athleteId) return;
+    const kg = fromDisplay(val);
+    const date = isoDate(new Date());
+    try {
+      await apiFetch(`/weights/${athleteId}`, {
+        method: "POST",
+        body: JSON.stringify({ date, kg }),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+      setInputWeight("");
+      await load();
+    } catch (e) {
+      setErr(e.message || "Could not save weight");
+    }
+  };
 
-  const toY = (w) => chartH - ((w - minW) / range) * chartH;
+  const weekDates = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    return isoDate(d);
+  });
 
-  const pointsWithData = entries.filter((e) => e.entry);
-  const polyPts = pointsWithData
-    .map((e) => `${e.i * step}%,${toY(e.entry.weight)}`)
-    .join(" ");
+  const byDate = Object.fromEntries((rows || []).map((r) => [r.date, r]));
+  const series = weekDates.map((d) => Number(byDate[d]?.kg)).filter((n) => Number.isFinite(n));
 
-  const todayEntry = weightLog[todayKey];
-  const allEntries = Object.values(weightLog).filter(Boolean);
-  const avgWeight = allEntries.length
-    ? (
-        allEntries.reduce((s, e) => s + e.weight, 0) / allEntries.length
-      ).toFixed(1)
-    : null;
-  const firstW = weights[0];
-  const lastW = weights[weights.length - 1];
-  const trend = weights.length >= 2 ? (lastW - firstW).toFixed(1) : null;
-  const trendUp = trend > 0;
+  const spark = (() => {
+    if (series.length < 2) return null;
+    const w = 520, h = 120, pad = 10;
+    const W = w - pad * 2, H = h - pad * 2;
+    const min = Math.min(...series), max = Math.max(...series);
+    const range = Math.max(1e-6, max - min);
+    const pts = series.map((v, i) => {
+      const x = pad + (i / (series.length - 1)) * W;
+      const y = pad + (1 - (v - min) / range) * H;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    }).join(' ');
+    return (
+      <svg width={w} height={h} style={{ display: 'block' }}>
+        <rect x={0} y={0} width={w} height={h} rx={12} fill={`${T.bg}00`} stroke={`${T.border}`} />
+        <polyline points={pts} fill="transparent" stroke={T.coachGreen || '#22c55e'} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+      </svg>
+    );
+  })();
 
   return (
-    <div
-      style={{
-        background: T.card,
-        border: `1px solid ${T.border}`,
-        borderRadius: 16,
-        padding: 24,
-      }}
-    >
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 20,
-        }}
-      >
+    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div>
-          <div
-            style={{
-              fontFamily: "Bebas Neue",
-              fontSize: 22,
-              letterSpacing: 2,
-              color: T.text,
-            }}
-          >
-            WEIGHT TRACKER
-          </div>
-          <div
-            style={{
-              fontFamily: "DM Sans",
-              fontSize: 12,
-              color: T.muted,
-              marginTop: 2,
-            }}
-          >
-            Log your weight daily · Track progress week on week.
-          </div>
+          <div style={{ fontFamily: "Bebas Neue", fontSize: 22, letterSpacing: 2, color: T.text }}>WEIGHT</div>
+          <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, marginTop: 2 }}>Saved by date · browse past weeks.</div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {avgWeight && (
-            <div style={{ textAlign: "right" }}>
-              <div
-                style={{
-                  fontFamily: "JetBrains Mono",
-                  fontSize: 11,
-                  color: trendUp ? T.danger : T.coachGreen,
-                }}
-              >
-                {trend > 0 ? `▲ +${trend}` : `▼ ${trend}`} {unit} this week
-              </div>
-              <div
-                style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}
-              >
-                Avg: {toDisplay(parseFloat(avgWeight))} {unit}
-              </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button onClick={() => setWeekOffset((w) => w - 1)} style={{ background: "none", border: `1px solid ${T.border}`, color: T.muted, borderRadius: 10, padding: "8px 12px", cursor: "pointer" }} type="button">◀</button>
+          <div style={{ fontFamily: "JetBrains Mono", fontSize: 11, color: T.muted }}>{isoDate(start)} → {isoDate(end)}</div>
+          <button onClick={() => setWeekOffset((w) => Math.min(0, w + 1))} style={{ background: "none", border: `1px solid ${T.border}`, color: T.muted, borderRadius: 10, padding: "8px 12px", cursor: "pointer" }} type="button">▶</button>
+          <button onClick={() => setUnit((u) => (u === 'kg' ? 'lbs' : 'kg'))} style={{ background: "none", border: `1px solid ${T.border}`, color: T.muted, borderRadius: 10, padding: "8px 10px", cursor: "pointer" }} type="button">{unit.toUpperCase()}</button>
+        </div>
+      </div>
+
+      {err ? <div style={{ marginBottom: 12, background: `${T.warn}18`, border: `1px solid ${T.warn}44`, borderRadius: 10, padding: "10px 14px", fontSize: 12, color: T.warn }}>{err}</div> : null}
+      {saved ? <div style={{ marginBottom: 12, background: `${T.coachGreen}18`, border: `1px solid ${T.coachGreen}44`, borderRadius: 10, padding: "10px 14px", fontSize: 12, color: T.coachGreen }}>✓ Saved</div> : null}
+
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
+        <input value={inputWeight} onChange={(e) => setInputWeight(e.target.value)} placeholder={unit === 'kg' ? 'kg' : 'lbs'} style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, color: T.text, fontFamily: 'DM Sans' }} />
+        <button onClick={save} style={{ background: T.accent, border: 'none', borderRadius: 12, padding: '12px 16px', color: T.bg, fontFamily: 'Bebas Neue', letterSpacing: 2, cursor: 'pointer' }} type="button">LOG</button>
+      </div>
+
+      {spark}
+
+      <div style={{ marginTop: 12, borderTop: `1px solid ${T.border}`, paddingTop: 12 }}>
+        {weekDates.map((d) => {
+          const r = byDate[d];
+          return (
+            <div key={d} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${T.border}22` }}>
+              <div style={{ fontFamily: "JetBrains Mono", fontSize: 12, color: T.muted }}>{d}</div>
+              <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.text }}>{r ? `${toDisplay(Number(r.kg))} ${unit}` : "—"}</div>
             </div>
-          )}
-          {/* Unit toggle */}
-          <div
-            style={{
-              display: "flex",
-              background: T.surface,
-              borderRadius: 8,
-              border: `1px solid ${T.border}`,
-              overflow: "hidden",
-            }}
-          >
-            {["kg", "lbs"].map((u) => (
-              <button
-                key={u}
-                onClick={() => setUnit(u)}
-                style={{
-                  padding: "5px 12px",
-                  border: "none",
-                  cursor: "pointer",
-                  fontFamily: "DM Sans",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  background: unit === u ? T.accent : "transparent",
-                  color: unit === u ? T.bg : T.muted,
-                  transition: "all 0.15s",
-                }}
-              >
-                {u}
-              </button>
-            ))}
-          </div>
-        </div>
+          );
+        })}
       </div>
-
-      {/* Chart */}
-      <div style={{ position: "relative", marginBottom: 20 }}>
-        <svg
-          width="100%"
-          height={chartH + 2}
-          style={{ overflow: "visible", display: "block" }}
-        >
-          {/* Goal line (optional reference) */}
-          {hasData && (
-            <line
-              x1="0"
-              y1={chartH / 2}
-              x2="100%"
-              y2={chartH / 2}
-              stroke={T.border}
-              strokeWidth="1"
-              strokeDasharray="4 4"
-            />
-          )}
-          {/* Area fill */}
-          {hasData && pointsWithData.length >= 2 && (
-            <polyline
-              points={[
-                `${pointsWithData[0].i * step}%,${chartH}`,
-                ...pointsWithData.map(
-                  (e) => `${e.i * step}%,${toY(e.entry.weight)}`
-                ),
-                `${
-                  pointsWithData[pointsWithData.length - 1].i * step
-                }%,${chartH}`,
-              ].join(" ")}
-              fill={`${T.protein}18`}
-              stroke="none"
-            />
-          )}
-          {/* Line */}
-          {hasData && pointsWithData.length >= 2 && (
-            <polyline
-              points={polyPts}
-              fill="none"
-              stroke={T.protein}
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          )}
-          {/* Data points */}
-          {entries.map((e) => {
-            if (!e.entry) return null;
-            const cx = `${e.i * step}%`;
-            const cy = toY(e.entry.weight);
-            const isToday = e.day === todayKey;
-            return (
-              <g key={e.day}>
-                <circle
-                  cx={cx}
-                  cy={cy}
-                  r={isToday ? 6 : 4}
-                  fill={isToday ? T.accent : T.protein}
-                  stroke={T.card}
-                  strokeWidth="2"
-                />
-                <text
-                  x={cx}
-                  y={cy - 10}
-                  textAnchor="middle"
-                  style={{
-                    fontFamily: "JetBrains Mono",
-                    fontSize: 9,
-                    fill: isToday ? T.accent : T.muted,
-                  }}
-                >
-                  {toDisplay(e.entry.weight)}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-        {/* Day labels */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            marginTop: 6,
-          }}
-        >
-          {DAYS.map((d, i) => (
-            <span
-              key={d}
-              style={{
-                fontFamily: "Bebas Neue",
-                fontSize: 11,
-                color: d === todayKey ? T.accent : T.muted,
-                flex: 1,
-                textAlign:
-                  i === 0 ? "left" : i === DAYS.length - 1 ? "right" : "center",
-                letterSpacing: 1,
-              }}
-            >
-              {d}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      {/* Log input row */}
-      <div
-        style={{
-          display: "flex",
-          gap: 10,
-          alignItems: "center",
-          background: T.surface,
-          border: `1px solid ${T.border}`,
-          borderRadius: 12,
-          padding: "12px 16px",
-        }}
-      >
-        <span style={{ fontSize: 20 }}>⚖️</span>
-        <div style={{ flex: 1 }}>
-          <div
-            style={{
-              fontFamily: "DM Sans",
-              fontSize: 10,
-              color: T.muted,
-              letterSpacing: 1,
-              textTransform: "uppercase",
-              marginBottom: 4,
-            }}
-          >
-            Log today's weight ({unit})
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <input
-              type="number"
-              step="0.1"
-              min="30"
-              max="300"
-              value={inputWeight}
-              onChange={(e) => setInputWeight(e.target.value)}
-              placeholder={
-                todayEntry
-                  ? `${toDisplay(todayEntry.weight)} ${unit} (logged)`
-                  : `e.g. ${unit === "kg" ? "83.5" : "184.0"}`
-              }
-              style={{
-                flex: 1,
-                background: "transparent",
-                border: `1px solid ${T.border}`,
-                borderRadius: 8,
-                padding: "8px 12px",
-                color: T.text,
-                fontFamily: "JetBrains Mono",
-                fontSize: 13,
-                outline: "none",
-                caretColor: T.accent,
-              }}
-            />
-            <input
-              type="time"
-              value={inputTime}
-              onChange={(e) => setInputTime(e.target.value)}
-              style={{
-                background: "transparent",
-                border: `1px solid ${T.border}`,
-                borderRadius: 8,
-                padding: "8px 12px",
-                color: T.muted,
-                fontFamily: "JetBrains Mono",
-                fontSize: 12,
-                outline: "none",
-                colorScheme: "dark",
-                width: 110,
-              }}
-            />
-          </div>
-        </div>
-        <button
-          onClick={logWeight}
-          style={{
-            background: saved ? T.coachGreen : T.protein,
-            color: "#fff",
-            border: "none",
-            borderRadius: 10,
-            padding: "10px 20px",
-            fontFamily: "Bebas Neue",
-            fontSize: 14,
-            letterSpacing: 1,
-            cursor: "pointer",
-            transition: "all 0.25s",
-            whiteSpace: "nowrap",
-            flexShrink: 0,
-          }}
-        >
-          {saved ? "✓ SAVED" : "LOG WEIGHT"}
-        </button>
-      </div>
-
-      {/* This week summary row */}
-      {hasData && (
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            marginTop: 14,
-            paddingTop: 14,
-            borderTop: `1px solid ${T.border}`,
-          }}
-        >
-          {[
-            {
-              label: "Current",
-              val: todayEntry ? `${toDisplay(todayEntry.weight)} ${unit}` : "—",
-              color: T.accent,
-            },
-            {
-              label: "This week",
-              val:
-                trend !== null
-                  ? `${trendUp ? "+" : ""}${
-                      unit === "kg" ? trend : (trend * 2.20462).toFixed(1)
-                    } ${unit}`
-                  : "—",
-              color: trendUp ? T.danger : T.coachGreen,
-            },
-            {
-              label: "Days logged",
-              val: `${weights.length} / 7`,
-              color: T.protein,
-            },
-          ].map((s) => (
-            <div key={s.label} style={{ flex: 1, textAlign: "center" }}>
-              <div
-                style={{
-                  fontFamily: "JetBrains Mono",
-                  fontSize: 13,
-                  color: s.color,
-                  fontWeight: 600,
-                }}
-              >
-                {s.val}
-              </div>
-              <div
-                style={{
-                  fontFamily: "DM Sans",
-                  fontSize: 9,
-                  color: T.muted,
-                  marginTop: 2,
-                }}
-              >
-                {s.label}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
-
-// ── Dashboard (main landing page) ─────────────────────────────────────────────
 function Dashboard({
   plan,
   profile,
@@ -80573,10 +79770,10 @@ function Dashboard({
       </div>
 
       {/* ── Mood Tracker ── */}
-      <MoodTracker moodLog={moodLog} setMoodLog={setMoodLog} />
+      <MoodTracker athleteId={profile?.id} />
 
       {/* ── Weight Tracker ── */}
-      <WeightTracker />
+      <WeightTracker athleteId={profile?.id} />
 
       {/* ── Coach Videos (full width below) ── */}
       <div
@@ -84174,33 +83371,8 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
     return () => clearInterval(ticker);
   }, [mfpConnected, mfpUsername, mfpManualMode]);
 
-  const [moodLog, setMoodLog] = useState(() => {
-    // Pre-seed some mood history so the week view is meaningful from the start
-    const seed = {};
-    const seeds = [
-      { day: "MON", id: 4, emoji: "🙂", label: "Good", color: "#FF9A52" },
-      {
-        day: "TUE",
-        id: 5,
-        emoji: "😄",
-        label: "Great",
-        color: "#22c55e",
-        note: "Really nailed nutrition today",
-      },
-      {
-        day: "WED",
-        id: 3,
-        emoji: "😐",
-        label: "Neutral",
-        color: "#f97316",
-        note: "Struggled with energy mid-afternoon",
-      },
-      { day: "THU", id: 4, emoji: "🙂", label: "Good", color: "#FF9A52" },
-    ];
-    seeds.forEach((s) => {
-      seed[s.day] = { ...s, timestamp: new Date().toISOString() };
-    });
-    return seed;
+  const [moodLog, setMoodLog] = useState({});
+    
   });
 
   if (!tokenState || !profile)
