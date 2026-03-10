@@ -83372,6 +83372,8 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
   }, [mfpConnected, mfpUsername, mfpManualMode]);
 
   const [moodLog, setMoodLog] = useState({});
+    
+  });
 
   if (!tokenState || !profile)
     return (
