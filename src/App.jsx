@@ -9972,7 +9972,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
     } finally {
       setMfpSyncing(false);
     }
-   ;
+  };
 
   // ── Submit manually entered data ──────────────────────────────────────────
   const submitManualMFP = (formData) => {
