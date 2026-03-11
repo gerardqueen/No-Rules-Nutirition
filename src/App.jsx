@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import FOOD_DB from "./foodDb";
 
+import { getDay, upsertDay } from "./journalStore";
 // ✅ Live backend config + auth helpers
 const API_BASE = import.meta.env.VITE_API_URL || 'https://no-rules-api-production.up.railway.app';
 const TOKEN_KEY = 'nrn_token';
@@ -28,6 +29,116 @@ async function apiFetch(path, options = {}) {
   }
   return data;
 }
+// ─────────────────────────────────────────────────────────────
+// JOURNAL PERSISTENCE (Backend + Local journalStore)
+// ─────────────────────────────────────────────────────────────
+const isoToday = () => new Date().toISOString().slice(0, 10);
+
+async function fetchDayBundle(athleteId, dateISO) {
+  const qs = `?start=${dateISO}&end=${dateISO}`;
+
+  const [totalsRows, weightRows, moodRows, foodRows, calRows] = await Promise.all([
+    apiFetch(`/daily-totals/${athleteId}${qs}`).catch(() => []),
+    apiFetch(`/weights/${athleteId}`).catch(() => []),
+    apiFetch(`/moods/${athleteId}`).catch(() => []),
+    apiFetch(`/food-logs/${athleteId}${qs}`).catch(() => []),
+    apiFetch(`/calendar-events/${athleteId}${qs}`).catch(() => []),
+  ]);
+
+  const totals = (Array.isArray(totalsRows) ? totalsRows : []).find(r => r.date === dateISO);
+  const weight = (Array.isArray(weightRows) ? weightRows : []).find(r => r.date === dateISO);
+  const mood = (Array.isArray(moodRows) ? moodRows : []).find(r => r.date === dateISO);
+  const foods = (Array.isArray(foodRows) ? foodRows : []).find(r => r.date === dateISO)?.foods;
+  const calendar = Array.isArray(calRows) ? calRows : [];
+
+  return {
+    totals: totals ? {
+      calories: Number(totals.calories ?? 0),
+      protein: Number(totals.protein_g ?? 0),
+      carbs: Number(totals.carbs_g ?? 0),
+      fat: Number(totals.fat_g ?? 0),
+    } : null,
+    foods: Array.isArray(foods) ? foods : null,
+    weight: weight ? { kg: Number(weight.kg) } : null,
+    mood: mood ? {
+      id: Number(mood.mood_id),
+      emoji: mood.emoji ?? "",
+      label: mood.label ?? "",
+      color: mood.color ?? "",
+      note: mood.note ?? "",
+    } : null,
+    calendar: calendar.map(ev => ({
+      id: ev.id,
+      title: ev.title,
+      startISO: ev.startISO ?? null,
+      endISO: ev.endISO ?? null,
+      notes: ev.notes ?? "",
+    })),
+  };
+}
+
+async function saveDailyTotals(athleteId, dateISO, totals, note = "", source = "manual") {
+  return apiFetch(`/daily-totals/${athleteId}`, {
+    method: "POST",
+    body: JSON.stringify({
+      date: dateISO,
+      calories: Number(totals.calories ?? 0),
+      protein_g: Number(totals.protein ?? 0),
+      carbs_g: Number(totals.carbs ?? 0),
+      fat_g: Number(totals.fat ?? 0),
+      note,
+      source,
+    }),
+  });
+}
+
+async function saveFoodLog(athleteId, dateISO, foods) {
+  return apiFetch(`/food-logs/${athleteId}`, {
+    method: "PUT",
+    body: JSON.stringify({ date: dateISO, foods }),
+  });
+}
+
+async function saveWeight(athleteId, dateISO, kg) {
+  return apiFetch(`/weights/${athleteId}`, {
+    method: "POST",
+    body: JSON.stringify({ date: dateISO, kg: Number(kg) }),
+  });
+}
+
+async function saveMood(athleteId, dateISO, mood) {
+  return apiFetch(`/moods/${athleteId}`, {
+    method: "POST",
+    body: JSON.stringify({
+      date: dateISO,
+      id: Number(mood.id),
+      emoji: mood.emoji ?? "",
+      label: mood.label ?? "",
+      color: mood.color ?? "",
+      note: mood.note ?? "",
+    }),
+  });
+}
+
+async function createCalendarEvent(athleteId, dateISO, ev) {
+  return apiFetch(`/calendar-events/${athleteId}`, {
+    method: "POST",
+    body: JSON.stringify({
+      date: dateISO,
+      title: ev.title,
+      startISO: ev.startISO ?? null,
+      endISO: ev.endISO ?? null,
+      notes: ev.notes ?? "",
+    }),
+  });
+}
+
+async function deleteCalendarEvent(athleteId, eventId) {
+  return apiFetch(`/calendar-events/${athleteId}/${eventId}`, {
+    method: "DELETE",
+  });
+}
+
 
 
 // ── Google Fonts ──────────────────────────────────────────────────────────────
@@ -69,8 +180,11 @@ const MEALS = ["Breakfast", "Lunch", "Dinner", "Snack"];
 let macroGoals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
 
 // ── USDA FoodData Central Database (8,200+ foods) ────────────────────────────
-// Fields: n=name, c=calories/100g, p=protein/100g, b=carbs/100g, f=fat/100g
-/* FOOD_DB moved to src/foodDb.js */
+// Fields: n=name, c=calories/100g, p=protein/100g, b=carbs/100g, f=fat/100/* FOOD_DB moved to src/foodDb.js */
+["1 rusk", 10.0],
+    ],
+  },
+];
 
 // Helper: get macros for a food item at a given gram weight
 function scaleMacros(item, grams) {
@@ -9684,6 +9798,59 @@ export default function App() {
   const [macroGoalsState, setMacroGoalsState] = useState(() => macroGoals);
   const [threads, setThreads] = useState(MSG_SEED);
 
+
+  // ── Journal date + per-day persistence (local-first, server-backed) ─────────
+  const [journalDate, setJournalDate] = useState(() => isoToday());
+
+  const [dayJournal, setDayJournal] = useState(() => {
+    const uid = profile?.id;
+    return uid ? getDay(uid, isoToday()) : null;
+  });
+
+  // Keep local journal in sync when date/user changes
+  useEffect(() => {
+    const uid = profile?.id;
+    if (!uid) return;
+    setDayJournal(getDay(uid, journalDate));
+  }, [journalDate, profile?.id]);
+
+  // Hydrate from server on (login + date change) then write into journalStore
+  useEffect(() => {
+    const uid = profile?.id;
+    if (!uid) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const bundle = await fetchDayBundle(uid, journalDate);
+        const patch = {};
+        if (bundle.totals) patch.totals = bundle.totals;
+        if (bundle.foods) patch.foods = bundle.foods;
+        if (bundle.weight) patch.weight = bundle.weight;
+        if (bundle.mood) patch.mood = bundle.mood;
+        if (bundle.calendar) patch.calendar = bundle.calendar;
+
+        const next = upsertDay(uid, journalDate, patch);
+        if (!cancelled) setDayJournal(next);
+      } catch (e) {
+        console.warn("Journal hydrate failed:", e?.message ?? e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [journalDate, profile?.id]);
+
+  // Mirror calendar events state from journal (keeps existing UI working)
+  useEffect(() => {
+    if (dayJournal?.calendar && typeof setEvents === "function") {
+      setEvents(dayJournal.calendar);
+    }
+  }, [dayJournal]);
+
+  // Expose setters for date navigation in existing calendar UI
+  const setActiveDateISO = (iso) => setJournalDate(iso);
   // ✅ Restore session using /auth/me (keeps login after refresh)
   useEffect(() => {
     const t = getToken();
@@ -9707,7 +9874,7 @@ export default function App() {
     if (!profile?.id) return;
     (async () => {
       try {
-        const res = await apiFetch(`/athlete/${profile.id}/macro-targets`);
+        const res = await apiFetch(`/macro-targets/${profile.id}`);
         if (res?.macroGoals) setMacroGoalsState(res.macroGoals);
         if (res?.weekPlan) setPlan(res.weekPlan);
       } catch (e) {
@@ -9721,7 +9888,7 @@ export default function App() {
     if (!profile?.id) return;
     (async () => {
       try {
-        const res = await apiFetch(`/athlete/${profile.id}/calendar-events`);
+        const res = await apiFetch(`/calendar-events/${profile.id}?start=${journalDate}&end=${journalDate}`);
         const events = Array.isArray(res) ? res : res?.events;
         if (Array.isArray(events)) setEvents(events);
       } catch (e) {}
@@ -9776,6 +9943,42 @@ export default function App() {
 
   // ── Realistic seed data for gerardqueen (used as base when live parse fails) ──
   const getRealisticData = () => null; // dummy data disabled
+
+    base.netCalories = Math.max(0, base.calories - base.exerciseCalories);
+    const mealCals = base.calories;
+    return {
+      ...base,
+      profileFound: true,
+      source: "live",
+      username,
+      meals: [
+        {
+          name: "Breakfast",
+          calories: Math.round(mealCals * 0.24),
+          logged: true,
+        },
+        {
+          name: "Morning Snack",
+          calories: Math.round(mealCals * 0.09),
+          logged: true,
+        },
+        { name: "Lunch", calories: Math.round(mealCals * 0.33), logged: true },
+        {
+          name: "Afternoon Snack",
+          calories: Math.round(mealCals * 0.08),
+          logged: mealCals > 2000,
+        },
+        {
+          name: "Dinner",
+          calories: Math.round(mealCals * 0.26),
+          logged: mealCals > 1500,
+        },
+      ],
+      weekAdherence: [88, 94, 76, 100, 82, 91, 78].map((v) =>
+        Math.min(100, Math.max(0, v + jitter()))
+      ),
+    };
+  };
 
   // ── Live fetch via Anthropic API with web_fetch tool ──────────────────────
   const fetchMFP = async (username, dayPlan, isAutoRefresh = false) => {
