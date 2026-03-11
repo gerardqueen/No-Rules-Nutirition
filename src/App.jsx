@@ -69,11 +69,8 @@ const MEALS = ["Breakfast", "Lunch", "Dinner", "Snack"];
 let macroGoals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
 
 // ── USDA FoodData Central Database (8,200+ foods) ────────────────────────────
-// Fields: n=name, c=calories/100g, p=protein/100g, b=carbs/100g, f=fat/100/* FOOD_DB moved to src/foodDb.js */
-["1 rusk", 10.0],
-    ],
-  },
-];
+// Fields: n=name, c=calories/100g, p=protein/100g, b=carbs/100g, f=fat/100g
+/* FOOD_DB moved to src/foodDb.js */
 
 // Helper: get macros for a food item at a given gram weight
 function scaleMacros(item, grams) {
