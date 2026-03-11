@@ -1,5 +1,5 @@
-/* Extracted from original App.jsx to keep client food database without bloating App.jsx */
-export const FOOD_DB = [
+// Auto-extracted from App.jsx
+const FOOD_DB = [
   {
     n: "APPLEBEE'S, 9 oz house sirloin steak",
     c: 189,
@@ -73816,3 +73816,5 @@ export const FOOD_DB = [
     ],
   },
 ];
+
+export default FOOD_DB;
