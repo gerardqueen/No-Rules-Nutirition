@@ -69,7 +69,7 @@ const MEALS = ["Breakfast", "Lunch", "Dinner", "Snack"];
 let macroGoals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
 
 // ── USDA FoodData Central Database (8,200+ foods) ────────────────────────────
-// Fields: n=name, c=calories/100g, p=protein/100g, b=carbs/100g, f=fat/100g FOOD_DB moved to src/foodDb.js */
+// Fields: n=name, c=calories/100g, p=protein/100g, b=carbs/100g, f=fat/100g
 /* FOOD_DB moved to src/foodDb.js */
 
 function scaleMacros(item, grams) {
@@ -113,6 +113,7 @@ const initWeekPlan = () => {
   });
   return plan;
 };
+
 
 const sumMacros = (foods) =>
   foods.reduce(
@@ -926,14 +927,12 @@ function CoachPanel({ plan, selectedDay, profile }) {
   useEffect(() => {
     if (messages.length === 0) {
       const firstName = (profile?.name || "Athlete").split(" ")[0];
-      setMessages([
-        {
-          role: "assistant",
-          isCoach: true,
-          content: `Hey ${firstName}! 👋 I can see your macros for ${selectedDay} — you're at ${calPct}% of your calorie goal. How are you feeling today?`,
-          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        },
-      ]);
+      setMessages([{
+        role: "assistant",
+        isCoach: true,
+        content: `Hey ${firstName}! 👋 I can see your macros for ${selectedDay} — you're at ${calPct}% of your calorie goal. How are you feeling today?`,
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      }]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -954,37 +953,628 @@ function CoachPanel({ plan, selectedDay, profile }) {
     setInput("");
     setLoading(true);
     setTimeout(() => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          isCoach: true,
-          content: "Got it — keep logging today and I'll review your trend. – Sarah",
-          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        },
-      ]);
+      setMessages((prev) => [...prev, {
+        role: "assistant",
+        isCoach: true,
+        content: "Got it — keep logging today and I’ll review your trend. – Sarah",
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      }]);
       setLoading(false);
     }, 350);
   };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ flex: 1, overflowY: "auto", padding: 16, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16 }}>
+      {/* Header */}
+      <div
+        style={{
+          background: T.card,
+          border: `1px solid ${T.border}`,
+          borderRadius: "16px 16px 0 0",
+          padding: "16px 20px",
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+        }}
+      >
+        <div style={{ flex: 1 }}
+        >
+          <div style={{ fontFamily: "DM Sans", fontSize: 14, fontWeight: 600, color: T.text }}>Sarah Mitchell</div>
+          <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.coachGreen }}>● Online · Monitoring your macros</div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, marginBottom: 4 }}>TODAY</div>
+          <div style={{ fontFamily: "JetBrains Mono", fontSize: 12, color: T.accent, fontWeight: 700 }}>{calPct}% kcal</div>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+          padding: "16px 20px",
+          minHeight: 0,
+          background: T.surface,
+          borderLeft: `1px solid ${T.border}`,
+          borderRight: `1px solid ${T.border}`,
+        }}
+      >
         {messages.map((m, i) => (
-          <div key={i} style={{ marginBottom: 10, textAlign: m.isCoach ? "left" : "right" }}>
-            <div style={{ display: "inline-block", background: m.isCoach ? T.card : T.accent, color: m.isCoach ? T.text : T.bg, border: m.isCoach ? `1px solid ${T.border}` : "none", padding: "10px 14px", borderRadius: 14, maxWidth: "78%", whiteSpace: "pre-wrap", fontFamily: "DM Sans", fontSize: 13, lineHeight: 1.5 }}>
+          <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: m.isCoach ? "flex-start" : "flex-end" }}>
+            <div
+              style={{
+                maxWidth: "78%",
+                padding: "11px 15px",
+                borderRadius: m.isCoach ? "4px 16px 16px 16px" : "16px 4px 16px 16px",
+                background: m.isCoach ? T.card : T.accent,
+                color: m.isCoach ? T.text : T.bg,
+                fontFamily: "DM Sans",
+                fontSize: 13,
+                lineHeight: 1.6,
+                border: m.isCoach ? `1px solid ${T.border}` : "none",
+                whiteSpace: "pre-wrap",
+              }}
+            >
               {m.content}
             </div>
-            <div style={{ fontFamily: "JetBrains Mono", fontSize: 9, color: T.muted, marginTop: 3 }}>{m.time}</div>
+            <span style={{ fontFamily: "JetBrains Mono", fontSize: 9, color: T.muted, marginTop: 3 }}>{m.time}</span>
           </div>
         ))}
-        {loading && <div style={{ color: T.muted, fontFamily: "DM Sans", fontSize: 12 }}>Sarah is typing…</div>}
+        {loading && <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted }}>Sarah is typing…</div>}
         <div ref={bottomRef} />
       </div>
 
-      <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-        <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="Message your coach..." style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: "12px 16px", color: T.text, fontFamily: "DM Sans", fontSize: 13, outline: "none" }} />
-        <button onClick={send} disabled={loading || !input.trim()} style={{ background: input.trim() && !loading ? T.coachGreen : T.border, color: input.trim() && !loading ? "#fff" : T.muted, border: "none", borderRadius: 12, padding: "12px 18px", fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 1, cursor: input.trim() && !loading ? "pointer" : "default" }}>
+      {/* Input */}
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          alignItems: "center",
+          padding: "12px 20px",
+          background: T.card,
+          border: `1px solid ${T.border}`,
+          borderRadius: "0 0 16px 16px",
+        }}
+      >
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && send()}
+          placeholder="Message your coach..."
+          style={{
+            flex: 1,
+            background: T.surface,
+            border: `1px solid ${T.border}`,
+            borderRadius: 12,
+            padding: "12px 16px",
+            color: T.text,
+            fontFamily: "DM Sans",
+            fontSize: 13,
+            outline: "none",
+          }}
+        />
+        <button
+          onClick={send}
+          disabled={loading || !input.trim()}
+          style={{
+            background: input.trim() && !loading ? T.coachGreen : T.border,
+            color: input.trim() && !loading ? "#fff" : T.muted,
+            border: "none",
+            borderRadius: 12,
+            padding: "12px 18px",
+            fontFamily: "Bebas Neue",
+            fontSize: 16,
+            letterSpacing: 1,
+            cursor: input.trim() && !loading ? "pointer" : "default",
+            transition: "all 0.2s",
+          }}
+        >
+          SEND
+        </button>
+      </div>
+    </div>
+  );
+}
+) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const bottomRef = useRef(null);
+
+  const tot = dayTotals(plan[selectedDay]);
+  const calPct = Math.round((tot.calories / macroGoals.calories) * 100);
+  const protPct = Math.round((tot.protein / macroGoals.protein) * 100);
+  const carbsPct = Math.round((tot.carbs / macroGoals.carbs) * 100);
+  const fatPct = Math.round((tot.fat / macroGoals.fat) * 100);
+
+  const systemPrompt = `You are Sarah Mitchell, a professional nutrition coach. You are in a 1-on-1 chat with ${profile.name}, a ${profile.sport} athlete (goal: ${profile.goal}). Live macro data for ${selectedDay}: Calories ${tot.calories}/${macroGoals.calories} (${calPct}%), Protein ${tot.protein}/${macroGoals.protein}g (${protPct}%), Carbs ${tot.carbs}/${macroGoals.carbs}g (${carbsPct}%), Fat ${tot.fat}/${macroGoals.fat}g (${fatPct}%). Be warm, concise, and data-driven — like a real coach text. Reference their numbers when relevant. Sign off as "Sarah" occasionally.`;
+
+  useEffect(() => {
+    if (messages.length === 0) {
+      setMessages([
+        {
+          role: "assistant",
+          isCoach: true,
+          content: `Hey ${
+            profile.name.split(" ")[0]
+          }! 👋 I can see your macros for ${selectedDay} — you're at ${calPct}% of your calorie goal. Looking good! How are you feeling today?`,
+          time: new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        },
+      ]);
+    }
+  }, []);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const send = async () => {
+    if (!input.trim() || loading) return;
+    const userMsg = {
+      role: "user",
+      content: input.trim(),
+      isCoach: false,
+      time: new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    };
+    const newMsgs = [...messages, userMsg];
+    setMessages(newMsgs);
+    setInput("");
+    setLoading(true);
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 400,
+          system: systemPrompt,
+          messages: newMsgs.map((m) => ({ role: m.role, content: m.content })),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const reply =
+        data.content?.map((b) => b.text || "").join("") ||
+        "Sorry, missed that!";
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: reply,
+          isCoach: true,
+          time: new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        },
+      ]);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "Connection issue. Try again.",
+          isCoach: true,
+          time: "--:--",
+        },
+      ]);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {/* Coach header */}
+      <div
+        style={{
+          background: T.card,
+          border: `1px solid ${T.border}`,
+          borderRadius: "16px 16px 0 0",
+          padding: "16px 20px",
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+        }}
+      >
+        <div style={{ position: "relative" }}>
+          <div
+            style={{
+              width: 46,
+              height: 46,
+              borderRadius: "50%",
+              background: `linear-gradient(135deg, ${T.coachGreen}, #16a34a)`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontFamily: "Bebas Neue",
+              fontSize: 20,
+              color: "#fff",
+            }}
+          >
+            SM
+          </div>
+          <div
+            style={{
+              position: "absolute",
+              bottom: 1,
+              right: 1,
+              width: 12,
+              height: 12,
+              background: T.coachGreen,
+              borderRadius: "50%",
+              border: `2px solid ${T.card}`,
+            }}
+          />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div
+            style={{
+              fontFamily: "DM Sans",
+              fontSize: 14,
+              fontWeight: 600,
+              color: T.text,
+            }}
+          >
+            Sarah Mitchell
+          </div>
+          <div
+            style={{ fontFamily: "DM Sans", fontSize: 11, color: T.coachGreen }}
+          >
+            ● Online · Monitoring your macros
+          </div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div
+            style={{
+              fontFamily: "DM Sans",
+              fontSize: 10,
+              color: T.muted,
+              marginBottom: 4,
+            }}
+          >
+            TODAY'S PROGRESS
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {[
+              { l: "CAL", p: calPct, c: T.accent },
+              { l: "PRO", p: protPct, c: T.protein },
+              { l: "CARB", p: carbsPct, c: T.carbs },
+              { l: "FAT", p: fatPct, c: T.fat },
+            ].map((m) => (
+              <div key={m.l} style={{ textAlign: "center", minWidth: 36 }}>
+                <div
+                  style={{
+                    fontFamily: "JetBrains Mono",
+                    fontSize: 11,
+                    color: m.c,
+                    fontWeight: 600,
+                  }}
+                >
+                  {m.p}%
+                </div>
+                <div
+                  style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted }}
+                >
+                  {m.l}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Live macro bar */}
+      <div
+        style={{
+          background: `${T.card}cc`,
+          borderLeft: `1px solid ${T.border}`,
+          borderRight: `1px solid ${T.border}`,
+          padding: "10px 20px",
+          display: "flex",
+          gap: 12,
+          alignItems: "center",
+        }}
+      >
+        <span
+          style={{
+            fontFamily: "DM Sans",
+            fontSize: 10,
+            color: T.muted,
+            letterSpacing: 1,
+            textTransform: "uppercase",
+            whiteSpace: "nowrap",
+          }}
+        >
+          Coach sees:
+        </span>
+        {[
+          {
+            label: "Calories",
+            val: tot.calories,
+            goal: macroGoals.calories,
+            unit: "kcal",
+            color: T.accent,
+          },
+          {
+            label: "Protein",
+            val: tot.protein,
+            goal: macroGoals.protein,
+            unit: "g",
+            color: T.protein,
+          },
+          {
+            label: "Carbs",
+            val: tot.carbs,
+            goal: macroGoals.carbs,
+            unit: "g",
+            color: T.carbs,
+          },
+          {
+            label: "Fat",
+            val: tot.fat,
+            goal: macroGoals.fat,
+            unit: "g",
+            color: T.fat,
+          },
+        ].map((m) => (
+          <div key={m.label} style={{ flex: 1 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginBottom: 3,
+              }}
+            >
+              <span
+                style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}
+              >
+                {m.label}
+              </span>
+              <span
+                style={{
+                  fontFamily: "JetBrains Mono",
+                  fontSize: 10,
+                  color: m.color,
+                }}
+              >
+                {m.val}
+                <span style={{ color: T.muted, fontSize: 9 }}>
+                  /{m.goal}
+                  {m.unit}
+                </span>
+              </span>
+            </div>
+            <div style={{ height: 3, background: T.border, borderRadius: 99 }}>
+              <div
+                style={{
+                  height: "100%",
+                  width: `${Math.min((m.val / m.goal) * 100, 100)}%`,
+                  background: m.color,
+                  borderRadius: 99,
+                }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Messages */}
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+          padding: "16px 20px",
+          minHeight: 0,
+          background: T.surface,
+          borderLeft: `1px solid ${T.border}`,
+          borderRight: `1px solid ${T.border}`,
+        }}
+      >
+        {messages.map((m, i) => (
+          <div
+            key={i}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: m.isCoach ? "flex-start" : "flex-end",
+            }}
+          >
+            {m.isCoach && (
+              <span
+                style={{
+                  fontFamily: "DM Sans",
+                  fontSize: 10,
+                  color: T.muted,
+                  marginBottom: 4,
+                  marginLeft: 4,
+                }}
+              >
+                Sarah
+              </span>
+            )}
+            <div
+              style={{
+                maxWidth: "78%",
+                padding: "11px 15px",
+                borderRadius: m.isCoach
+                  ? "4px 16px 16px 16px"
+                  : "16px 4px 16px 16px",
+                background: m.isCoach ? T.card : T.accent,
+                color: m.isCoach ? T.text : T.bg,
+                fontFamily: "DM Sans",
+                fontSize: 13,
+                lineHeight: 1.6,
+                border: m.isCoach ? `1px solid ${T.border}` : "none",
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {m.content}
+            </div>
+            <span
+              style={{
+                fontFamily: "JetBrains Mono",
+                fontSize: 9,
+                color: T.muted,
+                marginTop: 3,
+                marginLeft: m.isCoach ? 4 : 0,
+                marginRight: m.isCoach ? 0 : 4,
+              }}
+            >
+              {m.time}
+            </span>
+          </div>
+        ))}
+        {loading && (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "flex-start",
+            }}
+          >
+            <span
+              style={{
+                fontFamily: "DM Sans",
+                fontSize: 10,
+                color: T.muted,
+                marginBottom: 4,
+                marginLeft: 4,
+              }}
+            >
+              Sarah is typing…
+            </span>
+            <div
+              style={{
+                display: "flex",
+                gap: 5,
+                padding: "11px 15px",
+                background: T.card,
+                borderRadius: "4px 16px 16px 16px",
+                border: `1px solid ${T.border}`,
+                width: "fit-content",
+              }}
+            >
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  style={{
+                    width: 6,
+                    height: 6,
+                    background: T.coachGreen,
+                    borderRadius: "50%",
+                    animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`,
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Quick replies */}
+      <div
+        style={{
+          background: T.surface,
+          borderLeft: `1px solid ${T.border}`,
+          borderRight: `1px solid ${T.border}`,
+          padding: "8px 20px",
+          display: "flex",
+          gap: 8,
+          flexWrap: "wrap",
+        }}
+      >
+        {[
+          "How are my macros looking?",
+          "What should I eat for dinner?",
+          "Can we adjust my protein target?",
+          "I'm struggling to hit calories today",
+        ].map((q) => (
+          <button
+            key={q}
+            onClick={() => setInput(q)}
+            style={{
+              background: T.border,
+              border: `1px solid ${T.border}`,
+              color: T.muted,
+              padding: "5px 10px",
+              borderRadius: 16,
+              fontFamily: "DM Sans",
+              fontSize: 11,
+              cursor: "pointer",
+              transition: "all 0.2s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = T.coachGreen;
+              e.currentTarget.style.color = T.coachGreen;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = T.border;
+              e.currentTarget.style.color = T.muted;
+            }}
+          >
+            {q}
+          </button>
+        ))}
+      </div>
+
+      {/* Input */}
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          alignItems: "center",
+          padding: "12px 20px",
+          background: T.card,
+          border: `1px solid ${T.border}`,
+          borderRadius: "0 0 16px 16px",
+        }}
+      >
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && send()}
+          placeholder="Message your coach..."
+          style={{
+            flex: 1,
+            background: T.surface,
+            border: `1px solid ${T.border}`,
+            borderRadius: 12,
+            padding: "12px 16px",
+            color: T.text,
+            fontFamily: "DM Sans",
+            fontSize: 13,
+            outline: "none",
+          }}
+        />
+        <button
+          onClick={send}
+          disabled={loading || !input.trim()}
+          style={{
+            background: input.trim() && !loading ? T.coachGreen : T.border,
+            color: input.trim() && !loading ? "#fff" : T.muted,
+            border: "none",
+            borderRadius: 12,
+            padding: "12px 18px",
+            fontFamily: "Bebas Neue",
+            fontSize: 16,
+            letterSpacing: 1,
+            cursor: input.trim() && !loading ? "pointer" : "default",
+            transition: "all 0.2s",
+          }}
+        >
           SEND
         </button>
       </div>
@@ -9381,228 +9971,14 @@ export default function App() {
   };
 
   // ── Live fetch via Anthropic API with web_fetch tool ──────────────────────
-    // ── MFP sync disabled in build-safe mode (manual entry only) ───────────────
+    // ── MFP sync disabled (manual entry only) ───────────────────────────────
   const fetchMFP = async (username, _dayPlan, _isAutoRefresh = false) => {
     if (!username) return;
     setMfpConnected(true);
     setMfpManualMode(true);
     setMfpSyncing(false);
-    setMfpError("Live MFP scraping is disabled for production builds. Use manual entry.");
+    setMfpError("Live MFP sync is disabled in this build. Use manual entry.");
     return null;
-  };
-                break;
-              }
-            }
-          } catch (_) { /* not JSON, try HTML */ }
-
-          // Try HTML scraping
-          const html = raw.includes("{") && raw.includes("contents") 
-            ? (JSON.parse(raw).contents || "") 
-            : raw;
-          if (html.length > 500) {
-            const getN = (re) => { const m = html.match(re); return m ? parseInt(m[1].replace(/,/g,""),10) : 0; };
-            // MFP embeds nutrition data as JSON-LD or window.__data
-            const dataMatch = html.match(/"energy"[^}]*"value"\s*:\s*(\d+)/) ||
-                              html.match(/class="[^"]*total[^"]*calories[^"]*"[^>]*>[\s\S]{0,100}?(\d{3,4})/i);
-            const cal = getN(/"energy"[^}]{0,50}"value"\s*:\s*(\d+)/) ||
-                        getN(/total[^<]{0,50}calories[^<]{0,50}>([0-9,]{3,5})/i) ||
-                        getN(/"calories"\s*:\s*(\d+)/i);
-            const prot = getN(/"protein"\s*:\s*([\d.]+)/i);
-            const carb = getN(/"carbohydrates"\s*:\s*([\d.]+)/i) || getN(/"carbs"\s*:\s*([\d.]+)/i);
-            const fat  = getN(/"fat"\s*:\s*([\d.]+)/i);
-            if (cal > 50 && (prot > 0 || carb > 0)) {
-              parsed = { profileFound: true, username, date: dateStr, source: "live",
-                calories: cal, protein: prot, carbs: carb, fat,
-                fibre: getN(/"fiber"\s*:\s*([\d.]+)/i),
-                water: 0, exerciseCalories: 0, netCalories: cal,
-                meals: [
-                  { name: "Breakfast", calories: 0, logged: html.toLowerCase().includes("breakfast") },
-                  { name: "Lunch", calories: 0, logged: html.toLowerCase().includes("lunch") },
-                  { name: "Dinner", calories: 0, logged: html.toLowerCase().includes("dinner") },
-                  { name: "Snacks", calories: 0, logged: html.toLowerCase().includes("snack") },
-                ],
-                weekAdherence: [85, 90, 78, 95, 82, 88, 76],
-              };
-            }
-          }
-        } catch (_proxyErr) { /* try next proxy */ }
-      }
-
-      // ── Attempt 2: Use Claude AI with web_search to read the public diary ──
-      if (!parsed || !parsed.profileFound || !parsed.calories) {
-        const response = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 2000,
-            tools: [{ type: "web_search_20250305", name: "web_search" }],
-            messages: [
-              {
-                role: "user",
-                content: `TASK: Fetch this public MyFitnessPal diary page and return the nutrition totals as JSON.
-
-URL to fetch: https://www.myfitnesspal.com/food/diary/${username}?date=${dateStr}
-
-The diary is PUBLIC (no login needed). Use web_search to retrieve it.
-
-Look for the daily totals row showing: Calories, Protein (g), Carbs (g), Fat (g). These appear at the bottom of the food diary table.
-
-Return ONLY this exact JSON (fill in real numbers, no markdown, no text):
-{"profileFound":true,"username":"${username}","date":"${dateStr}","source":"live","calories":0,"protein":0,"carbs":0,"fat":0,"fibre":0,"water":0,"exerciseCalories":0,"netCalories":0,"meals":[{"name":"Breakfast","calories":0,"logged":false},{"name":"Lunch","calories":0,"logged":false},{"name":"Dinner","calories":0,"logged":false},{"name":"Snacks","calories":0,"logged":false}],"weekAdherence":[85,90,78,95,82,88,76]}
-
-If the page requires login or is private, return ONLY: {"profileFound":false}`,
-              },
-            ],
-          }),
-        });
-
-        if (response.ok) {
-          const apiData = await response.json();
-          const allText = (apiData.content || [])
-            .filter((b) => b.type === "text")
-            .map((b) => b.text)
-            .join("\n")
-            .replace(/```json\s*/gi, "")
-            .replace(/```/g, "")
-            .trim();
-          const jsonMatch = allText.match(/\{[\s\S]*\}/);
-          try {
-            parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-          } catch {
-            parsed = null;
-          }
-        }
-      }
-
-      // ── Compatibility shim ────────────────────────────────────────────────
-      const jsonMatch = null; // already parsed above
-
-      // ── Use live data if we got real numbers ──────────────────────────────
-      if (
-        parsed &&
-        parsed.profileFound &&
-        parsed.calories > 0 &&
-        parsed.protein > 0
-      ) {
-        const result = { ...parsed, source: "live" };
-        setMfpData(result);
-        setMfpConnected(true);
-        setMfpLastSync(new Date());
-        setMfpError(null);
-        setMfpManualMode(false);
-        setMfpSyncCount((c) => c + 1);
-        // Auto-push updates to meal plan on every refresh
-        importMFPDay(selectedDay, result);
-        return result;
-      }
-
-      // ── Fallback: use realistic data based on the linked profile ──────────
-      // (MFP requires auth cookies — diary content isn't accessible without login,
-      //  but we maintain the live-link feel with profile-calibrated estimates)
-      const fallback = getRealisticData(username, dayPlan);
-      setMfpData(fallback);
-      setMfpConnected(true);
-      setMfpLastSync(new Date());
-      setMfpManualMode(false);
-      setMfpSyncCount((c) => c + 1);
-      // Show a soft note rather than a hard error
-      setMfpError(
-        parsed?.profileFound === false
-          ? `Diary for ${username} is private or not logged today — showing calibrated estimates.`
-          : null
-      );
-      // Auto-push to meal plan
-      importMFPDay(selectedDay, fallback);
-      return fallback;
-    } catch (err) {
-      // Network/API error — still show calibrated data, don't break the UI
-      const fallback = getRealisticData(username, dayPlan);
-      setMfpData(fallback);
-      setMfpConnected(true);
-      setMfpLastSync(new Date());
-      setMfpManualMode(false);
-      setMfpSyncCount((c) => c + 1);
-      setMfpError(null);
-      importMFPDay(selectedDay, fallback);
-      return fallback;
-    } finally {
-      setMfpSyncing(false);
-    }
-  };
-
-  // ── Submit manually entered data ──────────────────────────────────────────
-  const submitManualMFP = (formData) => {
-    const cals = parseInt(formData.calories) || 0;
-    const exCals = parseInt(formData.exerciseCalories) || 0;
-    const result = {
-      profileFound: true,
-      source: "manual",
-      username: mfpUsername || "manual",
-      calories: cals,
-      protein: parseInt(formData.protein) || 0,
-      carbs: parseInt(formData.carbs) || 0,
-      fat: parseInt(formData.fat) || 0,
-      fibre: parseInt(formData.fibre) || 0,
-      water: parseInt(formData.water) || 0,
-      exerciseCalories: exCals,
-      netCalories: Math.max(0, cals - exCals),
-      weekAdherence: [80, 85, 90, 75, 88, 92, 70],
-      meals: (() => {
-        const provided = (formData.meals || [])
-          .filter((m) => m.name && parseInt(m.calories) > 0)
-          .map((m) => ({
-            name: m.name,
-            calories: parseInt(m.calories) || 0,
-            logged: true,
-          }));
-        if (provided.length > 0) return provided;
-        return [
-          {
-            name: "Breakfast",
-            calories: Math.round(cals * 0.25),
-            logged: cals > 0,
-          },
-          {
-            name: "Lunch",
-            calories: Math.round(cals * 0.35),
-            logged: cals > 0,
-          },
-          {
-            name: "Dinner",
-            calories: Math.round(cals * 0.3),
-            logged: cals > 0,
-          },
-          {
-            name: "Snacks",
-            calories: Math.round(cals * 0.1),
-            logged: cals > 0,
-          },
-        ];
-      })(),
-    };
-    setMfpData(result);
-    setMfpConnected(true);
-    setMfpLastSync(new Date());
-    setMfpManualMode(false);
-    setMfpError(null);
-    setMfpSyncCount((c) => c + 1);
-    importMFPDay(selectedDay, result);
-  };
-
-  // ── Update MFP username → immediately re-fetch (Senpro behaviour) ─────────
-  const handleSetMfpUsername = (newUsername) => {
-    const trimmed = newUsername.trim().toLowerCase();
-    setProfile((prev) => ({ ...prev, mfpUsername: trimmed || null }));
-    setMfpData(null);
-    setMfpConnected(false);
-    setMfpManualMode(false);
-    setMfpError(null);
-    setMfpNextSyncIn(null);
-    if (trimmed) {
-      // Slight delay to let state settle, then fetch immediately
-      setTimeout(() => fetchMFP(trimmed, plan[selectedDay]), 150);
-    }
   };
 
   // Convert MFP diary data into plan food entries for a given day
