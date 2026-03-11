@@ -179,12 +179,6 @@ const DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
 const MEALS = ["Breakfast", "Lunch", "Dinner", "Snack"];
 let macroGoals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
 
-// ── USDA FoodData Central Database (8,200+ foods) ────────────────────────────
-// Fields: n=name, c=calories/100g, p=protein/100g, b=carbs/100g, f=fat/100/* FOOD_DB moved to src/foodDb.js */
-["1 rusk", 10.0],
-    ],
-  },
-];
 
 // Helper: get macros for a food item at a given gram weight
 function scaleMacros(item, grams) {
@@ -9844,12 +9838,9 @@ export default function App() {
 
   // Mirror calendar events state from journal (keeps existing UI working)
   useEffect(() => {
-    if (dayJournal?.calendar && typeof setEvents === "function") {
-      setEvents(dayJournal.calendar);
-    }
+    if (dayJournal?.calendar) setEvents(dayJournal.calendar);
   }, [dayJournal]);
 
-  // Expose setters for date navigation in existing calendar UI
   const setActiveDateISO = (iso) => setJournalDate(iso);
   // ✅ Restore session using /auth/me (keeps login after refresh)
   useEffect(() => {
