@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import FOOD_DB from "./foodDb";
+import { loadJournal, upsertDay, getDay } from "./journalStore";
 
 // ✅ Live backend config + auth helpers
 const API_BASE = import.meta.env.VITE_API_URL || 'https://no-rules-api-production.up.railway.app';
@@ -28,6 +29,32 @@ async function apiFetch(path, options = {}) {
   }
   return data;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Date helpers (ISO YYYY-MM-DD, Monday-start weeks)
+// ─────────────────────────────────────────────────────────────────────────────
+const isoToday = () => new Date().toISOString().slice(0, 10);
+function startOfWeekISO(iso) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  // JS: 0=Sun..6=Sat. We want Monday.
+  const dow = d.getUTCDay();
+  const diff = dow === 0 ? -6 : 1 - dow;
+  d.setUTCDate(d.getUTCDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
+function addDaysISO(iso, days) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+const WEEK_DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
+const dayIndex = (day) => WEEK_DAYS.indexOf(day);
+function weekDatesMap(weekStartISO) {
+  const out = {};
+  WEEK_DAYS.forEach((d, i) => (out[d] = addDaysISO(weekStartISO, i)));
+  return out;
+}
+
 
 
 // ── Google Fonts ──────────────────────────────────────────────────────────────
@@ -85,24 +112,7 @@ function scaleMacros(item, grams) {
 }
 
 // Legacy sample foods for initial plan (kept for seed data)
-const sampleFoods = [
-  {
-    name: "Chicken Breast (200g)",
-    calories: 330,
-    protein: 62,
-    carbs: 0,
-    fat: 7,
-  },
-  { name: "Brown Rice (150g)", calories: 195, protein: 4, carbs: 41, fat: 2 },
-  { name: "Whole Eggs x3", calories: 210, protein: 18, carbs: 2, fat: 15 },
-  { name: "Greek Yogurt (200g)", calories: 140, protein: 20, carbs: 8, fat: 2 },
-  { name: "Banana", calories: 105, protein: 1, carbs: 27, fat: 0 },
-  { name: "Oats (80g)", calories: 300, protein: 11, carbs: 54, fat: 5 },
-  { name: "Almonds (30g)", calories: 170, protein: 6, carbs: 6, fat: 15 },
-  { name: "Salmon (180g)", calories: 374, protein: 40, carbs: 0, fat: 22 },
-  { name: "Sweet Potato (200g)", calories: 172, protein: 4, carbs: 40, fat: 0 },
-  { name: "Whey Protein Shake", calories: 150, protein: 30, carbs: 5, fat: 2 },
-];
+const sampleFoods = [];
 
 const initWeekPlan = () => {
   const plan = {};
@@ -9716,6 +9726,13 @@ export default function App() {
     })();
   }, [profile?.id]);
 
+  // ✅ Load local journal cache for this athlete
+  useEffect(() => {
+    if (!profile?.id) return;
+    setJournal(loadJournal(profile.id));
+  }, [profile?.id]);
+
+
   // ✅ Pull coach-set calendar events from backend
   useEffect(() => {
     if (!profile?.id) return;
@@ -9757,6 +9774,133 @@ export default function App() {
           carbs: a.carbs + Number(r.carbs_g || 0),
           fat: a.fat + Number(r.fat_g || 0),
         }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+
+  // Local-first persist for the currently selected date
+  const persistDay = (patch) => {
+    if (!profile?.id) return null;
+    const updated = upsertDay(profile.id, selectedDateISO, patch);
+    setJournal((prev) => ({ ...prev, [selectedDateISO]: updated }));
+    return updated;
+  };
+
+  const dayRecord = useMemo(() => {
+    if (!profile?.id) {
+      return { date: selectedDateISO, foods: [], totals: { calories: 0, protein: 0, carbs: 0, fat: 0 }, weight: null, mood: null, calendar: [], notes: "" };
+    }
+    // Prefer local cache; backend sync runs separately
+    return journal?.[selectedDateISO] || getDay(profile.id, selectedDateISO);
+  }, [profile?.id, selectedDateISO, journal]);
+
+  // ✅ Pull week data from backend (targets, totals, weight, mood, foods, calendar)
+  useEffect(() => {
+    if (!profile?.id) return;
+    const start = weekStart;
+    const end = addDaysISO(weekStart, 6);
+    let ignore = false;
+
+    (async () => {
+      try {
+        // Targets (coach plan / overrides)
+        const targets = await apiFetch(`/macro-targets/${profile.id}?start=${start}&end=${end}`);
+        // Totals consumed
+        const totalsRows = await apiFetch(`/daily-totals/${profile.id}?start=${start}&end=${end}`);
+        // Foods list
+        const foodRows = await apiFetch(`/food-logs/${profile.id}?start=${start}&end=${end}`).catch(() => []);
+        // Calendar events
+        const calRows = await apiFetch(`/calendar-events/${profile.id}?start=${start}&end=${end}`).catch(() => []);
+        // Weight & mood (full list - lightweight)
+        const weights = await apiFetch(`/weights/${profile.id}`).catch(() => []);
+        const moods = await apiFetch(`/moods/${profile.id}`).catch(() => []);
+
+        if (ignore) return;
+
+        // Merge into local journal cache so UI can render instantly
+        const merged = { ...(loadJournal(profile.id) || {}) };
+
+        // map targets by date
+        const targetMap = {};
+        (targets || []).forEach((t) => (targetMap[t.date] = t));
+
+        // map totals by date
+        const totalsMap = {};
+        (totalsRows || []).forEach((r) => {
+          totalsMap[r.date] = {
+            calories: Number(r.calories || 0),
+            protein: Number(r.protein_g || 0),
+            carbs: Number(r.carbs_g || 0),
+            fat: Number(r.fat_g || 0),
+          };
+        });
+
+        // foods by date
+        const foodsMap = {};
+        (foodRows || []).forEach((r) => (foodsMap[r.date] = Array.isArray(r.foods) ? r.foods : []));
+
+        // calendar by date
+        const calMap = {};
+        (calRows || []).forEach((e) => {
+          const d = e.date;
+          calMap[d] = calMap[d] || [];
+          calMap[d].push({
+            id: e.id,
+            title: e.title,
+            startISO: e.startISO,
+            endISO: e.endISO,
+            notes: e.notes,
+          });
+        });
+
+        // weight by date (keep last per date)
+        const wMap = {};
+        (weights || []).forEach((w) => {
+          if (!w?.date) return;
+          wMap[w.date] = { kg: Number(w.kg || 0) };
+        });
+
+        // mood by date
+        const mMap = {};
+        (moods || []).forEach((m) => {
+          if (!m?.date) return;
+          mMap[m.date] = {
+            id: Number(m.mood_id || 0),
+            emoji: m.emoji,
+            label: m.label,
+            color: m.color,
+            note: m.note,
+          };
+        });
+
+        // update each date in the week
+        for (let i = 0; i < 7; i++) {
+          const dateISO = addDaysISO(start, i);
+          const prev = merged[dateISO] || { date: dateISO, foods: [], totals: { calories: 0, protein: 0, carbs: 0, fat: 0 }, weight: null, mood: null, calendar: [], notes: "" };
+          merged[dateISO] = {
+            ...prev,
+            date: dateISO,
+            // store targets under notes/meta if you want; UI can also keep a separate state
+            totals: totalsMap[dateISO] || prev.totals,
+            foods: foodsMap[dateISO] || prev.foods,
+            calendar: calMap[dateISO] || prev.calendar,
+            weight: wMap[dateISO] || prev.weight,
+            mood: mMap[dateISO] || prev.mood,
+            _targets: targetMap[dateISO] || prev._targets,
+          };
+        }
+
+        setJournal(merged);
+        // persist merged cache so refresh is instant
+        localStorage.setItem(`nrn_journal_${profile.id}`, JSON.stringify(merged));
+      } catch (e) {
+        // keep local cache
+      }
+    })();
+
+    return () => {
+      ignore = true;
+    };
+  }, [profile?.id, weekStart]);
+
+
         const n = Math.max(1, vals.length);
         const avg = {
           calories: Math.round(sum.calories / n),
@@ -9776,6 +9920,42 @@ export default function App() {
 
   // ── Realistic seed data for gerardqueen (used as base when live parse fails) ──
   const getRealisticData = () => null; // dummy data disabled
+
+    base.netCalories = Math.max(0, base.calories - base.exerciseCalories);
+    const mealCals = base.calories;
+    return {
+      ...base,
+      profileFound: true,
+      source: "live",
+      username,
+      meals: [
+        {
+          name: "Breakfast",
+          calories: Math.round(mealCals * 0.24),
+          logged: true,
+        },
+        {
+          name: "Morning Snack",
+          calories: Math.round(mealCals * 0.09),
+          logged: true,
+        },
+        { name: "Lunch", calories: Math.round(mealCals * 0.33), logged: true },
+        {
+          name: "Afternoon Snack",
+          calories: Math.round(mealCals * 0.08),
+          logged: mealCals > 2000,
+        },
+        {
+          name: "Dinner",
+          calories: Math.round(mealCals * 0.26),
+          logged: mealCals > 1500,
+        },
+      ],
+      weekAdherence: [88, 94, 76, 100, 82, 91, 78].map((v) =>
+        Math.min(100, Math.max(0, v + jitter()))
+      ),
+    };
+  };
 
   // ── Live fetch via Anthropic API with web_fetch tool ──────────────────────
   const fetchMFP = async (username, dayPlan, isAutoRefresh = false) => {
