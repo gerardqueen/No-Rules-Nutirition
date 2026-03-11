@@ -9777,42 +9777,6 @@ export default function App() {
   // ── Realistic seed data for gerardqueen (used as base when live parse fails) ──
   const getRealisticData = () => null; // dummy data disabled
 
-    base.netCalories = Math.max(0, base.calories - base.exerciseCalories);
-    const mealCals = base.calories;
-    return {
-      ...base,
-      profileFound: true,
-      source: "live",
-      username,
-      meals: [
-        {
-          name: "Breakfast",
-          calories: Math.round(mealCals * 0.24),
-          logged: true,
-        },
-        {
-          name: "Morning Snack",
-          calories: Math.round(mealCals * 0.09),
-          logged: true,
-        },
-        { name: "Lunch", calories: Math.round(mealCals * 0.33), logged: true },
-        {
-          name: "Afternoon Snack",
-          calories: Math.round(mealCals * 0.08),
-          logged: mealCals > 2000,
-        },
-        {
-          name: "Dinner",
-          calories: Math.round(mealCals * 0.26),
-          logged: mealCals > 1500,
-        },
-      ],
-      weekAdherence: [88, 94, 76, 100, 82, 91, 78].map((v) =>
-        Math.min(100, Math.max(0, v + jitter()))
-      ),
-    };
-  };
-
   // ── Live fetch via Anthropic API with web_fetch tool ──────────────────────
   const fetchMFP = async (username, dayPlan, isAutoRefresh = false) => {
     if (!username) return;
@@ -10008,7 +9972,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
     } finally {
       setMfpSyncing(false);
     }
-  };
+   ;
 
   // ── Submit manually entered data ──────────────────────────────────────────
   const submitManualMFP = (formData) => {
