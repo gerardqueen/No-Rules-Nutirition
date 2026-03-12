@@ -9776,32 +9776,38 @@ export default function App() {
   const mfpUsername = profile?.mfpUsername || null;
 
   // ✅ Load macro plan from backend so coach updates show in the client
+  // Polls every 30s so coach changes appear live
+  const fetchMacroGoals = async () => {
+    if (!profile?.id) return;
+    try {
+      const rows = await apiFetch(`/macro-plans/${profile.id}`);
+      const vals = (rows || []).filter(Boolean);
+      if (!vals.length) return;
+      const sum = vals.reduce((a, r) => ({
+        calories: a.calories + Number(r.calories || 0),
+        protein: a.protein + Number(r.protein_g || 0),
+        carbs: a.carbs + Number(r.carbs_g || 0),
+        fat: a.fat + Number(r.fat_g || 0),
+      }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+      const n = Math.max(1, vals.length);
+      const avg = {
+        calories: Math.round(sum.calories / n),
+        protein: Math.round(sum.protein / n),
+        carbs: Math.round(sum.carbs / n),
+        fat: Math.round(sum.fat / n),
+      };
+      macroGoals = avg;
+      setMacroGoalsState(avg);
+    } catch {
+      // keep current values
+    }
+  };
+
   useEffect(() => {
     if (!profile?.id) return;
-    (async () => {
-      try {
-        const rows = await apiFetch(`/macro-plans/${profile.id}`);
-        const vals = (rows || []).filter(Boolean);
-        if (!vals.length) return;
-        const sum = vals.reduce((a, r) => ({
-          calories: a.calories + Number(r.calories || 0),
-          protein: a.protein + Number(r.protein_g || 0),
-          carbs: a.carbs + Number(r.carbs_g || 0),
-          fat: a.fat + Number(r.fat_g || 0),
-        }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
-        const n = Math.max(1, vals.length);
-        const avg = {
-          calories: Math.round(sum.calories / n),
-          protein: Math.round(sum.protein / n),
-          carbs: Math.round(sum.carbs / n),
-          fat: Math.round(sum.fat / n),
-        };
-        macroGoals = avg;
-        setMacroGoalsState(avg);
-      } catch {
-        // keep defaults
-      }
-    })();
+    fetchMacroGoals(); // initial load
+    const interval = setInterval(fetchMacroGoals, 30 * 1000); // poll every 30s
+    return () => clearInterval(interval);
   }, [profile?.id]);
 
   const SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 min — matches Senpro cadence
