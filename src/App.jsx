@@ -94,9 +94,9 @@ function scaleMacros(item, grams) {
   return {
     name: item.n + (grams !== 100 ? ` (${grams}g)` : " (100g)"),
     calories: Math.round(item.c * r),
-    protein: Math.round(item.p * r * 10) / 10,
-    carbs: Math.round(item.b * r * 10) / 10,
-    fat: Math.round(item.f * r * 10) / 10,
+    protein: Math.round(item.p * r),
+    carbs: Math.round(item.b * r),
+    fat: Math.round(item.f * r),
   };
 }
 
@@ -122,7 +122,15 @@ const sumMacros = (foods) =>
     }),
     { calories: 0, protein: 0, carbs: 0, fat: 0 }
   );
-const dayTotals = (dayPlan) => sumMacros(Object.values(dayPlan).flat());
+const dayTotals = (dayPlan) => {
+  const raw = sumMacros(Object.values(dayPlan).flat());
+  return {
+    calories: Math.round(raw.calories),
+    protein: Math.round(raw.protein),
+    carbs: Math.round(raw.carbs),
+    fat: Math.round(raw.fat),
+  };
+};
 
 // ── Login Screen ──────────────────────────────────────────────────────────────
 function LoginScreen({ onLoggedIn }) {
@@ -10285,14 +10293,21 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
     return () => clearInterval(interval);
   }, [profile?.id]);
 
-  // ── Auto-save food logs to backend when plan changes ────────────────────────
-  // Uses useEffect so it always sees the COMMITTED React state after re-render.
-  const lastSavedPlanJSON = useRef('');
+  // ── Auto-save food logs + daily totals when plan changes ────────────────────
+  // Fires after React commits the new plan state. 1s debounce, no caching.
+  // Server uses upsert so redundant saves are harmless.
+  const saveTimerRef = useRef(null);
   useEffect(() => {
     if (!profile?.id) return;
-    // Debounce saves by 1.5s
-    const timer = setTimeout(() => {
-      // Save every day that has at least 1 food item
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      let hasFoods = false;
+      DAYS.forEach(dayKey => {
+        const dayPlan = plan[dayKey];
+        if (!dayPlan) return;
+        MEALS.forEach(meal => { if ((dayPlan[meal] || []).length > 0) hasFoods = true; });
+      });
+      if (!hasFoods) return; // Don't save empty initial state
       DAYS.forEach(dayKey => {
         const dayPlan = plan[dayKey];
         if (!dayPlan) return;
@@ -10303,45 +10318,37 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
           (dayPlan[meal] || []).forEach(f => {
             foods.push({
               name: f.name || '',
-              calories: f.calories || 0,
-              protein_g: f.protein || 0,
-              carbs_g: f.carbs || 0,
-              fat_g: f.fat || 0,
+              calories: Math.round(f.calories || 0),
+              protein_g: Math.round(f.protein || 0),
+              carbs_g: Math.round(f.carbs || 0),
+              fat_g: Math.round(f.fat || 0),
               meal: meal,
               source: f.source || 'manual',
             });
           });
         });
-        // Only save days that have food
         if (foods.length === 0) return;
-        // Check if this day actually changed (avoid redundant saves)
-        const dayJSON = JSON.stringify(foods);
-        const cacheKey = `${dayKey}_${dateStr}`;
-        if (lastSavedPlanJSON.current[cacheKey] === dayJSON) return;
-
+        // Save food items
         apiFetch(`/food-logs/${profile.id}`, {
           method: 'PUT',
           body: JSON.stringify({ date: dateStr, foods }),
-        }).then(() => {
-          lastSavedPlanJSON.current = { ...lastSavedPlanJSON.current, [cacheKey]: dayJSON };
-        }).catch(e => console.warn('Food log save failed:', e));
-
-        // Also save daily totals
+        }).catch(e => console.warn('Food log save:', e.message));
+        // Save daily totals
         const tot = dayTotals(dayPlan);
         apiFetch(`/daily-totals/${profile.id}`, {
           method: 'POST',
           body: JSON.stringify({
             date: dateStr,
-            calories: tot.calories,
-            protein_g: tot.protein,
-            carbs_g: tot.carbs,
-            fat_g: tot.fat,
+            calories: Math.round(tot.calories),
+            protein_g: Math.round(tot.protein),
+            carbs_g: Math.round(tot.carbs),
+            fat_g: Math.round(tot.fat),
             source: 'manual',
           }),
-        }).catch(e => console.warn('Daily totals save failed:', e));
+        }).catch(e => console.warn('Daily totals save:', e.message));
       });
-    }, 1500);
-    return () => clearTimeout(timer);
+    }, 1000);
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [plan, profile?.id]);
 
   if (!tokenState || !profile)
