@@ -8973,125 +8973,6 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
 /* ─────────────────────────────────────────────────────────────────────────────
    Real Coach Messages — loads from backend, polls every 10s
 ────────────────────────────────────────────────────────────────────────────── */
-function RealCoachMessages({ profileId }) {
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
-  const [coachId, setCoachId] = useState(null);
-  const [errCount, setErrCount] = useState(0);
-  const bottomRef = useRef(null);
-
-  // Find the coach by looking at profile's coachId
-  useEffect(() => {
-    if (!profileId) return;
-    (async () => {
-      try {
-        const me = await apiFetch('/auth/me');
-        if (me?.coachId) setCoachId(me.coachId);
-      } catch {}
-    })();
-  }, [profileId]);
-
-  const loadMessages = async () => {
-    if (!coachId) return;
-    try {
-      const msgs = await apiFetch(`/messages/${coachId}`);
-      if (Array.isArray(msgs)) { setMessages(msgs); setErrCount(0); }
-    } catch { setErrCount(c => c + 1); }
-  };
-
-  useEffect(() => { if (coachId) loadMessages(); }, [coachId]);
-  useEffect(() => {
-    if (!coachId || errCount > 3) return; // stop polling after 3 consecutive errors
-    const interval = setInterval(loadMessages, 15 * 1000);
-    return () => clearInterval(interval);
-  }, [coachId, errCount]);
-
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
-
-  const send = async () => {
-    if (!input.trim() || !coachId || sending) return;
-    setSending(true);
-    try {
-      const msg = await apiFetch(`/messages/${coachId}`, {
-        method: 'POST',
-        body: JSON.stringify({ content: input.trim() }),
-      });
-      setMessages(prev => [...prev, msg]);
-      setInput("");
-    } catch (e) { console.warn('Send failed:', e); }
-    setSending(false);
-  };
-
-  if (!coachId) return (
-    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
-      <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted }}>No coach assigned yet. Messages will appear here once your coach is linked.</div>
-    </div>
-  );
-
-  return (
-    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, overflow: "hidden", marginBottom: 16 }}>
-      <div style={{ padding: "14px 18px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <div style={{ fontFamily: "Bebas Neue", fontSize: 18, letterSpacing: 2, color: T.text }}>COACH MESSAGES</div>
-          <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>Direct messages from your coach · Auto-refreshes</div>
-        </div>
-        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          <div style={{ width: 6, height: 6, borderRadius: "50%", background: T.coachGreen, animation: "pulse 2s infinite" }} />
-          <span style={{ fontFamily: "DM Sans", fontSize: 10, color: T.coachGreen }}>LIVE</span>
-        </div>
-      </div>
-
-      {/* Messages */}
-      <div style={{ maxHeight: 340, overflowY: "auto", padding: "12px 18px" }}>
-        {messages.length === 0 ? (
-          <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, padding: "20px 0", textAlign: "center" }}>
-            No messages yet. Say hello to your coach!
-          </div>
-        ) : messages.map((m) => {
-          const isMe = m.fromId === profileId;
-          return (
-            <div key={m.id} style={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start", marginBottom: 8 }}>
-              <div style={{
-                maxWidth: "75%", padding: "10px 14px", borderRadius: 14,
-                background: isMe ? T.accent : T.surface,
-                color: isMe ? T.bg : T.text,
-                borderBottomRightRadius: isMe ? 4 : 14,
-                borderBottomLeftRadius: isMe ? 14 : 4,
-              }}>
-                <div style={{ fontFamily: "DM Sans", fontSize: 12, lineHeight: 1.4 }}>{m.content}</div>
-                <div style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: isMe ? `${T.bg}88` : T.muted, marginTop: 4, textAlign: "right" }}>
-                  {new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Input */}
-      <div style={{ padding: "10px 18px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 8 }}>
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
-          placeholder="Type a message…"
-          style={{
-            flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10,
-            padding: "10px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 12, outline: "none",
-          }}
-        />
-        <button onClick={send} disabled={sending || !input.trim()} style={{
-          background: input.trim() ? T.accent : T.border, color: input.trim() ? T.bg : T.muted,
-          border: "none", borderRadius: 10, padding: "10px 16px",
-          fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1.5, cursor: input.trim() ? "pointer" : "default",
-        }} type="button">{sending ? "…" : "SEND"}</button>
-      </div>
-    </div>
-  );
-}
-
 function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
   const [activeId, setActiveId] = useState(null);
   const [chatMsgs, setChatMsgs] = useState({}); // keyed by senderId
@@ -9099,23 +8980,68 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef(null);
 
-  const tot = dayTotals(plan[selectedDay]);
-  const totalUnread = threads.reduce(
-    (n, t) => n + t.messages.filter((m) => !m.read).length,
-    0
-  );
+  // ── Real coach messages state ──────────────────────────────────────────────
+  const [coachId, setCoachId] = useState(null);
+  const [coachName, setCoachName] = useState("My Coach");
+  const [realMsgs, setRealMsgs] = useState([]);
+  const [realErrCount, setRealErrCount] = useState(0);
 
+  // Discover coachId
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatMsgs, activeId]);
+    if (!profile?.id) return;
+    (async () => {
+      try {
+        const me = await apiFetch('/auth/me');
+        if (me?.coachId) setCoachId(me.coachId);
+      } catch {}
+    })();
+  }, [profile?.id]);
 
-  const activeThread = activeId
-    ? threads.find((t) => t.senderId === activeId)
-    : null;
+  // Load + poll real messages
+  const loadReal = async () => {
+    if (!coachId) return;
+    try {
+      const msgs = await apiFetch(`/messages/${coachId}`);
+      if (Array.isArray(msgs)) { setRealMsgs(msgs); setRealErrCount(0); }
+    } catch { setRealErrCount(c => c + 1); }
+  };
+  useEffect(() => { if (coachId) loadReal(); }, [coachId]);
+  useEffect(() => {
+    if (!coachId || realErrCount > 3) return;
+    const interval = setInterval(loadReal, 12 * 1000);
+    return () => clearInterval(interval);
+  }, [coachId, realErrCount]);
+
+  const sendReal = async () => {
+    if (!input.trim() || !coachId || loading) return;
+    setLoading(true);
+    try {
+      const msg = await apiFetch(`/messages/${coachId}`, {
+        method: 'POST', body: JSON.stringify({ content: input.trim() }),
+      });
+      setRealMsgs(prev => [...prev, msg]);
+      setInput("");
+    } catch (e) { console.warn('Send failed:', e); }
+    setLoading(false);
+  };
+
+  // ── AI coach threads ───────────────────────────────────────────────────────
+  const tot = dayTotals(plan[selectedDay]);
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMsgs, activeId, realMsgs]);
+
+  const activeThread = activeId && activeId !== "real-coach"
+    ? threads.find((t) => t.senderId === activeId) : null;
   const coachCfg = activeId ? COACHES_CONFIG[activeId] : null;
+  const isRealCoach = activeId === "real-coach";
+
+  const realUnread = realMsgs.filter(m => m.fromId !== profile?.id && !m.read).length;
+  const totalUnread = threads.reduce((n, t) => n + t.messages.filter((m) => !m.read).length, 0) + realUnread;
 
   const openThread = (id) => {
     setActiveId(id);
+    setInput("");
+    if (id === "real-coach") return; // real coach thread — no AI init needed
     setThreads((prev) =>
       prev.map((t) =>
         t.senderId === id
@@ -9123,13 +9049,12 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
           : t
       )
     );
-    // Init chat for coach threads
     if (COACHES_CONFIG[id] && !chatMsgs[id]) {
       const cfg = COACHES_CONFIG[id];
       const firstName = profile.name.split(" ")[0];
       let greeting = "";
       if (id === "coach-sarah") {
-        const calPct = Math.round((tot.calories / macroGoals.calories) * 100);
+        const calPct = macroGoals.calories > 0 ? Math.round((tot.calories / macroGoals.calories) * 100) : 0;
         greeting = `Hey ${firstName}! 👋 I can see your macros for ${selectedDay} — you're at ${calPct}% of your calorie goal. How are you feeling today?`;
       } else if (id === "coach-james") {
         greeting = `Hey ${firstName}! 💪 Ready to talk training? What's on the programme today?`;
@@ -9138,706 +9063,209 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
       }
       setChatMsgs((prev) => ({
         ...prev,
-        [id]: [
-          {
-            role: "assistant",
-            content: greeting,
-            time: new Date().toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
-          },
-        ],
+        [id]: [{ role: "assistant", content: greeting, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }],
       }));
     }
   };
 
-  const sendMessage = async () => {
+  const sendAIMessage = async () => {
     if (!input.trim() || loading || !coachCfg) return;
     const senderId = activeId;
-    const userMsg = {
-      role: "user",
-      content: input.trim(),
-      time: new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-    };
+    const userMsg = { role: "user", content: input.trim(), time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
     const current = chatMsgs[senderId] || [];
     const updated = [...current, userMsg];
     setChatMsgs((prev) => ({ ...prev, [senderId]: updated }));
     setInput("");
     setLoading(true);
-    const sysPrompt =
-      senderId === "coach-sarah"
-        ? coachCfg.systemPrompt(profile, tot, macroGoals)
-        : coachCfg.systemPrompt(profile);
+    const sysPrompt = senderId === "coach-sarah" ? coachCfg.systemPrompt(profile, tot, macroGoals) : coachCfg.systemPrompt(profile);
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 350,
-          system: sysPrompt,
-          messages: updated.map((m) => ({ role: m.role, content: m.content })),
-        }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 350, system: sysPrompt, messages: updated.map((m) => ({ role: m.role, content: m.content })) }),
       });
       const data = await res.json().catch(() => ({}));
-      const reply =
-        data.content?.map((b) => b.text || "").join("") ||
-        "Sorry, missed that!";
-      setChatMsgs((prev) => ({
-        ...prev,
-        [senderId]: [
-          ...(prev[senderId] || []),
-          {
-            role: "assistant",
-            content: reply,
-            time: new Date().toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
-          },
-        ],
-      }));
+      const reply = data.content?.map((b) => b.text || "").join("") || "Sorry, missed that!";
+      setChatMsgs((prev) => ({ ...prev, [senderId]: [...(prev[senderId] || []), { role: "assistant", content: reply, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }] }));
     } catch {
-      setChatMsgs((prev) => ({
-        ...prev,
-        [senderId]: [
-          ...(prev[senderId] || []),
-          {
-            role: "assistant",
-            content: "Connection issue. Try again.",
-            time: "--:--",
-          },
-        ],
-      }));
+      setChatMsgs((prev) => ({ ...prev, [senderId]: [...(prev[senderId] || []), { role: "assistant", content: "Connection issue. Try again.", time: "--:--" }] }));
     }
     setLoading(false);
   };
 
-  const acColor = (t) => {
-    if (!t) return T.muted;
-    if (t.senderId === "coach-sarah") return T.coachGreen;
-    if (t.senderId === "coach-james") return "#3b82f6";
-    if (t.senderId === "coach-emma") return "#a855f7";
-    return T.accent;
+  const handleSend = () => {
+    if (isRealCoach) sendReal();
+    else sendAIMessage();
   };
 
+  // ── Build thread list: real coach first, then AI coaches ───────────────────
+  const allThreads = [];
+  if (coachId) {
+    const lastReal = realMsgs[realMsgs.length - 1];
+    allThreads.push({
+      id: "real-coach",
+      name: coachName || "My Coach",
+      role: "Your Coach",
+      initials: "🏋️",
+      color: T.coachGreen,
+      isReal: true,
+      lastMsg: lastReal?.content || "Start a conversation…",
+      lastTime: lastReal?.created_at ? new Date(lastReal.created_at) : null,
+      unread: realUnread,
+    });
+  }
+  threads.forEach((t) => {
+    const cfg = COACHES_CONFIG[t.senderId];
+    const msgs = [...t.messages].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    const latest = msgs[0];
+    allThreads.push({
+      id: t.senderId,
+      name: cfg?.name || t.senderName,
+      role: cfg?.role || "AI Coach",
+      initials: cfg?.initials || "?",
+      color: cfg?.color || T.accent,
+      isReal: false,
+      lastMsg: latest?.body || latest?.title || "New conversation",
+      lastTime: latest?.timestamp ? new Date(latest.timestamp) : null,
+      unread: t.messages.filter((m) => !m.read).length,
+    });
+  });
+
+  // ── Active chat messages ──────────────────────────────────────────────────
+  const activeChatMessages = isRealCoach
+    ? realMsgs.map(m => ({ role: m.fromId === profile?.id ? "user" : "assistant", content: m.content, time: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "" }))
+    : (chatMsgs[activeId] || []);
+
+  const activeInfo = allThreads.find(t => t.id === activeId);
+
   return (
-    <div
-      style={{
-        display: "flex",
-        height: "calc(100vh - 170px)",
-        gap: 0,
-        background: T.bg,
-        borderRadius: 20,
-        overflow: "hidden",
-        border: `1px solid ${T.border}`,
-      }}
-    >
+    <div style={{ display: "flex", height: "calc(100vh - 170px)", gap: 0, background: T.bg, borderRadius: 20, overflow: "hidden", border: `1px solid ${T.border}` }}>
       {/* ── LEFT SIDEBAR ── */}
-      <div
-        style={{
-          width: 320,
-          flexShrink: 0,
-          borderRight: `1px solid ${T.border}`,
-          display: "flex",
-          flexDirection: "column",
-          background: T.card,
-        }}
-      >
-        {/* Sidebar header */}
-        <div
-          style={{
-            padding: "18px 20px 14px",
-            borderBottom: `1px solid ${T.border}`,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <div
-              style={{
-                fontFamily: "Bebas Neue",
-                fontSize: 20,
-                letterSpacing: 2,
-                color: T.text,
-              }}
-            >
-              INBOX
-              {totalUnread > 0 && (
-                <span
-                  style={{
-                    marginLeft: 8,
-                    background: `${T.danger}22`,
-                    border: `1px solid ${T.danger}55`,
-                    borderRadius: 20,
-                    padding: "1px 8px",
-                    fontFamily: "DM Sans",
-                    fontSize: 10,
-                    color: T.danger,
-                    fontWeight: 600,
-                    letterSpacing: 0,
-                  }}
-                >
-                  {totalUnread} new
-                </span>
-              )}
-            </div>
+      <div style={{ width: 320, flexShrink: 0, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", background: T.card }}>
+        <div style={{ padding: "16px 18px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontFamily: "Bebas Neue", fontSize: 18, letterSpacing: 2, color: T.text }}>INBOX</div>
+            <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>{allThreads.length} conversation{allThreads.length !== 1 ? "s" : ""}</div>
           </div>
-          <div
-            style={{
-              fontFamily: "DM Sans",
-              fontSize: 11,
-              color: T.muted,
-              marginTop: 3,
-            }}
-          >
-            Your coaching team & platform updates
-          </div>
+          {totalUnread > 0 && (
+            <div style={{ background: T.danger, borderRadius: 10, padding: "2px 8px", fontFamily: "JetBrains Mono", fontSize: 10, color: "#fff", fontWeight: 700 }}>{totalUnread}</div>
+          )}
         </div>
 
-        {/* Thread list */}
-        <div style={{ flex: 1, overflowY: "auto" }}>
-          {threads.map((thread, idx) => {
-            const isCoach = thread.type === "coach";
-            const col = acColor(thread);
-            const sorted = [...thread.messages].sort(
-              (a, b) => new Date(b.timestamp) - new Date(a.timestamp)
-            );
-            const latest = sorted[0];
-            const unreadCt = thread.messages.filter((m) => !m.read).length;
-            const isActive = activeId === thread.senderId;
-            const cfg = COACHES_CONFIG[thread.senderId];
+        <div style={{ overflowY: "auto", flex: 1 }}>
+          {allThreads.map((t, idx) => {
+            const isActive = activeId === t.id;
             return (
-              <div
-                key={thread.senderId}
-                onClick={() => openThread(thread.senderId)}
-                style={{
-                  padding: "14px 20px",
-                  borderBottom: `1px solid ${T.border}`,
-                  background: isActive
-                    ? `${col}18`
-                    : unreadCt > 0
-                    ? `${col}08`
-                    : "transparent",
-                  cursor: "pointer",
-                  transition: "background 0.15s",
-                  position: "relative",
-                  display: "flex",
-                  gap: 12,
-                  alignItems: "center",
-                  borderLeft: isActive
-                    ? `3px solid ${col}`
-                    : "3px solid transparent",
-                }}
-                onMouseEnter={(e) => {
-                  if (!isActive) e.currentTarget.style.background = T.surface;
-                }}
-                onMouseLeave={(e) => {
-                  if (!isActive)
-                    e.currentTarget.style.background =
-                      unreadCt > 0 ? `${col}08` : "transparent";
-                }}
+              <div key={t.id} onClick={() => openThread(t.id)} style={{
+                padding: "14px 18px", borderBottom: idx < allThreads.length - 1 ? `1px solid ${T.border}` : "none",
+                background: isActive ? T.surface : t.unread > 0 ? `${t.color}08` : "transparent",
+                cursor: "pointer", transition: "background 0.15s", position: "relative", display: "flex", gap: 12, alignItems: "center",
+              }}
+                onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = T.surface; }}
+                onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = t.unread > 0 ? `${t.color}08` : "transparent"; }}
               >
+                {t.unread > 0 && <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: t.color, borderRadius: "4px 0 0 4px" }} />}
                 {/* Avatar */}
-                <div
-                  style={{
-                    width: 42,
-                    height: 42,
-                    borderRadius: 12,
-                    flexShrink: 0,
-                    position: "relative",
-                    background: `linear-gradient(135deg, ${col}99, ${col}55)`,
-                    border: `2px solid ${col}55`,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontFamily: "Bebas Neue",
-                      fontSize: 14,
-                      color: "#fff",
-                      letterSpacing: 0.5,
-                    }}
-                  >
-                    {thread.avatar}
-                  </span>
-                  {unreadCt > 0 && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        bottom: -3,
-                        right: -3,
-                        width: 14,
-                        height: 14,
-                        background: T.danger,
-                        borderRadius: "50%",
-                        border: `2px solid ${T.card}`,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontFamily: "JetBrains Mono",
-                          fontSize: 7,
-                          color: "#fff",
-                          fontWeight: 700,
-                        }}
-                      >
-                        {unreadCt}
+                <div style={{ width: 40, height: 40, borderRadius: "50%", background: `${t.color}22`, border: `2px solid ${t.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: t.isReal ? 18 : 14, fontFamily: "Bebas Neue", color: t.color, flexShrink: 0 }}>
+                  {t.isReal ? t.initials : t.initials}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontFamily: "DM Sans", fontSize: 13, fontWeight: t.unread > 0 ? 700 : 500, color: T.text }}>{t.name}</span>
+                      <span style={{ background: `${t.color}18`, border: `1px solid ${t.color}33`, borderRadius: 4, padding: "1px 6px", fontFamily: "DM Sans", fontSize: 8, fontWeight: 600, color: t.color }}>
+                        {t.isReal ? "Coach" : "AI"}
                       </span>
                     </div>
-                  )}
-                </div>
-
-                {/* Preview */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      marginBottom: 2,
-                      alignItems: "center",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontFamily: "DM Sans",
-                        fontSize: 13,
-                        fontWeight: unreadCt > 0 ? 700 : 500,
-                        color: T.text,
-                      }}
-                    >
-                      {thread.senderName}
-                    </span>
-                    <span
-                      style={{
-                        fontFamily: "JetBrains Mono",
-                        fontSize: 9,
-                        color: T.muted,
-                      }}
-                    >
-                      {timeAgo(latest.timestamp)}
-                    </span>
+                    {t.lastTime && <span style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: T.muted }}>{timeAgo(t.lastTime.toISOString())}</span>}
                   </div>
-                  <div
-                    style={{
-                      fontFamily: "DM Sans",
-                      fontSize: 10,
-                      color: col,
-                      marginBottom: 2,
-                      fontWeight: 600,
-                      letterSpacing: 0.2,
-                    }}
-                  >
-                    {isCoach ? cfg?.role || "Coach" : "Platform Updates"}
-                  </div>
-                  <div
-                    style={{
-                      fontFamily: "DM Sans",
-                      fontSize: 11,
-                      color: unreadCt > 0 ? T.text : T.muted,
-                      fontWeight: unreadCt > 0 ? 600 : 400,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {latest.title}
+                  <div style={{ fontFamily: "DM Sans", fontSize: 11, color: t.unread > 0 ? T.text : T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {t.lastMsg}
                   </div>
                 </div>
+                {t.unread > 0 && (
+                  <div style={{ background: t.color, borderRadius: "50%", width: 18, height: 18, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <span style={{ fontFamily: "JetBrains Mono", fontSize: 9, color: "#fff", fontWeight: 700 }}>{t.unread}</span>
+                  </div>
+                )}
               </div>
             );
           })}
+          {allThreads.length === 0 && (
+            <div style={{ padding: 24, textAlign: "center", color: T.muted, fontFamily: "DM Sans", fontSize: 12 }}>
+              No conversations yet
+            </div>
+          )}
         </div>
       </div>
 
-      {/* ── RIGHT PANEL ── */}
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-        }}
-      >
-        {/* No thread selected */}
-        {!activeThread && (
-          <div
-            style={{
-              flex: 1,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexDirection: "column",
-              gap: 16,
-              color: T.muted,
-            }}
-          >
-            <div style={{ fontSize: 48 }}>📬</div>
-            <div
-              style={{
-                fontFamily: "Bebas Neue",
-                fontSize: 22,
-                letterSpacing: 2,
-              }}
-            >
-              SELECT A CONVERSATION
-            </div>
-            <div style={{ fontFamily: "DM Sans", fontSize: 12 }}>
-              Choose a thread from your inbox to read messages or chat with your
-              coaching team
-            </div>
+      {/* ── RIGHT CHAT PANEL ── */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", background: T.bg }}>
+        {!activeId ? (
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontSize: 40, opacity: 0.3 }}>💬</div>
+            <div style={{ fontFamily: "DM Sans", fontSize: 14, color: T.muted }}>Select a conversation</div>
           </div>
+        ) : (
+          <>
+            {/* Chat header */}
+            <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 36, height: 36, borderRadius: "50%", background: `${activeInfo?.color || T.accent}22`, border: `2px solid ${activeInfo?.color || T.accent}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: activeInfo?.isReal ? 16 : 12, fontFamily: "Bebas Neue", color: activeInfo?.color || T.accent }}>
+                {activeInfo?.isReal ? activeInfo.initials : activeInfo?.initials}
+              </div>
+              <div>
+                <div style={{ fontFamily: "DM Sans", fontSize: 14, fontWeight: 700, color: T.text }}>{activeInfo?.name}</div>
+                <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>{activeInfo?.role}{activeInfo?.isReal ? " · Live" : " · AI Assistant"}</div>
+              </div>
+              {activeInfo?.isReal && (
+                <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: T.coachGreen, animation: "pulse 2s infinite" }} />
+                  <span style={{ fontFamily: "DM Sans", fontSize: 9, color: T.coachGreen }}>LIVE</span>
+                </div>
+              )}
+            </div>
+
+            {/* Messages */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
+              {activeChatMessages.length === 0 ? (
+                <div style={{ textAlign: "center", color: T.muted, fontFamily: "DM Sans", fontSize: 12, padding: 30 }}>
+                  {isRealCoach ? "No messages yet. Say hello to your coach!" : "Start the conversation…"}
+                </div>
+              ) : activeChatMessages.map((m, i) => {
+                const isUser = m.role === "user";
+                return (
+                  <div key={i} style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 10 }}>
+                    <div style={{ maxWidth: "75%", padding: "10px 14px", borderRadius: 14, background: isUser ? T.accent : T.surface, color: isUser ? T.bg : T.text, borderBottomRightRadius: isUser ? 4 : 14, borderBottomLeftRadius: isUser ? 14 : 4 }}>
+                      <div style={{ fontFamily: "DM Sans", fontSize: 12, lineHeight: 1.5 }}>{m.content}</div>
+                      {m.time && <div style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: isUser ? `${T.bg}88` : T.muted, marginTop: 4, textAlign: "right" }}>{m.time}</div>}
+                    </div>
+                  </div>
+                );
+              })}
+              {loading && (
+                <div style={{ display: "flex", gap: 4, padding: "8px 0" }}>
+                  {[0,1,2].map(i => <div key={i} style={{ width: 8, height: 8, borderRadius: "50%", background: T.muted, animation: `pulse 1s infinite ${i * 0.2}s` }} />)}
+                </div>
+              )}
+              <div ref={bottomRef} />
+            </div>
+
+            {/* Input */}
+            <div style={{ padding: "12px 20px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 8 }}>
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSend()}
+                placeholder={isRealCoach ? "Message your coach…" : `Message ${activeInfo?.name}…`}
+                style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 12, outline: "none" }}
+              />
+              <button onClick={handleSend} disabled={loading || !input.trim()} style={{
+                background: input.trim() ? T.accent : T.border, color: input.trim() ? T.bg : T.muted,
+                border: "none", borderRadius: 10, padding: "10px 16px",
+                fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1.5, cursor: input.trim() ? "pointer" : "default",
+              }} type="button">{loading ? "…" : "SEND"}</button>
+            </div>
+          </>
         )}
-
-        {/* Thread selected */}
-        {activeThread &&
-          (() => {
-            const isCoach = activeThread.type === "coach";
-            const col = acColor(activeThread);
-            const cfg = COACHES_CONFIG[activeThread.senderId];
-            const sorted = [...activeThread.messages].sort(
-              (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
-            );
-            const msgs = chatMsgs[activeThread.senderId] || [];
-
-            return (
-              <>
-                {/* Thread header */}
-                <div
-                  style={{
-                    padding: "14px 20px",
-                    borderBottom: `1px solid ${T.border}`,
-                    flexShrink: 0,
-                    background: T.card,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: 12,
-                      flexShrink: 0,
-                      background: `linear-gradient(135deg, ${col}99, ${col}55)`,
-                      border: `2px solid ${col}55`,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontFamily: "Bebas Neue",
-                        fontSize: 14,
-                        color: "#fff",
-                      }}
-                    >
-                      {activeThread.avatar}
-                    </span>
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div
-                      style={{
-                        fontFamily: "DM Sans",
-                        fontSize: 14,
-                        fontWeight: 700,
-                        color: T.text,
-                      }}
-                    >
-                      {activeThread.senderName}
-                    </div>
-                    <div
-                      style={{
-                        fontFamily: "DM Sans",
-                        fontSize: 11,
-                        color: col,
-                      }}
-                    >
-                      {isCoach
-                        ? `● Online · ${cfg?.role || "Coach"}`
-                        : "Platform Updates"}
-                    </div>
-                  </div>
-                  <span
-                    style={{
-                      background: `${col}18`,
-                      border: `1px solid ${col}33`,
-                      borderRadius: 6,
-                      padding: "3px 10px",
-                      fontFamily: "DM Sans",
-                      fontSize: 10,
-                      fontWeight: 600,
-                      color: col,
-                    }}
-                  >
-                    {isCoach ? "Coach" : "Company"}
-                  </span>
-                </div>
-
-                {/* Messages area */}
-                <div
-                  style={{
-                    flex: 1,
-                    overflowY: "auto",
-                    padding: "20px 24px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 16,
-                  }}
-                >
-                  {/* Notification messages from inbox */}
-                  {sorted.map((msg) => (
-                    <div
-                      key={msg.id}
-                      style={{
-                        background: T.card,
-                        border: `1px solid ${T.border}55`,
-                        borderRadius: 14,
-                        padding: "14px 16px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          marginBottom: 6,
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontFamily: "DM Sans",
-                            fontSize: 13,
-                            fontWeight: 700,
-                            color: T.text,
-                          }}
-                        >
-                          {msg.title}
-                        </div>
-                        <span
-                          style={{
-                            fontFamily: "JetBrains Mono",
-                            fontSize: 9,
-                            color: T.muted,
-                            whiteSpace: "nowrap",
-                            marginLeft: 12,
-                          }}
-                        >
-                          {timeAgo(msg.timestamp)}
-                        </span>
-                      </div>
-                      <div
-                        style={{
-                          fontFamily: "DM Sans",
-                          fontSize: 12,
-                          color: T.muted,
-                          lineHeight: 1.6,
-                        }}
-                      >
-                        {msg.body}
-                      </div>
-                    </div>
-                  ))}
-
-                  {/* Live AI chat (coaches only) */}
-                  {isCoach && msgs.length > 0 && (
-                    <div
-                      style={{
-                        borderTop: `1px solid ${T.border}`,
-                        paddingTop: 16,
-                        marginTop: 4,
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontFamily: "DM Sans",
-                          fontSize: 10,
-                          color: T.muted,
-                          letterSpacing: 1,
-                          textTransform: "uppercase",
-                          textAlign: "center",
-                          marginBottom: 14,
-                        }}
-                      >
-                        Live Chat
-                      </div>
-                      {msgs.map((m, i) => {
-                        const isAssistant = m.role === "assistant";
-                        return (
-                          <div
-                            key={i}
-                            style={{
-                              display: "flex",
-                              justifyContent: isAssistant
-                                ? "flex-start"
-                                : "flex-end",
-                              marginBottom: 10,
-                            }}
-                          >
-                            {isAssistant && (
-                              <div
-                                style={{
-                                  width: 28,
-                                  height: 28,
-                                  borderRadius: 8,
-                                  flexShrink: 0,
-                                  marginRight: 8,
-                                  background: `linear-gradient(135deg, ${col}99, ${col}55)`,
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  alignSelf: "flex-end",
-                                }}
-                              >
-                                <span
-                                  style={{
-                                    fontFamily: "Bebas Neue",
-                                    fontSize: 10,
-                                    color: "#fff",
-                                  }}
-                                >
-                                  {activeThread.avatar}
-                                </span>
-                              </div>
-                            )}
-                            <div
-                              style={{
-                                maxWidth: "72%",
-                                background: isAssistant ? T.card : T.accent,
-                                border: `1px solid ${
-                                  isAssistant ? T.border : T.accent
-                                }`,
-                                borderRadius: isAssistant
-                                  ? "16px 16px 16px 4px"
-                                  : "16px 16px 4px 16px",
-                                padding: "10px 14px",
-                              }}
-                            >
-                              <div
-                                style={{
-                                  fontFamily: "DM Sans",
-                                  fontSize: 13,
-                                  color: isAssistant ? T.text : T.bg,
-                                  lineHeight: 1.5,
-                                }}
-                              >
-                                {m.content}
-                              </div>
-                              <div
-                                style={{
-                                  fontFamily: "JetBrains Mono",
-                                  fontSize: 9,
-                                  color: isAssistant ? T.muted : `${T.bg}99`,
-                                  marginTop: 4,
-                                  textAlign: "right",
-                                }}
-                              >
-                                {m.time}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                      {loading && (
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                            marginLeft: 36,
-                          }}
-                        >
-                          {[0, 1, 2].map((i) => (
-                            <div
-                              key={i}
-                              style={{
-                                width: 6,
-                                height: 6,
-                                borderRadius: "50%",
-                                background: col,
-                                animation: `pulse 1.2s ${i * 0.2}s infinite`,
-                              }}
-                            />
-                          ))}
-                        </div>
-                      )}
-                      <div ref={bottomRef} />
-                    </div>
-                  )}
-                </div>
-
-                {/* Reply input (coaches only) */}
-                {isCoach && (
-                  <div
-                    style={{
-                      padding: "12px 20px",
-                      borderTop: `1px solid ${T.border}`,
-                      background: T.card,
-                      display: "flex",
-                      gap: 10,
-                      alignItems: "center",
-                      flexShrink: 0,
-                    }}
-                  >
-                    <input
-                      value={input}
-                      onChange={(e) => setInput(e.target.value)}
-                      onKeyDown={(e) =>
-                        e.key === "Enter" && !e.shiftKey && sendMessage()
-                      }
-                      placeholder={`Message ${activeThread.senderName}…`}
-                      style={{
-                        flex: 1,
-                        background: T.surface,
-                        border: `1px solid ${T.border}`,
-                        borderRadius: 12,
-                        padding: "10px 16px",
-                        color: T.text,
-                        fontFamily: "DM Sans",
-                        fontSize: 13,
-                        outline: "none",
-                        caretColor: col,
-                      }}
-                    />
-                    <button
-                      onClick={sendMessage}
-                      disabled={loading || !input.trim()}
-                      style={{
-                        background: input.trim() ? col : T.border,
-                        color: "#fff",
-                        border: "none",
-                        borderRadius: 12,
-                        padding: "10px 18px",
-                        fontFamily: "Bebas Neue",
-                        fontSize: 14,
-                        letterSpacing: 1,
-                        cursor: input.trim() ? "pointer" : "default",
-                        transition: "all 0.2s",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      SEND
-                    </button>
-                  </div>
-                )}
-              </>
-            );
-          })()}
       </div>
     </div>
   );
@@ -10723,29 +10151,11 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
         {tab === "inbox" && (
           <div>
             <div style={{ marginBottom: 16 }}>
-              <div
-                style={{
-                  fontFamily: "Bebas Neue",
-                  fontSize: 28,
-                  letterSpacing: 2,
-                  color: T.text,
-                }}
-              >
-                INBOX
-              </div>
-              <div
-                style={{
-                  fontFamily: "DM Sans",
-                  fontSize: 13,
-                  color: T.muted,
-                  marginTop: 4,
-                }}
-              >
-                Messages from your coaching team · Your coach has live
-                visibility of your macros
+              <div style={{ fontFamily: "Bebas Neue", fontSize: 28, letterSpacing: 2, color: T.text }}>INBOX</div>
+              <div style={{ fontFamily: "DM Sans", fontSize: 13, color: T.muted, marginTop: 4 }}>
+                Messages from your coaching team · Real coach + AI assistants
               </div>
             </div>
-            <RealCoachMessages profileId={profile?.id} />
             <InboxPage
               plan={plan}
               selectedDay={selectedDay}
