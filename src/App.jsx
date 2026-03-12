@@ -6609,7 +6609,6 @@ function WeeklyPlanner({
   mfpLastSync,
   onImportMFP,
   onSyncNow,
-  onFoodChange,
 }) {
   const [selectedMeal, setSelectedMeal] = useState(null);
   const [showFoodPicker, setShowFoodPicker] = useState(false);
@@ -6865,8 +6864,6 @@ function WeeklyPlanner({
       return next;
     });
     resetPicker();
-    // Save to backend
-    setTimeout(() => onFoodChange?.(selectedDay), 100);
   };
 
   const removeFood = (day, meal, idx) => {
@@ -6876,8 +6873,6 @@ function WeeklyPlanner({
       next[day][meal] = next[day][meal].filter((_, i) => i !== idx);
       return next;
     });
-    // Save to backend
-    setTimeout(() => onFoodChange?.(day), 100);
   };
 
   const [importedDay, setImportedDay] = useState(null);
@@ -10137,8 +10132,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
       });
       return next;
     });
-    // Save imported food to backend
-    setTimeout(() => saveFoodForDayRef.current?.(day), 200);
+    // useEffect auto-save will handle persisting to backend
   };
 
   // Auto-fetch on login if account has mfpUsername
@@ -10291,51 +10285,64 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
     return () => clearInterval(interval);
   }, [profile?.id]);
 
-  // ── Save food log for a specific day key (MON/TUE/…) to backend ───────────
-  const saveFoodForDay = (dayKey) => {
+  // ── Auto-save food logs to backend when plan changes ────────────────────────
+  // Uses useEffect so it always sees the COMMITTED React state after re-render.
+  const lastSavedPlanJSON = useRef('');
+  useEffect(() => {
     if (!profile?.id) return;
-    const dateStr = dayKeyToDate(dayKey);
-    if (!dateStr) return;
-    const dayPlan = plan[dayKey];
-    if (!dayPlan) return;
-    // Flatten all meals into food items
-    const foods = [];
-    MEALS.forEach(meal => {
-      (dayPlan[meal] || []).forEach(f => {
-        foods.push({
-          name: f.name || '',
-          calories: f.calories || 0,
-          protein_g: f.protein || 0,
-          carbs_g: f.carbs || 0,
-          fat_g: f.fat || 0,
-          meal: meal,
-          source: 'manual',
+    // Debounce saves by 1.5s
+    const timer = setTimeout(() => {
+      // Save every day that has at least 1 food item
+      DAYS.forEach(dayKey => {
+        const dayPlan = plan[dayKey];
+        if (!dayPlan) return;
+        const dateStr = dayKeyToDate(dayKey);
+        if (!dateStr) return;
+        const foods = [];
+        MEALS.forEach(meal => {
+          (dayPlan[meal] || []).forEach(f => {
+            foods.push({
+              name: f.name || '',
+              calories: f.calories || 0,
+              protein_g: f.protein || 0,
+              carbs_g: f.carbs || 0,
+              fat_g: f.fat || 0,
+              meal: meal,
+              source: f.source || 'manual',
+            });
+          });
         });
-      });
-    });
-    // Save food items (even if empty — clears the day)
-    apiFetch(`/food-logs/${profile.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ date: dateStr, foods }),
-    }).catch(e => console.warn('Food log save failed:', e));
-    // Also save daily totals
-    const tot = dayTotals(dayPlan);
-    apiFetch(`/daily-totals/${profile.id}`, {
-      method: 'POST',
-      body: JSON.stringify({
-        date: dateStr,
-        calories: tot.calories,
-        protein_g: tot.protein,
-        carbs_g: tot.carbs,
-        fat_g: tot.fat,
-        source: 'manual',
-      }),
-    }).catch(e => console.warn('Daily totals save failed:', e));
-  };
+        // Only save days that have food
+        if (foods.length === 0) return;
+        // Check if this day actually changed (avoid redundant saves)
+        const dayJSON = JSON.stringify(foods);
+        const cacheKey = `${dayKey}_${dateStr}`;
+        if (lastSavedPlanJSON.current[cacheKey] === dayJSON) return;
 
-  // Expose saveFoodForDay via ref so child components can call it
-  const saveFoodForDayRef = useRef(saveFoodForDay);
-  saveFoodForDayRef.current = saveFoodForDay;
+        apiFetch(`/food-logs/${profile.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ date: dateStr, foods }),
+        }).then(() => {
+          lastSavedPlanJSON.current = { ...lastSavedPlanJSON.current, [cacheKey]: dayJSON };
+        }).catch(e => console.warn('Food log save failed:', e));
+
+        // Also save daily totals
+        const tot = dayTotals(dayPlan);
+        apiFetch(`/daily-totals/${profile.id}`, {
+          method: 'POST',
+          body: JSON.stringify({
+            date: dateStr,
+            calories: tot.calories,
+            protein_g: tot.protein,
+            carbs_g: tot.carbs,
+            fat_g: tot.fat,
+            source: 'manual',
+          }),
+        }).catch(e => console.warn('Daily totals save failed:', e));
+      });
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [plan, profile?.id]);
 
   if (!tokenState || !profile)
     return (
@@ -10574,7 +10581,6 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
             onSyncNow={() =>
               mfpUsername && fetchMFP(mfpUsername, plan[selectedDay])
             }
-            onFoodChange={(dayKey) => saveFoodForDayRef.current?.(dayKey)}
           />
         )}
         {tab === "tracker" && (
