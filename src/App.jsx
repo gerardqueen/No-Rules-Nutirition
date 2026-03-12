@@ -8981,23 +8981,22 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
   const bottomRef = useRef(null);
 
   // ── Real coach messages state ──────────────────────────────────────────────
-  const [coachId, setCoachId] = useState(null);
-  const [coachName, setCoachName] = useState("My Coach");
+  const coachId = profile?.coachId || null;
   const [realMsgs, setRealMsgs] = useState([]);
   const [realErrCount, setRealErrCount] = useState(0);
+  const [realUnreadMap, setRealUnreadMap] = useState({}); // from GET /messages-unread
 
-  // Discover coachId
-  useEffect(() => {
-    if (!profile?.id) return;
-    (async () => {
-      try {
-        const me = await apiFetch('/auth/me');
-        if (me?.coachId) setCoachId(me.coachId);
-      } catch {}
-    })();
-  }, [profile?.id]);
+  // Load unread counts from backend
+  const loadUnreadCounts = async () => {
+    try {
+      const rows = await apiFetch('/messages-unread');
+      const map = {};
+      (Array.isArray(rows) ? rows : []).forEach(r => { map[r.fromId] = r.count; });
+      setRealUnreadMap(map);
+    } catch {}
+  };
 
-  // Load + poll real messages
+  // Load real messages for active coach conversation
   const loadReal = async () => {
     if (!coachId) return;
     try {
@@ -9005,10 +9004,11 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
       if (Array.isArray(msgs)) { setRealMsgs(msgs); setRealErrCount(0); }
     } catch { setRealErrCount(c => c + 1); }
   };
-  useEffect(() => { if (coachId) loadReal(); }, [coachId]);
+
+  useEffect(() => { if (coachId) { loadReal(); loadUnreadCounts(); } }, [coachId]);
   useEffect(() => {
     if (!coachId || realErrCount > 3) return;
-    const interval = setInterval(loadReal, 12 * 1000);
+    const interval = setInterval(() => { loadReal(); loadUnreadCounts(); }, 12 * 1000);
     return () => clearInterval(interval);
   }, [coachId, realErrCount]);
 
@@ -9021,6 +9021,7 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
       });
       setRealMsgs(prev => [...prev, msg]);
       setInput("");
+      setRealErrCount(0);
     } catch (e) { console.warn('Send failed:', e); }
     setLoading(false);
   };
@@ -9035,13 +9036,17 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
   const coachCfg = activeId ? COACHES_CONFIG[activeId] : null;
   const isRealCoach = activeId === "real-coach";
 
-  const realUnread = realMsgs.filter(m => m.fromId !== profile?.id && !m.read).length;
+  const realUnread = coachId ? (realUnreadMap[coachId] || 0) : 0;
   const totalUnread = threads.reduce((n, t) => n + t.messages.filter((m) => !m.read).length, 0) + realUnread;
 
   const openThread = (id) => {
     setActiveId(id);
     setInput("");
-    if (id === "real-coach") return; // real coach thread — no AI init needed
+    if (id === "real-coach") {
+      // Loading messages marks them read server-side; refresh unread counts
+      loadReal().then(loadUnreadCounts);
+      return;
+    }
     setThreads((prev) =>
       prev.map((t) =>
         t.senderId === id
@@ -9103,7 +9108,7 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
     const lastReal = realMsgs[realMsgs.length - 1];
     allThreads.push({
       id: "real-coach",
-      name: coachName || "My Coach",
+      name: "My Coach",
       role: "Your Coach",
       initials: "🏋️",
       color: T.coachGreen,
