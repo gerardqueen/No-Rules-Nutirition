@@ -8970,6 +8970,135 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
 }
 
 // ── Inbox Page (full-page inbox with multi-coach + company threads) ───────────
+/* ─────────────────────────────────────────────────────────────────────────────
+   Real Coach Messages — loads from backend, polls every 10s
+────────────────────────────────────────────────────────────────────────────── */
+function RealCoachMessages({ profileId }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [coachName, setCoachName] = useState("My Coach");
+  const [coachId, setCoachId] = useState(null);
+  const bottomRef = useRef(null);
+
+  // Find the coach by looking at profile's coachId
+  useEffect(() => {
+    if (!profileId) return;
+    (async () => {
+      try {
+        const me = await apiFetch('/auth/me');
+        if (me?.coachId) {
+          setCoachId(me.coachId);
+          // Try to get coach name
+          try {
+            const unread = await apiFetch('/messages-unread');
+            // Just use the coachId
+          } catch {}
+        }
+      } catch {}
+    })();
+  }, [profileId]);
+
+  const loadMessages = async () => {
+    if (!coachId) return;
+    try {
+      const msgs = await apiFetch(`/messages/${coachId}`);
+      if (Array.isArray(msgs)) setMessages(msgs);
+    } catch {}
+  };
+
+  useEffect(() => { if (coachId) loadMessages(); }, [coachId]);
+  useEffect(() => {
+    if (!coachId) return;
+    const interval = setInterval(loadMessages, 10 * 1000);
+    return () => clearInterval(interval);
+  }, [coachId]);
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  const send = async () => {
+    if (!input.trim() || !coachId || sending) return;
+    setSending(true);
+    try {
+      const msg = await apiFetch(`/messages/${coachId}`, {
+        method: 'POST',
+        body: JSON.stringify({ content: input.trim() }),
+      });
+      setMessages(prev => [...prev, msg]);
+      setInput("");
+    } catch (e) { console.warn('Send failed:', e); }
+    setSending(false);
+  };
+
+  if (!coachId) return (
+    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
+      <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted }}>No coach assigned yet. Messages will appear here once your coach is linked.</div>
+    </div>
+  );
+
+  return (
+    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, overflow: "hidden", marginBottom: 16 }}>
+      <div style={{ padding: "14px 18px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontFamily: "Bebas Neue", fontSize: 18, letterSpacing: 2, color: T.text }}>COACH MESSAGES</div>
+          <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>Direct messages from your coach · Auto-refreshes</div>
+        </div>
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <div style={{ width: 6, height: 6, borderRadius: "50%", background: T.coachGreen, animation: "pulse 2s infinite" }} />
+          <span style={{ fontFamily: "DM Sans", fontSize: 10, color: T.coachGreen }}>LIVE</span>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div style={{ maxHeight: 340, overflowY: "auto", padding: "12px 18px" }}>
+        {messages.length === 0 ? (
+          <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, padding: "20px 0", textAlign: "center" }}>
+            No messages yet. Say hello to your coach!
+          </div>
+        ) : messages.map((m) => {
+          const isMe = m.fromId === profileId;
+          return (
+            <div key={m.id} style={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start", marginBottom: 8 }}>
+              <div style={{
+                maxWidth: "75%", padding: "10px 14px", borderRadius: 14,
+                background: isMe ? T.accent : T.surface,
+                color: isMe ? T.bg : T.text,
+                borderBottomRightRadius: isMe ? 4 : 14,
+                borderBottomLeftRadius: isMe ? 14 : 4,
+              }}>
+                <div style={{ fontFamily: "DM Sans", fontSize: 12, lineHeight: 1.4 }}>{m.content}</div>
+                <div style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: isMe ? `${T.bg}88` : T.muted, marginTop: 4, textAlign: "right" }}>
+                  {new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Input */}
+      <div style={{ padding: "10px 18px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 8 }}>
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && send()}
+          placeholder="Type a message…"
+          style={{
+            flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10,
+            padding: "10px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 12, outline: "none",
+          }}
+        />
+        <button onClick={send} disabled={sending || !input.trim()} style={{
+          background: input.trim() ? T.accent : T.border, color: input.trim() ? T.bg : T.muted,
+          border: "none", borderRadius: 10, padding: "10px 16px",
+          fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1.5, cursor: input.trim() ? "pointer" : "default",
+        }} type="button">{sending ? "…" : "SEND"}</button>
+      </div>
+    </div>
+  );
+}
+
 function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
   const [activeId, setActiveId] = useState(null);
   const [chatMsgs, setChatMsgs] = useState({}); // keyed by senderId
@@ -10623,6 +10752,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
                 visibility of your macros
               </div>
             </div>
+            <RealCoachMessages profileId={profile?.id} />
             <InboxPage
               plan={plan}
               selectedDay={selectedDay}
