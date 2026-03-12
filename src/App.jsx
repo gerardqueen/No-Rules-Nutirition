@@ -68,6 +68,22 @@ const DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
 const MEALS = ["Breakfast", "Lunch", "Dinner", "Snack"];
 let macroGoals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
 
+// Convert day key (MON/TUE/…) to YYYY-MM-DD for the current week
+function dayKeyToDate(dayKey) {
+  const today = new Date();
+  const todayDow = today.getDay(); // 0=Sun
+  const todayIdx = todayDow === 0 ? 6 : todayDow - 1; // 0=Mon … 6=Sun
+  const targetIdx = DAYS.indexOf(dayKey);
+  if (targetIdx < 0) return null;
+  const diff = targetIdx - todayIdx;
+  const d = new Date(today);
+  d.setDate(d.getDate() + diff);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function dateToISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 // ── USDA FoodData Central Database (8,200+ foods) ────────────────────────────
 // Fields: n=name, c=calories/100g, p=protein/100g, b=carbs/100g, f=fat/100g
 /* FOOD_DB moved to src/foodDb.js */
@@ -6593,6 +6609,7 @@ function WeeklyPlanner({
   mfpLastSync,
   onImportMFP,
   onSyncNow,
+  onFoodChange,
 }) {
   const [selectedMeal, setSelectedMeal] = useState(null);
   const [showFoodPicker, setShowFoodPicker] = useState(false);
@@ -6848,6 +6865,8 @@ function WeeklyPlanner({
       return next;
     });
     resetPicker();
+    // Save to backend
+    setTimeout(() => onFoodChange?.(selectedDay), 100);
   };
 
   const removeFood = (day, meal, idx) => {
@@ -6857,6 +6876,8 @@ function WeeklyPlanner({
       next[day][meal] = next[day][meal].filter((_, i) => i !== idx);
       return next;
     });
+    // Save to backend
+    setTimeout(() => onFoodChange?.(day), 100);
   };
 
   const [importedDay, setImportedDay] = useState(null);
@@ -9777,34 +9798,37 @@ export default function App() {
 
   // ✅ Load macro plan from backend so coach updates show in the client
   // Polls every 30s so coach changes appear live
-  const fetchMacroGoals = async () => {
-    if (!profile?.id) return;
-    try {
-      const rows = await apiFetch(`/macro-plans/${profile.id}`);
-      const vals = (rows || []).filter(Boolean);
-      if (!vals.length) return;
-      const sum = vals.reduce((a, r) => ({
-        calories: a.calories + Number(r.calories || 0),
-        protein: a.protein + Number(r.protein_g || 0),
-        carbs: a.carbs + Number(r.carbs_g || 0),
-        fat: a.fat + Number(r.fat_g || 0),
-      }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
-      const n = Math.max(1, vals.length);
-      const avg = {
-        calories: Math.round(sum.calories / n),
-        protein: Math.round(sum.protein / n),
-        carbs: Math.round(sum.carbs / n),
-        fat: Math.round(sum.fat / n),
-      };
-      macroGoals = avg;
-      setMacroGoalsState(avg);
-    } catch {
-      // keep current values
-    }
-  };
+  const profileIdRef = useRef(null);
+  profileIdRef.current = profile?.id;
 
   useEffect(() => {
     if (!profile?.id) return;
+    const fetchMacroGoals = async () => {
+      const pid = profileIdRef.current;
+      if (!pid) return;
+      try {
+        const rows = await apiFetch(`/macro-plans/${pid}`);
+        const vals = (rows || []).filter(Boolean);
+        if (!vals.length) return;
+        const sum = vals.reduce((a, r) => ({
+          calories: a.calories + Number(r.calories || 0),
+          protein: a.protein + Number(r.protein_g || 0),
+          carbs: a.carbs + Number(r.carbs_g || 0),
+          fat: a.fat + Number(r.fat_g || 0),
+        }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+        const n = Math.max(1, vals.length);
+        const avg = {
+          calories: Math.round(sum.calories / n),
+          protein: Math.round(sum.protein / n),
+          carbs: Math.round(sum.carbs / n),
+          fat: Math.round(sum.fat / n),
+        };
+        macroGoals = avg;
+        setMacroGoalsState(avg);
+      } catch {
+        // keep current values
+      }
+    };
     fetchMacroGoals(); // initial load
     const interval = setInterval(fetchMacroGoals, 30 * 1000); // poll every 30s
     return () => clearInterval(interval);
@@ -10113,6 +10137,8 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
       });
       return next;
     });
+    // Save imported food to backend
+    setTimeout(() => saveFoodForDayRef.current?.(day), 200);
   };
 
   // Auto-fetch on login if account has mfpUsername
@@ -10249,69 +10275,67 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
     })();
   }, [profile?.id]);
 
-  // ── Load calendar events from backend ─────────────────────────────────────
+  // ── Load calendar events from backend + poll every 30s ─────────────────────
   const [events, setEvents] = useState([]);
+  const fetchCalendarEvents = async () => {
+    if (!profile?.id) return;
+    try {
+      const rows = await apiFetch(`/calendar-events/${profile.id}`);
+      if (Array.isArray(rows)) setEvents(rows);
+    } catch (e) { /* keep current */ }
+  };
   useEffect(() => {
     if (!profile?.id) return;
-    (async () => {
-      try {
-        const rows = await apiFetch(`/calendar-events/${profile.id}`);
-        if (Array.isArray(rows)) setEvents(rows);
-      } catch (e) { /* keep empty */ }
-    })();
+    fetchCalendarEvents();
+    const interval = setInterval(fetchCalendarEvents, 30 * 1000);
+    return () => clearInterval(interval);
   }, [profile?.id]);
 
-  // ── Auto-save food logs to backend (debounced) ────────────────────────────
-  const planRef = useRef(plan);
-  planRef.current = plan;
-  const foodLogSaveTimer = useRef(null);
-  useEffect(() => {
+  // ── Save food log for a specific day key (MON/TUE/…) to backend ───────────
+  const saveFoodForDay = (dayKey) => {
     if (!profile?.id) return;
-    // Debounce: save 2s after last plan change
-    if (foodLogSaveTimer.current) clearTimeout(foodLogSaveTimer.current);
-    foodLogSaveTimer.current = setTimeout(() => {
-      const today = new Date();
-      const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-      const dayIdx = today.getDay();
-      const todayKey = DAYS[dayIdx === 0 ? 6 : dayIdx - 1];
-      const dayPlan = planRef.current[todayKey];
-      if (!dayPlan) return;
-      // Flatten all meals into food items
-      const foods = [];
-      MEALS.forEach(meal => {
-        (dayPlan[meal] || []).forEach(f => {
-          foods.push({
-            name: f.name,
-            calories: f.calories || 0,
-            protein_g: f.protein || 0,
-            carbs_g: f.carbs || 0,
-            fat_g: f.fat || 0,
-            meal: meal,
-            source: 'manual',
-          });
+    const dateStr = dayKeyToDate(dayKey);
+    if (!dateStr) return;
+    const dayPlan = plan[dayKey];
+    if (!dayPlan) return;
+    // Flatten all meals into food items
+    const foods = [];
+    MEALS.forEach(meal => {
+      (dayPlan[meal] || []).forEach(f => {
+        foods.push({
+          name: f.name || '',
+          calories: f.calories || 0,
+          protein_g: f.protein || 0,
+          carbs_g: f.carbs || 0,
+          fat_g: f.fat || 0,
+          meal: meal,
+          source: 'manual',
         });
       });
-      if (foods.length === 0) return;
-      apiFetch(`/food-logs/${profile.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ date: todayStr, foods }),
-      }).catch(e => console.warn('Food log save failed:', e));
-      // Also save daily totals
-      const tot = dayTotals(dayPlan);
-      apiFetch(`/daily-totals/${profile.id}`, {
-        method: 'POST',
-        body: JSON.stringify({
-          date: todayStr,
-          calories: tot.calories,
-          protein_g: tot.protein,
-          carbs_g: tot.carbs,
-          fat_g: tot.fat,
-          source: 'manual',
-        }),
-      }).catch(e => console.warn('Daily totals save failed:', e));
-    }, 2000);
-    return () => { if (foodLogSaveTimer.current) clearTimeout(foodLogSaveTimer.current); };
-  }, [plan, profile?.id]);
+    });
+    // Save food items (even if empty — clears the day)
+    apiFetch(`/food-logs/${profile.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ date: dateStr, foods }),
+    }).catch(e => console.warn('Food log save failed:', e));
+    // Also save daily totals
+    const tot = dayTotals(dayPlan);
+    apiFetch(`/daily-totals/${profile.id}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        date: dateStr,
+        calories: tot.calories,
+        protein_g: tot.protein,
+        carbs_g: tot.carbs,
+        fat_g: tot.fat,
+        source: 'manual',
+      }),
+    }).catch(e => console.warn('Daily totals save failed:', e));
+  };
+
+  // Expose saveFoodForDay via ref so child components can call it
+  const saveFoodForDayRef = useRef(saveFoodForDay);
+  saveFoodForDayRef.current = saveFoodForDay;
 
   if (!tokenState || !profile)
     return (
@@ -10550,6 +10574,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
             onSyncNow={() =>
               mfpUsername && fetchMFP(mfpUsername, plan[selectedDay])
             }
+            onFoodChange={(dayKey) => saveFoodForDayRef.current?.(dayKey)}
           />
         )}
         {tab === "tracker" && (
