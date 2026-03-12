@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import FOOD_DB from "./foodDb";
 
-import { getDay, upsertDay } from "./journalStore";
 // ✅ Live backend config + auth helpers
 const API_BASE = import.meta.env.VITE_API_URL || 'https://no-rules-api-production.up.railway.app';
 const TOKEN_KEY = 'nrn_token';
@@ -29,116 +28,6 @@ async function apiFetch(path, options = {}) {
   }
   return data;
 }
-// ─────────────────────────────────────────────────────────────
-// JOURNAL PERSISTENCE (Backend + Local journalStore)
-// ─────────────────────────────────────────────────────────────
-const isoToday = () => new Date().toISOString().slice(0, 10);
-
-async function fetchDayBundle(athleteId, dateISO) {
-  const qs = `?start=${dateISO}&end=${dateISO}`;
-
-  const [totalsRows, weightRows, moodRows, foodRows, calRows] = await Promise.all([
-    apiFetch(`/daily-totals/${athleteId}${qs}`).catch(() => []),
-    apiFetch(`/weights/${athleteId}`).catch(() => []),
-    apiFetch(`/moods/${athleteId}`).catch(() => []),
-    apiFetch(`/food-logs/${athleteId}${qs}`).catch(() => []),
-    apiFetch(`/calendar-events/${athleteId}${qs}`).catch(() => []),
-  ]);
-
-  const totals = (Array.isArray(totalsRows) ? totalsRows : []).find(r => r.date === dateISO);
-  const weight = (Array.isArray(weightRows) ? weightRows : []).find(r => r.date === dateISO);
-  const mood = (Array.isArray(moodRows) ? moodRows : []).find(r => r.date === dateISO);
-  const foods = (Array.isArray(foodRows) ? foodRows : []).find(r => r.date === dateISO)?.foods;
-  const calendar = Array.isArray(calRows) ? calRows : [];
-
-  return {
-    totals: totals ? {
-      calories: Number(totals.calories ?? 0),
-      protein: Number(totals.protein_g ?? 0),
-      carbs: Number(totals.carbs_g ?? 0),
-      fat: Number(totals.fat_g ?? 0),
-    } : null,
-    foods: Array.isArray(foods) ? foods : null,
-    weight: weight ? { kg: Number(weight.kg) } : null,
-    mood: mood ? {
-      id: Number(mood.mood_id),
-      emoji: mood.emoji ?? "",
-      label: mood.label ?? "",
-      color: mood.color ?? "",
-      note: mood.note ?? "",
-    } : null,
-    calendar: calendar.map(ev => ({
-      id: ev.id,
-      title: ev.title,
-      startISO: ev.startISO ?? null,
-      endISO: ev.endISO ?? null,
-      notes: ev.notes ?? "",
-    })),
-  };
-}
-
-async function saveDailyTotals(athleteId, dateISO, totals, note = "", source = "manual") {
-  return apiFetch(`/daily-totals/${athleteId}`, {
-    method: "POST",
-    body: JSON.stringify({
-      date: dateISO,
-      calories: Number(totals.calories ?? 0),
-      protein_g: Number(totals.protein ?? 0),
-      carbs_g: Number(totals.carbs ?? 0),
-      fat_g: Number(totals.fat ?? 0),
-      note,
-      source,
-    }),
-  });
-}
-
-async function saveFoodLog(athleteId, dateISO, foods) {
-  return apiFetch(`/food-logs/${athleteId}`, {
-    method: "PUT",
-    body: JSON.stringify({ date: dateISO, foods }),
-  });
-}
-
-async function saveWeight(athleteId, dateISO, kg) {
-  return apiFetch(`/weights/${athleteId}`, {
-    method: "POST",
-    body: JSON.stringify({ date: dateISO, kg: Number(kg) }),
-  });
-}
-
-async function saveMood(athleteId, dateISO, mood) {
-  return apiFetch(`/moods/${athleteId}`, {
-    method: "POST",
-    body: JSON.stringify({
-      date: dateISO,
-      id: Number(mood.id),
-      emoji: mood.emoji ?? "",
-      label: mood.label ?? "",
-      color: mood.color ?? "",
-      note: mood.note ?? "",
-    }),
-  });
-}
-
-async function createCalendarEvent(athleteId, dateISO, ev) {
-  return apiFetch(`/calendar-events/${athleteId}`, {
-    method: "POST",
-    body: JSON.stringify({
-      date: dateISO,
-      title: ev.title,
-      startISO: ev.startISO ?? null,
-      endISO: ev.endISO ?? null,
-      notes: ev.notes ?? "",
-    }),
-  });
-}
-
-async function deleteCalendarEvent(athleteId, eventId) {
-  return apiFetch(`/calendar-events/${athleteId}/${eventId}`, {
-    method: "DELETE",
-  });
-}
-
 
 
 // ── Google Fonts ──────────────────────────────────────────────────────────────
@@ -179,6 +68,9 @@ const DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
 const MEALS = ["Breakfast", "Lunch", "Dinner", "Snack"];
 let macroGoals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
 
+// ── USDA FoodData Central Database (8,200+ foods) ────────────────────────────
+// Fields: n=name, c=calories/100g, p=protein/100g, b=carbs/100g, f=fat/100g
+/* FOOD_DB moved to src/foodDb.js */
 
 // Helper: get macros for a food item at a given gram weight
 function scaleMacros(item, grams) {
@@ -192,26 +84,7 @@ function scaleMacros(item, grams) {
   };
 }
 
-// Legacy sample foods for initial plan (kept for seed data)
-const sampleFoods = [
-  {
-    name: "Chicken Breast (200g)",
-    calories: 330,
-    protein: 62,
-    carbs: 0,
-    fat: 7,
-  },
-  { name: "Brown Rice (150g)", calories: 195, protein: 4, carbs: 41, fat: 2 },
-  { name: "Whole Eggs x3", calories: 210, protein: 18, carbs: 2, fat: 15 },
-  { name: "Greek Yogurt (200g)", calories: 140, protein: 20, carbs: 8, fat: 2 },
-  { name: "Banana", calories: 105, protein: 1, carbs: 27, fat: 0 },
-  { name: "Oats (80g)", calories: 300, protein: 11, carbs: 54, fat: 5 },
-  { name: "Almonds (30g)", calories: 170, protein: 6, carbs: 6, fat: 15 },
-  { name: "Salmon (180g)", calories: 374, protein: 40, carbs: 0, fat: 22 },
-  { name: "Sweet Potato (200g)", calories: 172, protein: 4, carbs: 40, fat: 0 },
-  { name: "Whey Protein Shake", calories: 150, protein: 30, carbs: 5, fat: 2 },
-];
-
+// initWeekPlan starts empty — coach sets targets, athlete logs food manually
 const initWeekPlan = () => {
   const plan = {};
   DAYS.forEach((d) => {
@@ -220,12 +93,6 @@ const initWeekPlan = () => {
       plan[d][m] = [];
     });
   });
-  plan["MON"]["Breakfast"] = [sampleFoods[5], sampleFoods[2]];
-  plan["MON"]["Lunch"] = [sampleFoods[0], sampleFoods[1]];
-  plan["MON"]["Dinner"] = [sampleFoods[7], sampleFoods[8]];
-  plan["TUE"]["Breakfast"] = [sampleFoods[3], sampleFoods[4]];
-  plan["TUE"]["Lunch"] = [sampleFoods[0], sampleFoods[1], sampleFoods[6]];
-  plan["TUE"]["Snack"] = [sampleFoods[9]];
   return plan;
 };
 
@@ -3115,7 +2982,7 @@ const SEED_EVENTS = [];
 ;
 
 // ── Mini Calendar ─────────────────────────────────────────────────────────────
-function MiniCalendar() {
+function MiniCalendar({ events, setEvents, profileId }) {
   const today = new Date();
   const todayStr = _ds(today.getFullYear(), today.getMonth(), today.getDate());
 
@@ -3123,7 +2990,6 @@ function MiniCalendar() {
     year: today.getFullYear(),
     month: today.getMonth(),
   });
-  const [events, setEvents] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editEvent, setEditEvent] = useState(null);
   const [selectedDate, setSelectedDate] = useState(null);
@@ -3187,18 +3053,44 @@ function MiniCalendar() {
     });
     setShowModal(true);
   };
-  const save = () => {
+  const save = async () => {
     if (!form.title.trim()) return;
     if (editEvent) {
+      // For edits, delete old and create new (simple approach)
+      if (profileId) {
+        try { await apiFetch(`/calendar-events/${profileId}/${editEvent.id}`, { method: 'DELETE' }); } catch {}
+      }
       setEvents((evs) =>
-        evs.map((e) => (e.id === editEvent.id ? { ...e, ...form } : e))
+        evs.filter((e) => e.id !== editEvent.id)
       );
+    }
+    // Create new event
+    if (profileId) {
+      try {
+        const created = await apiFetch(`/calendar-events/${profileId}`, {
+          method: 'POST',
+          body: JSON.stringify({
+            date: form.date,
+            title: form.title,
+            startISO: form.date,
+            endISO: form.date,
+            notes: form.note || '',
+          }),
+        });
+        setEvents((evs) => [...evs, { id: created.id, date: created.date, title: created.title, notes: created.notes, type: form.type }]);
+      } catch (e) {
+        // Fallback to local
+        setEvents((evs) => [...evs, { id: Date.now(), ...form }]);
+      }
     } else {
       setEvents((evs) => [...evs, { id: Date.now(), ...form }]);
     }
     setShowModal(false);
   };
-  const remove = () => {
+  const remove = async () => {
+    if (profileId && editEvent?.id) {
+      try { await apiFetch(`/calendar-events/${profileId}/${editEvent.id}`, { method: 'DELETE' }); } catch {}
+    }
     setEvents((evs) => evs.filter((e) => e.id !== editEvent.id));
     setShowModal(false);
   };
@@ -4294,7 +4186,7 @@ const MOODS = [
   { id: 1, emoji: "😩", label: "Terrible", color: "#ef4444" },
 ];
 
-function MoodTracker({ moodLog, setMoodLog }) {
+function MoodTracker({ moodLog, setMoodLog, onMoodSaved }) {
   const todayKey =
     DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
   const [note, setNote] = useState(moodLog[todayKey]?.note || "");
@@ -4304,19 +4196,23 @@ function MoodTracker({ moodLog, setMoodLog }) {
   const todayMood = moodLog[todayKey];
 
   const selectMood = (mood) => {
+    const entry = { ...mood, note, timestamp: new Date().toISOString() };
     setMoodLog((prev) => ({
       ...prev,
-      [todayKey]: { ...mood, note, timestamp: new Date().toISOString() },
+      [todayKey]: entry,
     }));
+    onMoodSaved?.(todayKey, entry);
     setSaved(false);
   };
 
   const saveNote = () => {
     if (moodLog[todayKey]) {
+      const updated = { ...moodLog[todayKey], note };
       setMoodLog((prev) => ({
         ...prev,
-        [todayKey]: { ...prev[todayKey], note },
+        [todayKey]: updated,
       }));
+      onMoodSaved?.(todayKey, updated);
     }
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -5469,7 +5365,7 @@ function InboxBell({ threads, setThreads }) {
 const WEIGHT_SEED = {};
 ;
 
-function WeightTracker() {
+function WeightTracker({ onWeightSaved, profileId }) {
   const [weightLog, setWeightLog] = useState({});
   const [inputWeight, setInputWeight] = useState("");
   const [inputTime, setInputTime] = useState(() => {
@@ -5483,6 +5379,29 @@ function WeightTracker() {
 
   const todayKey =
     DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
+
+  // Load weights from backend
+  useEffect(() => {
+    if (!profileId) return;
+    (async () => {
+      try {
+        const rows = await apiFetch(`/weights/${profileId}`);
+        if (!Array.isArray(rows)) return;
+        const byDay = {};
+        rows.forEach((r) => {
+          const d = new Date(r.date + 'T00:00:00');
+          const dayIdx = d.getDay();
+          const key = DAYS[dayIdx === 0 ? 6 : dayIdx - 1];
+          byDay[key] = {
+            weight: Number(r.kg),
+            date: r.date,
+            timestamp: new Date().toISOString(),
+          };
+        });
+        setWeightLog(byDay);
+      } catch (e) { /* keep empty */ }
+    })();
+  }, [profileId]);
 
   const toDisplay = (kg) =>
     unit === "lbs" ? parseFloat((kg * 2.20462).toFixed(1)) : kg;
@@ -5501,6 +5420,16 @@ function WeightTracker() {
         timestamp: new Date().toISOString(),
       },
     }));
+    // Save to backend
+    if (profileId) {
+      const today = new Date();
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+      apiFetch(`/weights/${profileId}`, {
+        method: 'POST',
+        body: JSON.stringify({ date: todayStr, kg }),
+      }).catch(e => console.warn('Weight save failed:', e));
+    }
+    onWeightSaved?.(kg);
     setSaved(true);
     setInputWeight("");
     setTimeout(() => setSaved(false), 2000);
@@ -5902,6 +5831,11 @@ function Dashboard({
   setMoodLog,
   threads,
   setThreads,
+  onMoodSaved,
+  profileId,
+  events,
+  setEvents,
+  onWeightSaved,
 }) {
   // Aggregate totals across the whole week for the overview
   const weekTotals = DAYS.reduce(
@@ -6539,7 +6473,7 @@ function Dashboard({
 
         {/* RIGHT COLUMN — Calendar */}
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <MiniCalendar />
+          <MiniCalendar events={events} setEvents={setEvents} profileId={profileId} />
 
           {/* Quick stats */}
           <div
@@ -6626,10 +6560,10 @@ function Dashboard({
       </div>
 
       {/* ── Mood Tracker ── */}
-      <MoodTracker moodLog={moodLog} setMoodLog={setMoodLog} />
+      <MoodTracker moodLog={moodLog} setMoodLog={setMoodLog} onMoodSaved={onMoodSaved} />
 
       {/* ── Weight Tracker ── */}
-      <WeightTracker />
+      <WeightTracker onWeightSaved={onWeightSaved} profileId={profileId} />
 
       {/* ── Coach Videos (full width below) ── */}
       <div
@@ -9792,56 +9726,6 @@ export default function App() {
   const [macroGoalsState, setMacroGoalsState] = useState(() => macroGoals);
   const [threads, setThreads] = useState(MSG_SEED);
 
-
-  // ── Journal date + per-day persistence (local-first, server-backed) ─────────
-  const [journalDate, setJournalDate] = useState(() => isoToday());
-
-  const [dayJournal, setDayJournal] = useState(() => {
-    const uid = profile?.id;
-    return uid ? getDay(uid, isoToday()) : null;
-  });
-
-  // Keep local journal in sync when date/user changes
-  useEffect(() => {
-    const uid = profile?.id;
-    if (!uid) return;
-    setDayJournal(getDay(uid, journalDate));
-  }, [journalDate, profile?.id]);
-
-  // Hydrate from server on (login + date change) then write into journalStore
-  useEffect(() => {
-    const uid = profile?.id;
-    if (!uid) return;
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const bundle = await fetchDayBundle(uid, journalDate);
-        const patch = {};
-        if (bundle.totals) patch.totals = bundle.totals;
-        if (bundle.foods) patch.foods = bundle.foods;
-        if (bundle.weight) patch.weight = bundle.weight;
-        if (bundle.mood) patch.mood = bundle.mood;
-        if (bundle.calendar) patch.calendar = bundle.calendar;
-
-        const next = upsertDay(uid, journalDate, patch);
-        if (!cancelled) setDayJournal(next);
-      } catch (e) {
-        console.warn("Journal hydrate failed:", e?.message ?? e);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [journalDate, profile?.id]);
-
-  // Mirror calendar events state from journal (keeps existing UI working)
-  useEffect(() => {
-    if (dayJournal?.calendar) setEvents(dayJournal.calendar);
-  }, [dayJournal]);
-
-  const setActiveDateISO = (iso) => setJournalDate(iso);
   // ✅ Restore session using /auth/me (keeps login after refresh)
   useEffect(() => {
     const t = getToken();
@@ -9865,7 +9749,7 @@ export default function App() {
     if (!profile?.id) return;
     (async () => {
       try {
-        const res = await apiFetch(`/macro-targets/${profile.id}`);
+        const res = await apiFetch(`/athlete/${profile.id}/macro-targets`);
         if (res?.macroGoals) setMacroGoalsState(res.macroGoals);
         if (res?.weekPlan) setPlan(res.weekPlan);
       } catch (e) {
@@ -9874,17 +9758,7 @@ export default function App() {
     })();
   }, [profile?.id]);
 
-  // ✅ Pull coach-set calendar events from backend
-  useEffect(() => {
-    if (!profile?.id) return;
-    (async () => {
-      try {
-        const res = await apiFetch(`/calendar-events/${profile.id}?start=${journalDate}&end=${journalDate}`);
-        const events = Array.isArray(res) ? res : res?.events;
-        if (Array.isArray(events)) setEvents(events);
-      } catch (e) {}
-    })();
-  }, [profile?.id]);
+  // (Calendar events now loaded after profile is set, see below)
 
 
 
@@ -9934,42 +9808,6 @@ export default function App() {
 
   // ── Realistic seed data for gerardqueen (used as base when live parse fails) ──
   const getRealisticData = () => null; // dummy data disabled
-
-    base.netCalories = Math.max(0, base.calories - base.exerciseCalories);
-    const mealCals = base.calories;
-    return {
-      ...base,
-      profileFound: true,
-      source: "live",
-      username,
-      meals: [
-        {
-          name: "Breakfast",
-          calories: Math.round(mealCals * 0.24),
-          logged: true,
-        },
-        {
-          name: "Morning Snack",
-          calories: Math.round(mealCals * 0.09),
-          logged: true,
-        },
-        { name: "Lunch", calories: Math.round(mealCals * 0.33), logged: true },
-        {
-          name: "Afternoon Snack",
-          calories: Math.round(mealCals * 0.08),
-          logged: mealCals > 2000,
-        },
-        {
-          name: "Dinner",
-          calories: Math.round(mealCals * 0.26),
-          logged: mealCals > 1500,
-        },
-      ],
-      weekAdherence: [88, 94, 76, 100, 82, 91, 78].map((v) =>
-        Math.min(100, Math.max(0, v + jitter()))
-      ),
-    };
-  };
 
   // ── Live fetch via Anthropic API with web_fetch tool ──────────────────────
   const fetchMFP = async (username, dayPlan, isAutoRefresh = false) => {
@@ -10294,34 +10132,180 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
     return () => clearInterval(ticker);
   }, [mfpConnected, mfpUsername, mfpManualMode]);
 
-  const [moodLog, setMoodLog] = useState(() => {
-    // Pre-seed some mood history so the week view is meaningful from the start
-    const seed = {};
-    const seeds = [
-      { day: "MON", id: 4, emoji: "🙂", label: "Good", color: "#FF9A52" },
-      {
-        day: "TUE",
-        id: 5,
-        emoji: "😄",
-        label: "Great",
-        color: "#22c55e",
-        note: "Really nailed nutrition today",
-      },
-      {
-        day: "WED",
-        id: 3,
-        emoji: "😐",
-        label: "Neutral",
-        color: "#f97316",
-        note: "Struggled with energy mid-afternoon",
-      },
-      { day: "THU", id: 4, emoji: "🙂", label: "Good", color: "#FF9A52" },
-    ];
-    seeds.forEach((s) => {
-      seed[s.day] = { ...s, timestamp: new Date().toISOString() };
-    });
-    return seed;
-  });
+  const [moodLog, setMoodLog] = useState({});
+
+  // ── Load mood log from backend ────────────────────────────────────────────
+  useEffect(() => {
+    if (!profile?.id) return;
+    (async () => {
+      try {
+        const rows = await apiFetch(`/moods/${profile.id}`);
+        if (!Array.isArray(rows)) return;
+        const byDay = {};
+        rows.forEach((r) => {
+          // Convert date to day key (MON/TUE/etc) for current week display
+          const d = new Date(r.date + 'T00:00:00');
+          const dayIdx = d.getDay(); // 0=Sun
+          const key = DAYS[dayIdx === 0 ? 6 : dayIdx - 1];
+          byDay[key] = {
+            day: key,
+            id: r.mood_id,
+            emoji: r.emoji,
+            label: r.label,
+            color: r.color,
+            note: r.note,
+            date: r.date,
+            timestamp: new Date().toISOString(),
+          };
+        });
+        setMoodLog(byDay);
+      } catch (e) { /* keep empty */ }
+    })();
+  }, [profile?.id]);
+
+  // ── Save mood to backend when updated ─────────────────────────────────────
+  const saveMoodToBackend = async (dayKey, entry) => {
+    if (!profile?.id || !entry) return;
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+    try {
+      await apiFetch(`/moods/${profile.id}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          date: todayStr,
+          id: entry.id,
+          emoji: entry.emoji,
+          label: entry.label,
+          color: entry.color,
+          note: entry.note || '',
+        }),
+      });
+    } catch (e) { console.warn('Mood save failed:', e); }
+  };
+
+  // ── Load weight log from backend ──────────────────────────────────────────
+  const [weightLogLoaded, setWeightLogLoaded] = useState(false);
+  useEffect(() => {
+    if (!profile?.id) return;
+    (async () => {
+      try {
+        const rows = await apiFetch(`/weights/${profile.id}`);
+        // Merge into weightLog state via the WeightTracker component
+        // We'll set a flag and pass loaded data down
+        if (Array.isArray(rows) && rows.length > 0) {
+          window.__nrn_loaded_weights = rows;
+        }
+        setWeightLogLoaded(true);
+      } catch (e) { setWeightLogLoaded(true); }
+    })();
+  }, [profile?.id]);
+
+  // ── Load food logs from backend ───────────────────────────────────────────
+  useEffect(() => {
+    if (!profile?.id) return;
+    (async () => {
+      try {
+        const today = new Date();
+        const start = new Date(today);
+        start.setDate(today.getDate() - 7);
+        const startStr = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
+        const endStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+        const rows = await apiFetch(`/food-logs/${profile.id}?start=${startStr}&end=${endStr}`);
+        if (Array.isArray(rows) && rows.length > 0) {
+          // Rebuild plan from food logs
+          setPlan((prev) => {
+            const next = { ...prev };
+            rows.forEach((dayLog) => {
+              const d = new Date(dayLog.date + 'T00:00:00');
+              const dayIdx = d.getDay();
+              const dayKey = DAYS[dayIdx === 0 ? 6 : dayIdx - 1];
+              if (!next[dayKey]) { next[dayKey] = {}; MEALS.forEach(m => next[dayKey][m] = []); }
+              // Group foods back into meals (default to Snack if no meal info)
+              const foods = (dayLog.foods || []).map(f => ({
+                name: f.name,
+                calories: Number(f.calories || 0),
+                protein: Number(f.protein_g ?? f.protein ?? 0),
+                carbs: Number(f.carbs_g ?? f.carbs ?? 0),
+                fat: Number(f.fat_g ?? f.fat ?? 0),
+                meal: f.meal || 'Snack',
+              }));
+              // Reset this day's meals
+              MEALS.forEach(m => next[dayKey][m] = []);
+              foods.forEach(f => {
+                const meal = MEALS.includes(f.meal) ? f.meal : 'Snack';
+                next[dayKey][meal].push(f);
+              });
+            });
+            return next;
+          });
+        }
+      } catch (e) { /* keep empty plan */ }
+    })();
+  }, [profile?.id]);
+
+  // ── Load calendar events from backend ─────────────────────────────────────
+  const [events, setEvents] = useState([]);
+  useEffect(() => {
+    if (!profile?.id) return;
+    (async () => {
+      try {
+        const rows = await apiFetch(`/calendar-events/${profile.id}`);
+        if (Array.isArray(rows)) setEvents(rows);
+      } catch (e) { /* keep empty */ }
+    })();
+  }, [profile?.id]);
+
+  // ── Auto-save food logs to backend (debounced) ────────────────────────────
+  const planRef = useRef(plan);
+  planRef.current = plan;
+  const foodLogSaveTimer = useRef(null);
+  useEffect(() => {
+    if (!profile?.id) return;
+    // Debounce: save 2s after last plan change
+    if (foodLogSaveTimer.current) clearTimeout(foodLogSaveTimer.current);
+    foodLogSaveTimer.current = setTimeout(() => {
+      const today = new Date();
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+      const dayIdx = today.getDay();
+      const todayKey = DAYS[dayIdx === 0 ? 6 : dayIdx - 1];
+      const dayPlan = planRef.current[todayKey];
+      if (!dayPlan) return;
+      // Flatten all meals into food items
+      const foods = [];
+      MEALS.forEach(meal => {
+        (dayPlan[meal] || []).forEach(f => {
+          foods.push({
+            name: f.name,
+            calories: f.calories || 0,
+            protein_g: f.protein || 0,
+            carbs_g: f.carbs || 0,
+            fat_g: f.fat || 0,
+            meal: meal,
+            source: 'manual',
+          });
+        });
+      });
+      if (foods.length === 0) return;
+      apiFetch(`/food-logs/${profile.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ date: todayStr, foods }),
+      }).catch(e => console.warn('Food log save failed:', e));
+      // Also save daily totals
+      const tot = dayTotals(dayPlan);
+      apiFetch(`/daily-totals/${profile.id}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          date: todayStr,
+          calories: tot.calories,
+          protein_g: tot.protein,
+          carbs_g: tot.carbs,
+          fat_g: tot.fat,
+          source: 'manual',
+        }),
+      }).catch(e => console.warn('Daily totals save failed:', e));
+    }, 2000);
+    return () => { if (foodLogSaveTimer.current) clearTimeout(foodLogSaveTimer.current); };
+  }, [plan, profile?.id]);
 
   if (!tokenState || !profile)
     return (
@@ -10538,6 +10522,11 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
             setThreads={setThreads}
             mfpData={mfpData}
             mfpConnected={mfpConnected}
+            onMoodSaved={saveMoodToBackend}
+            profileId={profile?.id}
+            events={events}
+            setEvents={setEvents}
+            onWeightSaved={() => {}}
           />
         )}
         {tab === "meals" && (
@@ -10662,3 +10651,4 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
       </div>
     </div>
   );
+}
