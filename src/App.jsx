@@ -8977,8 +8977,8 @@ function RealCoachMessages({ profileId }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [coachName, setCoachName] = useState("My Coach");
   const [coachId, setCoachId] = useState(null);
+  const [errCount, setErrCount] = useState(0);
   const bottomRef = useRef(null);
 
   // Find the coach by looking at profile's coachId
@@ -8987,14 +8987,7 @@ function RealCoachMessages({ profileId }) {
     (async () => {
       try {
         const me = await apiFetch('/auth/me');
-        if (me?.coachId) {
-          setCoachId(me.coachId);
-          // Try to get coach name
-          try {
-            const unread = await apiFetch('/messages-unread');
-            // Just use the coachId
-          } catch {}
-        }
+        if (me?.coachId) setCoachId(me.coachId);
       } catch {}
     })();
   }, [profileId]);
@@ -9003,16 +8996,16 @@ function RealCoachMessages({ profileId }) {
     if (!coachId) return;
     try {
       const msgs = await apiFetch(`/messages/${coachId}`);
-      if (Array.isArray(msgs)) setMessages(msgs);
-    } catch {}
+      if (Array.isArray(msgs)) { setMessages(msgs); setErrCount(0); }
+    } catch { setErrCount(c => c + 1); }
   };
 
   useEffect(() => { if (coachId) loadMessages(); }, [coachId]);
   useEffect(() => {
-    if (!coachId) return;
-    const interval = setInterval(loadMessages, 10 * 1000);
+    if (!coachId || errCount > 3) return; // stop polling after 3 consecutive errors
+    const interval = setInterval(loadMessages, 15 * 1000);
     return () => clearInterval(interval);
-  }, [coachId]);
+  }, [coachId, errCount]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
