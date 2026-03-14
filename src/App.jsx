@@ -8985,7 +8985,7 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
   const [conversations, setConversations] = useState([]);
   const [realMsgs, setRealMsgs] = useState([]);
   const [activeCoachId, setActiveCoachId] = useState(null);
-  const [msgFilter, setMsgFilter] = useState("chat");
+  const msgFilter = activeId && String(activeId).endsWith("-checkin") ? "checkin" : "chat";
   const [realErrCount, setRealErrCount] = useState(0);
 
   const loadConversations = async () => {
@@ -9010,7 +9010,7 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
     if (!activeCoachId || realErrCount > 3) return;
     const interval = setInterval(() => { loadReal(activeCoachId); loadConversations(); }, 12 * 1000);
     return () => clearInterval(interval);
-  }, [activeCoachId, realErrCount]);
+  }, [activeCoachId, realErrCount, msgFilter]);
 
   const sendReal = async () => {
     if (!input.trim() || !activeCoachId || loading) return;
@@ -9034,7 +9034,7 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMsgs, activeId, realMsgs]);
 
-  const activeThread = activeId && typeof activeId === "string" && !/^\d+$/.test(activeId)
+  const activeThread = activeId && typeof activeId === "string" && !/^\d+-(chat|checkin)$/.test(activeId)
     ? threads.find((t) => t.senderId === activeId) : null;
   const coachCfg = activeId ? COACHES_CONFIG[activeId] : null;
   const isRealCoach = activeCoachId != null;
@@ -9046,8 +9046,9 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
   const openThread = (id) => {
     setActiveId(id);
     setInput("");
-    if (typeof id === "number" || (typeof id === "string" && /^\d+$/.test(id))) {
-      const cid = Number(id);
+    const match = typeof id === "string" && id.match(/^(\d+)-(chat|checkin)$/);
+    if (match) {
+      const cid = Number(match[1]);
       setActiveCoachId(cid);
       loadReal(cid).then(loadConversations);
       return;
@@ -9115,30 +9116,12 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
     seenIds.add(c.otherId);
     const nameParts = (c.otherName || "Coach").split(" ");
     const initials = nameParts.length >= 2 ? (nameParts[0][0] + nameParts[1][0]).toUpperCase() : (c.otherName || "?")[0];
-    allThreads.push({
-      id: c.otherId,
-      name: c.otherName || "Coach",
-      role: c.role === "coach" || c.role === "admin" ? "Coach" : c.role || "Coach",
-      initials,
-      color: T.coachGreen,
-      isReal: true,
-      lastMsg: c.lastMessage || "Start a conversation…",
-      lastTime: c.lastAt ? new Date(c.lastAt) : null,
-      unread: c.unreadCount || 0,
-    });
+    allThreads.push({ id: `${c.otherId}-chat`, coachId: c.otherId, name: c.otherName || "Coach", sub: "Chat", role: "Coach", initials, color: T.coachGreen, isReal: true, lastMsg: c.lastMessage || "Start a conversation…", lastTime: c.lastAt ? new Date(c.lastAt) : null, unread: c.unreadCount || 0 });
+    allThreads.push({ id: `${c.otherId}-checkin`, coachId: c.otherId, name: c.otherName || "Coach", sub: "Check-in notes", role: "Coach", initials, color: T.coachGreen, isReal: true, lastMsg: "Check-in notes", lastTime: null, unread: 0 });
   });
   if (coachId && !seenIds.has(coachId)) {
-    allThreads.unshift({
-      id: coachId,
-      name: "My Coach",
-      role: "Coach",
-      initials: "🏋️",
-      color: T.coachGreen,
-      isReal: true,
-      lastMsg: "Start a conversation…",
-      lastTime: null,
-      unread: 0,
-    });
+    allThreads.unshift({ id: `${coachId}-chat`, coachId, name: "My Coach", sub: "Chat", role: "Coach", initials: "🏋️", color: T.coachGreen, isReal: true, lastMsg: "Start a conversation…", lastTime: null, unread: 0 });
+    allThreads.unshift({ id: `${coachId}-checkin`, coachId, name: "My Coach", sub: "Check-in notes", role: "Coach", initials: "🏋️", color: T.coachGreen, isReal: true, lastMsg: "Check-in notes", lastTime: null, unread: 0 });
   }
   threads.forEach((t) => {
     const cfg = COACHES_CONFIG[t.senderId];
@@ -9205,7 +9188,7 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <span style={{ fontFamily: "DM Sans", fontSize: 13, fontWeight: t.unread > 0 ? 700 : 500, color: T.text }}>{t.name}</span>
                       <span style={{ background: `${t.color}18`, border: `1px solid ${t.color}33`, borderRadius: 4, padding: "1px 6px", fontFamily: "DM Sans", fontSize: 8, fontWeight: 600, color: t.color }}>
-                        {t.isReal ? "Coach" : "AI"}
+                        {t.sub || (t.isReal ? "Coach" : "AI")}
                       </span>
                     </div>
                     {t.lastTime && <span style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: T.muted }}>{timeAgo(t.lastTime.toISOString())}</span>}
@@ -9244,21 +9227,15 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
               <div style={{ width: 36, height: 36, borderRadius: "50%", background: `${activeInfo?.color || T.accent}22`, border: `2px solid ${activeInfo?.color || T.accent}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: activeInfo?.isReal ? 16 : 12, fontFamily: "Bebas Neue", color: activeInfo?.color || T.accent }}>
                 {activeInfo?.isReal ? activeInfo.initials : activeInfo?.initials}
               </div>
-              <div style={{ flex: 1 }}>
+                <div style={{ flex: 1 }}>
                 <div style={{ fontFamily: "DM Sans", fontSize: 14, fontWeight: 700, color: T.text }}>{activeInfo?.name}</div>
-                <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>{activeInfo?.role}{activeInfo?.isReal ? " · Live" : " · AI Assistant"}</div>
+                <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>{activeInfo?.sub || activeInfo?.role}{activeInfo?.isReal ? " · Live" : " · AI Assistant"}</div>
               </div>
               {activeInfo?.isReal && (
-                <>
-                  <div style={{ display: "flex", gap: 4, background: T.surface, borderRadius: 8, padding: 2 }}>
-                    <button onClick={() => setMsgFilter("chat")} style={{ padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: "DM Sans", fontSize: 11, background: msgFilter === "chat" ? T.accent : "transparent", color: msgFilter === "chat" ? T.bg : T.muted }} type="button">Chat</button>
-                    <button onClick={() => setMsgFilter("checkin")} style={{ padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: "DM Sans", fontSize: 11, background: msgFilter === "checkin" ? T.accent : "transparent", color: msgFilter === "checkin" ? T.bg : T.muted }} type="button">Check-in notes</button>
-                  </div>
-                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                <div style={{ display: "flex", gap: 4, alignItems: "center", marginLeft: "auto" }}>
                     <div style={{ width: 6, height: 6, borderRadius: "50%", background: T.coachGreen, animation: "pulse 2s infinite" }} />
                     <span style={{ fontFamily: "DM Sans", fontSize: 9, color: T.coachGreen }}>LIVE</span>
-                  </div>
-                </>
+                </div>
               )}
             </div>
 
@@ -9443,15 +9420,13 @@ export default function App() {
         today.getMonth() + 1
       ).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 
-      // ── Attempt 1: MFP public JSON endpoint (no auth needed for public diaries) ──
+      // Server-side scrape (Senpro-style, no CORS) — backend fetches MFP directly
       let parsed = null;
-      const proxies = [
-        `https://corsproxy.io/?${encodeURIComponent(`https://www.myfitnesspal.com/food/diary/${username}.json?date=${dateStr}`)}`,
-        `https://api.allorigins.win/get?url=${encodeURIComponent(`https://www.myfitnesspal.com/food/diary/${username}?date=${dateStr}`)}`,
-        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(`https://www.myfitnesspal.com/food/diary/${username}?date=${dateStr}`)}`,
-      ];
-
-      for (const proxyUrl of proxies) {
+      try {
+        parsed = await apiFetch(`/mfp-diary/${encodeURIComponent(username)}?date=${dateStr}`);
+      } catch (_) {}
+      // Legacy client-side proxies removed — backend /mfp-diary does server-side scrape
+      if (!parsed) for (const proxyUrl of []) {
         if (parsed) break;
         try {
           const ctrl = new AbortController();
@@ -9525,8 +9500,8 @@ export default function App() {
         } catch (_proxyErr) { /* try next proxy */ }
       }
 
-      // ── Attempt 2: Use Claude AI with web_search to read the public diary ──
-      if (!parsed || !parsed.profileFound || !parsed.calories) {
+      // Fallback removed — backend /mfp-diary is the single source
+      if (false && (!parsed || !parsed.profileFound || !parsed.calories)) {
         const response = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -9580,7 +9555,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
         parsed &&
         parsed.profileFound &&
         parsed.calories > 0 &&
-        parsed.protein > 0
+        (parsed.protein > 0 || parsed.carbs > 0 || parsed.fat > 0)
       ) {
         const result = { ...parsed, source: "live" };
         setMfpData(result);
