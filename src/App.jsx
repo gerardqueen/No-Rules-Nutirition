@@ -1762,7 +1762,8 @@ function MFPPanel({
   onImport,
   onSetMfpUsername,
 }) {
-  const mfpUsername = account?.mfpUsername || null;
+  const mfpUsername = account?.mfpUsername ?? null;
+  const safeUsername = mfpUsername || "";
   const profileUrl = `https://www.myfitnesspal.com/en/food/diary/${
     mfpUsername || ""
   }`;
@@ -2205,7 +2206,7 @@ function MFPPanel({
           FETCHING LIVE DATA…
         </div>
         <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted }}>
-          Reading {mfpUsername}'s public diary via AI
+          {safeUsername ? `Reading ${safeUsername}'s public diary via AI` : "Reading your public diary via AI"}
         </div>
         <style>{`@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>
       </div>
@@ -8980,44 +8981,46 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef(null);
 
-  // ── Real coach messages state ──────────────────────────────────────────────
-  const coachId = profile?.coachId || null;
+  // ── Real coach messages (separate conversation per coach) ───────────────────
+  const [conversations, setConversations] = useState([]);
   const [realMsgs, setRealMsgs] = useState([]);
+  const [activeCoachId, setActiveCoachId] = useState(null);
+  const [msgFilter, setMsgFilter] = useState("chat");
   const [realErrCount, setRealErrCount] = useState(0);
-  const [realUnreadMap, setRealUnreadMap] = useState({}); // from GET /messages-unread
 
-  // Load unread counts from backend
-  const loadUnreadCounts = async () => {
+  const loadConversations = async () => {
     try {
-      const rows = await apiFetch('/messages-unread');
-      const map = {};
-      (Array.isArray(rows) ? rows : []).forEach(r => { map[r.fromId] = r.count; });
-      setRealUnreadMap(map);
+      const rows = await apiFetch('/conversations');
+      setConversations(Array.isArray(rows) ? rows : []);
     } catch {}
   };
 
-  // Load real messages for active coach conversation
-  const loadReal = async () => {
+  const loadReal = async (coachId) => {
     if (!coachId) return;
     try {
-      const msgs = await apiFetch(`/messages/${coachId}`);
+      const url = msgFilter === "checkin" ? `/messages/${coachId}?type=checkin` : `/messages/${coachId}?type=chat`;
+      const msgs = await apiFetch(url);
       if (Array.isArray(msgs)) { setRealMsgs(msgs); setRealErrCount(0); }
     } catch { setRealErrCount(c => c + 1); }
   };
 
-  useEffect(() => { if (coachId) { loadReal(); loadUnreadCounts(); } }, [coachId]);
+  useEffect(() => { loadConversations(); }, [profile?.id]);
+  useEffect(() => { if (activeCoachId) loadReal(activeCoachId); }, [activeCoachId, msgFilter]);
   useEffect(() => {
-    if (!coachId || realErrCount > 3) return;
-    const interval = setInterval(() => { loadReal(); loadUnreadCounts(); }, 12 * 1000);
+    if (!activeCoachId || realErrCount > 3) return;
+    const interval = setInterval(() => { loadReal(activeCoachId); loadConversations(); }, 12 * 1000);
     return () => clearInterval(interval);
-  }, [coachId, realErrCount]);
+  }, [activeCoachId, realErrCount]);
 
   const sendReal = async () => {
-    if (!input.trim() || !coachId || loading) return;
+    if (!input.trim() || !activeCoachId || loading) return;
     setLoading(true);
     try {
-      const msg = await apiFetch(`/messages/${coachId}`, {
-        method: 'POST', body: JSON.stringify({ content: input.trim() }),
+      const msg = await apiFetch(`/messages/${activeCoachId}`, {
+        method: 'POST', body: JSON.stringify({
+          content: input.trim(),
+          messageType: msgFilter === "checkin" ? "checkin" : "chat",
+        }),
       });
       setRealMsgs(prev => [...prev, msg]);
       setInput("");
@@ -9031,22 +9034,25 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMsgs, activeId, realMsgs]);
 
-  const activeThread = activeId && activeId !== "real-coach"
+  const activeThread = activeId && typeof activeId === "string" && !/^\d+$/.test(activeId)
     ? threads.find((t) => t.senderId === activeId) : null;
   const coachCfg = activeId ? COACHES_CONFIG[activeId] : null;
-  const isRealCoach = activeId === "real-coach";
+  const isRealCoach = activeCoachId != null;
+  const coachId = profile?.coachId || null;
 
-  const realUnread = coachId ? (realUnreadMap[coachId] || 0) : 0;
+  const realUnread = conversations.reduce((s, c) => s + (c.unreadCount || 0), 0);
   const totalUnread = threads.reduce((n, t) => n + t.messages.filter((m) => !m.read).length, 0) + realUnread;
 
   const openThread = (id) => {
     setActiveId(id);
     setInput("");
-    if (id === "real-coach") {
-      // Loading messages marks them read server-side; refresh unread counts
-      loadReal().then(loadUnreadCounts);
+    if (typeof id === "number" || (typeof id === "string" && /^\d+$/.test(id))) {
+      const cid = Number(id);
+      setActiveCoachId(cid);
+      loadReal(cid).then(loadConversations);
       return;
     }
+    setActiveCoachId(null);
     setThreads((prev) =>
       prev.map((t) =>
         t.senderId === id
@@ -9102,20 +9108,36 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
     else sendAIMessage();
   };
 
-  // ── Build thread list: real coach first, then AI coaches ───────────────────
+  // ── Build thread list: real coach conversations (one per coach), then AI ───
   const allThreads = [];
-  if (coachId) {
-    const lastReal = realMsgs[realMsgs.length - 1];
+  const seenIds = new Set();
+  conversations.forEach((c) => {
+    seenIds.add(c.otherId);
+    const nameParts = (c.otherName || "Coach").split(" ");
+    const initials = nameParts.length >= 2 ? (nameParts[0][0] + nameParts[1][0]).toUpperCase() : (c.otherName || "?")[0];
     allThreads.push({
-      id: "real-coach",
+      id: c.otherId,
+      name: c.otherName || "Coach",
+      role: c.role === "coach" || c.role === "admin" ? "Coach" : c.role || "Coach",
+      initials,
+      color: T.coachGreen,
+      isReal: true,
+      lastMsg: c.lastMessage || "Start a conversation…",
+      lastTime: c.lastAt ? new Date(c.lastAt) : null,
+      unread: c.unreadCount || 0,
+    });
+  });
+  if (coachId && !seenIds.has(coachId)) {
+    allThreads.unshift({
+      id: coachId,
       name: "My Coach",
-      role: "Your Coach",
+      role: "Coach",
       initials: "🏋️",
       color: T.coachGreen,
       isReal: true,
-      lastMsg: lastReal?.content || "Start a conversation…",
-      lastTime: lastReal?.created_at ? new Date(lastReal.created_at) : null,
-      unread: realUnread,
+      lastMsg: "Start a conversation…",
+      lastTime: null,
+      unread: 0,
     });
   }
   threads.forEach((t) => {
@@ -9135,9 +9157,14 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
     });
   });
 
-  // ── Active chat messages ──────────────────────────────────────────────────
+  // ── Active chat messages (include coach name) ───────────────────────────────
   const activeChatMessages = isRealCoach
-    ? realMsgs.map(m => ({ role: m.fromId === profile?.id ? "user" : "assistant", content: m.content, time: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "" }))
+    ? realMsgs.map(m => ({
+        role: m.fromId === profile?.id ? "user" : "assistant",
+        content: m.content,
+        time: m.created_at ? new Date(m.created_at).toLocaleString([], { hour: "2-digit", minute: "2-digit" }) : "",
+        fromName: m.fromName,
+      }))
     : (chatMsgs[activeId] || []);
 
   const activeInfo = allThreads.find(t => t.id === activeId);
@@ -9213,19 +9240,25 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
         ) : (
           <>
             {/* Chat header */}
-            <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <div style={{ width: 36, height: 36, borderRadius: "50%", background: `${activeInfo?.color || T.accent}22`, border: `2px solid ${activeInfo?.color || T.accent}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: activeInfo?.isReal ? 16 : 12, fontFamily: "Bebas Neue", color: activeInfo?.color || T.accent }}>
                 {activeInfo?.isReal ? activeInfo.initials : activeInfo?.initials}
               </div>
-              <div>
+              <div style={{ flex: 1 }}>
                 <div style={{ fontFamily: "DM Sans", fontSize: 14, fontWeight: 700, color: T.text }}>{activeInfo?.name}</div>
                 <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>{activeInfo?.role}{activeInfo?.isReal ? " · Live" : " · AI Assistant"}</div>
               </div>
               {activeInfo?.isReal && (
-                <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
-                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: T.coachGreen, animation: "pulse 2s infinite" }} />
-                  <span style={{ fontFamily: "DM Sans", fontSize: 9, color: T.coachGreen }}>LIVE</span>
-                </div>
+                <>
+                  <div style={{ display: "flex", gap: 4, background: T.surface, borderRadius: 8, padding: 2 }}>
+                    <button onClick={() => setMsgFilter("chat")} style={{ padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: "DM Sans", fontSize: 11, background: msgFilter === "chat" ? T.accent : "transparent", color: msgFilter === "chat" ? T.bg : T.muted }} type="button">Chat</button>
+                    <button onClick={() => setMsgFilter("checkin")} style={{ padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: "DM Sans", fontSize: 11, background: msgFilter === "checkin" ? T.accent : "transparent", color: msgFilter === "checkin" ? T.bg : T.muted }} type="button">Check-in notes</button>
+                  </div>
+                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: T.coachGreen, animation: "pulse 2s infinite" }} />
+                    <span style={{ fontFamily: "DM Sans", fontSize: 9, color: T.coachGreen }}>LIVE</span>
+                  </div>
+                </>
               )}
             </div>
 
@@ -9240,6 +9273,7 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
                 return (
                   <div key={i} style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 10 }}>
                     <div style={{ maxWidth: "75%", padding: "10px 14px", borderRadius: 14, background: isUser ? T.accent : T.surface, color: isUser ? T.bg : T.text, borderBottomRightRadius: isUser ? 4 : 14, borderBottomLeftRadius: isUser ? 14 : 4 }}>
+                      {!isUser && m.fromName && <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, marginBottom: 2 }}>{m.fromName}</div>}
                       <div style={{ fontFamily: "DM Sans", fontSize: 12, lineHeight: 1.5 }}>{m.content}</div>
                       {m.time && <div style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: isUser ? `${T.bg}88` : T.muted, marginTop: 4, textAlign: "right" }}>{m.time}</div>}
                     </div>
@@ -9653,8 +9687,8 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
     importMFPDay(selectedDay, result);
   };
 
-  // ── Update MFP username → immediately re-fetch (Senpro behaviour) ─────────
-  const handleSetMfpUsername = (newUsername) => {
+  // ── Update MFP username → persist to backend, then re-fetch ────────────────
+  const handleSetMfpUsername = async (newUsername) => {
     const trimmed = newUsername.trim().toLowerCase();
     setProfile((prev) => ({ ...prev, mfpUsername: trimmed || null }));
     setMfpData(null);
@@ -9662,8 +9696,17 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
     setMfpManualMode(false);
     setMfpError(null);
     setMfpNextSyncIn(null);
+    if (profile?.id) {
+      try {
+        await apiFetch(`/profiles/${profile.id}`, {
+          method: "PUT",
+          body: JSON.stringify({ mfpUsername: trimmed || null }),
+        });
+      } catch (e) {
+        setMfpError("Could not save MFP username — try again");
+      }
+    }
     if (trimmed) {
-      // Slight delay to let state settle, then fetch immediately
       setTimeout(() => fetchMFP(trimmed, plan[selectedDay]), 150);
     }
   };
@@ -10171,7 +10214,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
           </div>
         )}
         {tab === "mfp" && (
-          <div>
+          <div style={{ minHeight: 400 }}>
             <div style={{ marginBottom: 20 }}>
               <div
                 style={{
@@ -10191,7 +10234,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
                   marginTop: 4,
                 }}
               >
-                Sync your food diary · Coach sees your adherence in real time
+                Sync your food diary · Coach sees your adherence in real time · Link your MFP username below
               </div>
             </div>
             <MFPPanel
