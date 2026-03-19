@@ -4212,52 +4212,46 @@ const MOODS = [
 ];
 
 function MoodTracker({ moodLog, setMoodLog, onMoodSaved }) {
-  const todayKey =
-    DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
-  const [note, setNote] = useState(moodLog[todayKey]?.note || "");
-  const [saved, setSaved] = useState(!!moodLog[todayKey]);
+  const todayDate = dateToISO(new Date());
+  const [note, setNote] = useState(moodLog[todayDate]?.note || "");
+  const [saved, setSaved] = useState(!!moodLog[todayDate]);
   const [showHistory, setShowHistory] = useState(false);
 
-  const todayMood = moodLog[todayKey];
+  const todayMood = moodLog[todayDate];
 
   const selectMood = (mood) => {
-    const entry = { ...mood, note, timestamp: new Date().toISOString() };
-    setMoodLog((prev) => ({
-      ...prev,
-      [todayKey]: entry,
-    }));
-    onMoodSaved?.(todayKey, entry);
+    const entry = { ...mood, note, date: todayDate, timestamp: new Date().toISOString() };
+    setMoodLog((prev) => ({ ...prev, [todayDate]: entry }));
+    onMoodSaved?.(todayDate, entry);
     setSaved(false);
   };
 
   const saveNote = () => {
-    if (moodLog[todayKey]) {
-      const updated = { ...moodLog[todayKey], note };
-      setMoodLog((prev) => ({
-        ...prev,
-        [todayKey]: updated,
-      }));
-      onMoodSaved?.(todayKey, updated);
+    if (moodLog[todayDate]) {
+      const updated = { ...moodLog[todayDate], note };
+      setMoodLog((prev) => ({ ...prev, [todayDate]: updated }));
+      onMoodSaved?.(todayDate, updated);
     }
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
 
-  // Build week history array
-  const weekHistory = DAYS.map((d) => ({ day: d, entry: moodLog[d] || null }));
+  // Build last 7 calendar days
+  const last7 = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const ds = dateToISO(d);
+    const dow = d.getDay();
+    last7.push({ date: ds, dayLabel: DAYS[dow === 0 ? 6 : dow - 1], entry: moodLog[ds] || null, isToday: ds === todayDate });
+  }
   const avgScore = (() => {
-    const entries = Object.values(moodLog).filter(Boolean);
+    const entries = last7.filter(d => d.entry).map(d => d.entry.id);
     if (!entries.length) return null;
-    return (entries.reduce((a, e) => a + e.id, 0) / entries.length).toFixed(1);
+    return (entries.reduce((a, v) => a + v, 0) / entries.length).toFixed(1);
   })();
 
   const trendLabel =
-    avgScore >= 4
-      ? "Great week 🔥"
-      : avgScore >= 3
-      ? "Solid week 💪"
-      : avgScore
-      ? "Tough stretch 💙"
+    avgScore >= 4 ? "Great week 🔥" : avgScore >= 3 ? "Solid week 💪" : avgScore ? "Tough stretch 💙" : null;
       : null;
 
   return (
@@ -4458,92 +4452,24 @@ function MoodTracker({ moodLog, setMoodLog, onMoodSaved }) {
             THIS WEEK
           </div>
           <div style={{ display: "flex", gap: 10 }}>
-            {weekHistory.map(({ day, entry }) => (
-              <div
-                key={day}
-                style={{
-                  flex: 1,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 6,
-                }}
-              >
-                {/* Bar */}
-                <div
-                  style={{
-                    width: "100%",
-                    height: 64,
-                    display: "flex",
-                    alignItems: "flex-end",
-                    background: T.surface,
-                    borderRadius: 8,
-                    overflow: "hidden",
-                    position: "relative",
-                  }}
-                >
+            {last7.map(({ date, dayLabel, entry, isToday }) => (
+              <div key={date} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                <div style={{ width: "100%", height: 64, display: "flex", alignItems: "flex-end", background: T.surface, borderRadius: 8, overflow: "hidden", position: "relative", border: isToday ? `1px solid ${T.accent}44` : "none" }}>
                   {entry ? (
-                    <div
-                      style={{
-                        width: "100%",
-                        height: `${(entry.id / 5) * 100}%`,
-                        background: `${entry.color}55`,
-                        borderTop: `2px solid ${entry.color}`,
-                        transition: "height 0.5s ease",
-                        position: "absolute",
-                        bottom: 0,
-                      }}
-                    />
+                    <div style={{ width: "100%", height: `${(entry.id / 5) * 100}%`, background: `${entry.color}55`, borderTop: `2px solid ${entry.color}`, transition: "height 0.5s ease", position: "absolute", bottom: 0 }} />
                   ) : (
-                    <div
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
+                    <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
                       <span style={{ fontSize: 10, color: T.border }}>—</span>
                     </div>
                   )}
                   {entry && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        inset: 0,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
+                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
                       <span style={{ fontSize: 18 }}>{entry.emoji}</span>
                     </div>
                   )}
                 </div>
-                {/* Tooltip on hover if note */}
-                <div
-                  style={{
-                    fontFamily: "Bebas Neue",
-                    fontSize: 11,
-                    letterSpacing: 1,
-                    color: entry ? entry.color : T.border,
-                  }}
-                >
-                  {day}
-                </div>
-                {entry && (
-                  <div
-                    style={{
-                      fontFamily: "DM Sans",
-                      fontSize: 9,
-                      color: T.muted,
-                      textAlign: "center",
-                    }}
-                  >
-                    {entry.label}
-                  </div>
-                )}
+                <div style={{ fontFamily: "Bebas Neue", fontSize: 11, letterSpacing: 1, color: entry ? entry.color : T.border }}>{dayLabel}</div>
+                <div style={{ fontFamily: "JetBrains Mono", fontSize: 7, color: T.muted }}>{date.slice(5)}</div>
               </div>
             ))}
           </div>
@@ -4552,59 +4478,23 @@ function MoodTracker({ moodLog, setMoodLog, onMoodSaved }) {
           <div style={{ marginTop: 16, position: "relative", height: 40 }}>
             <svg width="100%" height="40" style={{ overflow: "visible" }}>
               {(() => {
-                const entries = weekHistory
-                  .map((w, i) => ({ i, entry: w.entry }))
-                  .filter((x) => x.entry);
+                const entries = last7.map((w, i) => ({ i, entry: w.entry })).filter((x) => x.entry);
                 if (entries.length < 2) return null;
-                const step = 100 / (DAYS.length - 1);
-                const pts = entries
-                  .map((x) => `${x.i * step}%,${40 - (x.entry.id / 5) * 36}`)
-                  .join(" ");
+                const step = 100 / (last7.length - 1);
+                const pts = entries.map((x) => `${x.i * step}%,${40 - (x.entry.id / 5) * 36}`).join(" ");
                 return (
                   <>
-                    <polyline
-                      points={pts}
-                      fill="none"
-                      stroke={T.accent}
-                      strokeWidth="1.5"
-                      strokeDasharray="4 3"
-                      strokeLinecap="round"
-                    />
+                    <polyline points={pts} fill="none" stroke={T.accent} strokeWidth="1.5" strokeDasharray="4 3" strokeLinecap="round" />
                     {entries.map((x) => (
-                      <circle
-                        key={x.i}
-                        cx={`${x.i * step}%`}
-                        cy={40 - (x.entry.id / 5) * 36}
-                        r="4"
-                        fill={x.entry.color}
-                        stroke={T.card}
-                        strokeWidth="2"
-                      />
+                      <circle key={x.i} cx={`${x.i * step}%`} cy={40 - (x.entry.id / 5) * 36} r="4" fill={x.entry.color} stroke={T.card} strokeWidth="2" />
                     ))}
                   </>
                 );
               })()}
             </svg>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                marginTop: 4,
-              }}
-            >
-              {DAYS.map((d) => (
-                <span
-                  key={d}
-                  style={{
-                    fontFamily: "JetBrains Mono",
-                    fontSize: 8,
-                    color: T.border,
-                    flex: 1,
-                    textAlign: "center",
-                  }}
-                >
-                  {d}
-                </span>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+              {last7.map((d) => (
+                <span key={d.date} style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: T.border, flex: 1, textAlign: "center" }}>{d.dayLabel}</span>
               ))}
             </div>
           </div>
@@ -5391,19 +5281,12 @@ const WEIGHT_SEED = {};
 ;
 
 function WeightTracker({ onWeightSaved, profileId }) {
-  const [weightLog, setWeightLog] = useState({});
+  const [weightLog, setWeightLog] = useState({}); // keyed by YYYY-MM-DD
   const [inputWeight, setInputWeight] = useState("");
-  const [inputTime, setInputTime] = useState(() => {
-    const now = new Date();
-    return `${String(now.getHours()).padStart(2, "0")}:${String(
-      now.getMinutes()
-    ).padStart(2, "0")}`;
-  });
   const [saved, setSaved] = useState(false);
-  const [unit, setUnit] = useState("kg"); // "kg" | "lbs"
+  const [unit, setUnit] = useState("kg");
 
-  const todayKey =
-    DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
+  const todayDate = dateToISO(new Date());
 
   // Load weights from backend
   useEffect(() => {
@@ -5412,46 +5295,24 @@ function WeightTracker({ onWeightSaved, profileId }) {
       try {
         const rows = await apiFetch(`/weights/${profileId}`);
         if (!Array.isArray(rows)) return;
-        const byDay = {};
-        rows.forEach((r) => {
-          const d = new Date(r.date + 'T00:00:00');
-          const dayIdx = d.getDay();
-          const key = DAYS[dayIdx === 0 ? 6 : dayIdx - 1];
-          byDay[key] = {
-            weight: Number(r.kg),
-            date: r.date,
-            timestamp: new Date().toISOString(),
-          };
-        });
-        setWeightLog(byDay);
-      } catch (e) { /* keep empty */ }
+        const byDate = {};
+        rows.forEach((r) => { byDate[r.date] = { weight: Number(r.kg), date: r.date }; });
+        setWeightLog(byDate);
+      } catch {}
     })();
   }, [profileId]);
 
-  const toDisplay = (kg) =>
-    unit === "lbs" ? parseFloat((kg * 2.20462).toFixed(1)) : kg;
-  const fromDisplay = (v) =>
-    unit === "lbs" ? parseFloat((v / 2.20462).toFixed(2)) : parseFloat(v);
+  const toDisplay = (kg) => unit === "lbs" ? parseFloat((kg * 2.20462).toFixed(1)) : kg;
+  const fromDisplay = (v) => unit === "lbs" ? parseFloat((v / 2.20462).toFixed(2)) : parseFloat(v);
 
   const logWeight = () => {
     const val = parseFloat(inputWeight);
     if (!val || val <= 0) return;
     const kg = fromDisplay(val);
-    setWeightLog((prev) => ({
-      ...prev,
-      [todayKey]: {
-        weight: kg,
-        time: inputTime,
-        timestamp: new Date().toISOString(),
-      },
-    }));
-    // Save to backend
+    setWeightLog((prev) => ({ ...prev, [todayDate]: { weight: kg, date: todayDate } }));
     if (profileId) {
-      const today = new Date();
-      const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
       apiFetch(`/weights/${profileId}`, {
-        method: 'POST',
-        body: JSON.stringify({ date: todayStr, kg }),
+        method: 'POST', body: JSON.stringify({ date: todayDate, kg }),
       }).catch(e => console.warn('Weight save failed:', e));
     }
     onWeightSaved?.(kg);
@@ -5460,388 +5321,111 @@ function WeightTracker({ onWeightSaved, profileId }) {
     setTimeout(() => setSaved(false), 2000);
   };
 
-  // Build chart data
-  const entries = DAYS.map((d, i) => ({
-    day: d,
-    i,
-    entry: weightLog[d] || null,
-  }));
-  const hasData = entries.filter((e) => e.entry).length > 0;
-  const weights = entries.filter((e) => e.entry).map((e) => e.entry.weight);
-  const minW = Math.min(...weights) - 0.5;
-  const maxW = Math.max(...weights) + 0.5;
-  const range = maxW - minW || 1;
+  // Build last 7 calendar days
+  const last7 = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const ds = dateToISO(d);
+    const dow = d.getDay();
+    last7.push({ date: ds, dayLabel: DAYS[dow === 0 ? 6 : dow - 1], entry: weightLog[ds] || null, isToday: ds === todayDate });
+  }
+  const hasData = last7.some(e => e.entry);
+  const weights = last7.filter(e => e.entry).map(e => e.entry.weight);
+  const minW = hasData ? Math.min(...weights) - 0.5 : 0;
+  const maxW = hasData ? Math.max(...weights) + 0.5 : 1;
+  const rangeW = maxW - minW || 1;
+  const toY = (w) => 100 - ((w - minW) / rangeW) * 100;
 
-  const chartH = 80;
-  const chartW = 100; // percentage units
-  const step = chartW / (DAYS.length - 1);
-
-  const toY = (w) => chartH - ((w - minW) / range) * chartH;
-
-  const pointsWithData = entries.filter((e) => e.entry);
-  const polyPts = pointsWithData
-    .map((e) => `${e.i * step}%,${toY(e.entry.weight)}`)
-    .join(" ");
-
-  const todayEntry = weightLog[todayKey];
+  const todayEntry = weightLog[todayDate];
   const allEntries = Object.values(weightLog).filter(Boolean);
-  const avgWeight = allEntries.length
-    ? (
-        allEntries.reduce((s, e) => s + e.weight, 0) / allEntries.length
-      ).toFixed(1)
-    : null;
-  const firstW = weights[0];
-  const lastW = weights[weights.length - 1];
-  const trend = weights.length >= 2 ? (lastW - firstW).toFixed(1) : null;
-  const trendUp = trend > 0;
+  const avgWeight = allEntries.length > 0 ? (allEntries.reduce((s, e) => s + e.weight, 0) / allEntries.length).toFixed(1) : null;
+  const trend = weights.length >= 2 ? (weights[weights.length - 1] - weights[0]).toFixed(1) : null;
 
   return (
-    <div
-      style={{
-        background: T.card,
-        border: `1px solid ${T.border}`,
-        borderRadius: 16,
-        padding: 24,
-      }}
-    >
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 20,
-        }}
-      >
+    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 20, padding: 22 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div>
-          <div
-            style={{
-              fontFamily: "Bebas Neue",
-              fontSize: 22,
-              letterSpacing: 2,
-              color: T.text,
-            }}
-          >
-            WEIGHT TRACKER
-          </div>
-          <div
-            style={{
-              fontFamily: "DM Sans",
-              fontSize: 12,
-              color: T.muted,
-              marginTop: 2,
-            }}
-          >
-            Log your weight daily · Track progress week on week.
-          </div>
+          <div style={{ fontFamily: "Bebas Neue", fontSize: 22, letterSpacing: 2, color: T.text }}>WEIGHT TRACKER</div>
+          <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, marginTop: 2 }}>Log daily · Track progress over time</div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {avgWeight && (
-            <div style={{ textAlign: "right" }}>
-              <div
-                style={{
-                  fontFamily: "JetBrains Mono",
-                  fontSize: 11,
-                  color: trendUp ? T.danger : T.coachGreen,
-                }}
-              >
-                {trend > 0 ? `▲ +${trend}` : `▼ ${trend}`} {unit} this week
-              </div>
-              <div
-                style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}
-              >
-                Avg: {toDisplay(parseFloat(avgWeight))} {unit}
-              </div>
-            </div>
-          )}
-          {/* Unit toggle */}
-          <div
-            style={{
-              display: "flex",
-              background: T.surface,
-              borderRadius: 8,
-              border: `1px solid ${T.border}`,
-              overflow: "hidden",
-            }}
-          >
-            {["kg", "lbs"].map((u) => (
-              <button
-                key={u}
-                onClick={() => setUnit(u)}
-                style={{
-                  padding: "5px 12px",
-                  border: "none",
-                  cursor: "pointer",
-                  fontFamily: "DM Sans",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  background: unit === u ? T.accent : "transparent",
-                  color: unit === u ? T.bg : T.muted,
-                  transition: "all 0.15s",
-                }}
-              >
-                {u}
-              </button>
-            ))}
-          </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          {["kg", "lbs"].map((u) => (
+            <button key={u} onClick={() => setUnit(u)} style={{
+              background: unit === u ? `${T.accent}22` : "none", border: `1px solid ${unit === u ? T.accent + "55" : T.border}`,
+              borderRadius: 6, padding: "4px 10px", color: unit === u ? T.accent : T.muted,
+              fontFamily: "JetBrains Mono", fontSize: 10, cursor: "pointer",
+            }} type="button">{u}</button>
+          ))}
         </div>
       </div>
 
       {/* Chart */}
-      <div style={{ position: "relative", marginBottom: 20 }}>
-        <svg
-          width="100%"
-          height={chartH + 2}
-          style={{ overflow: "visible", display: "block" }}
-        >
-          {/* Goal line (optional reference) */}
-          {hasData && (
-            <line
-              x1="0"
-              y1={chartH / 2}
-              x2="100%"
-              y2={chartH / 2}
-              stroke={T.border}
-              strokeWidth="1"
-              strokeDasharray="4 4"
-            />
-          )}
-          {/* Area fill */}
-          {hasData && pointsWithData.length >= 2 && (
-            <polyline
-              points={[
-                `${pointsWithData[0].i * step}%,${chartH}`,
-                ...pointsWithData.map(
-                  (e) => `${e.i * step}%,${toY(e.entry.weight)}`
-                ),
-                `${
-                  pointsWithData[pointsWithData.length - 1].i * step
-                }%,${chartH}`,
-              ].join(" ")}
-              fill={`${T.protein}18`}
-              stroke="none"
-            />
-          )}
-          {/* Line */}
-          {hasData && pointsWithData.length >= 2 && (
-            <polyline
-              points={polyPts}
-              fill="none"
-              stroke={T.protein}
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          )}
-          {/* Data points */}
-          {entries.map((e) => {
-            if (!e.entry) return null;
-            const cx = `${e.i * step}%`;
-            const cy = toY(e.entry.weight);
-            const isToday = e.day === todayKey;
-            return (
-              <g key={e.day}>
-                <circle
-                  cx={cx}
-                  cy={cy}
-                  r={isToday ? 6 : 4}
-                  fill={isToday ? T.accent : T.protein}
-                  stroke={T.card}
-                  strokeWidth="2"
-                />
-                <text
-                  x={cx}
-                  y={cy - 10}
-                  textAnchor="middle"
-                  style={{
-                    fontFamily: "JetBrains Mono",
-                    fontSize: 9,
-                    fill: isToday ? T.accent : T.muted,
-                  }}
-                >
-                  {toDisplay(e.entry.weight)}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-        {/* Day labels */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            marginTop: 6,
-          }}
-        >
-          {DAYS.map((d, i) => (
-            <span
-              key={d}
-              style={{
-                fontFamily: "Bebas Neue",
-                fontSize: 11,
-                color: d === todayKey ? T.accent : T.muted,
-                flex: 1,
-                textAlign:
-                  i === 0 ? "left" : i === DAYS.length - 1 ? "right" : "center",
-                letterSpacing: 1,
-              }}
-            >
-              {d}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      {/* Log input row */}
-      <div
-        style={{
-          display: "flex",
-          gap: 10,
-          alignItems: "center",
-          background: T.surface,
-          border: `1px solid ${T.border}`,
-          borderRadius: 12,
-          padding: "12px 16px",
-        }}
-      >
-        <span style={{ fontSize: 20 }}>⚖️</span>
-        <div style={{ flex: 1 }}>
-          <div
-            style={{
-              fontFamily: "DM Sans",
-              fontSize: 10,
-              color: T.muted,
-              letterSpacing: 1,
-              textTransform: "uppercase",
-              marginBottom: 4,
-            }}
-          >
-            Log today's weight ({unit})
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <input
-              type="number"
-              step="0.1"
-              min="30"
-              max="300"
-              value={inputWeight}
-              onChange={(e) => setInputWeight(e.target.value)}
-              placeholder={
-                todayEntry
-                  ? `${toDisplay(todayEntry.weight)} ${unit} (logged)`
-                  : `e.g. ${unit === "kg" ? "83.5" : "184.0"}`
-              }
-              style={{
-                flex: 1,
-                background: "transparent",
-                border: `1px solid ${T.border}`,
-                borderRadius: 8,
-                padding: "8px 12px",
-                color: T.text,
-                fontFamily: "JetBrains Mono",
-                fontSize: 13,
-                outline: "none",
-                caretColor: T.accent,
-              }}
-            />
-            <input
-              type="time"
-              value={inputTime}
-              onChange={(e) => setInputTime(e.target.value)}
-              style={{
-                background: "transparent",
-                border: `1px solid ${T.border}`,
-                borderRadius: 8,
-                padding: "8px 12px",
-                color: T.muted,
-                fontFamily: "JetBrains Mono",
-                fontSize: 12,
-                outline: "none",
-                colorScheme: "dark",
-                width: 110,
-              }}
-            />
-          </div>
-        </div>
-        <button
-          onClick={logWeight}
-          style={{
-            background: saved ? T.coachGreen : T.protein,
-            color: "#fff",
-            border: "none",
-            borderRadius: 10,
-            padding: "10px 20px",
-            fontFamily: "Bebas Neue",
-            fontSize: 14,
-            letterSpacing: 1,
-            cursor: "pointer",
-            transition: "all 0.25s",
-            whiteSpace: "nowrap",
-            flexShrink: 0,
-          }}
-        >
-          {saved ? "✓ SAVED" : "LOG WEIGHT"}
-        </button>
-      </div>
-
-      {/* This week summary row */}
       {hasData && (
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            marginTop: 14,
-            paddingTop: 14,
-            borderTop: `1px solid ${T.border}`,
-          }}
-        >
-          {[
-            {
-              label: "Current",
-              val: todayEntry ? `${toDisplay(todayEntry.weight)} ${unit}` : "—",
-              color: T.accent,
-            },
-            {
-              label: "This week",
-              val:
-                trend !== null
-                  ? `${trendUp ? "+" : ""}${
-                      unit === "kg" ? trend : (trend * 2.20462).toFixed(1)
-                    } ${unit}`
-                  : "—",
-              color: trendUp ? T.danger : T.coachGreen,
-            },
-            {
-              label: "Days logged",
-              val: `${weights.length} / 7`,
-              color: T.protein,
-            },
-          ].map((s) => (
-            <div key={s.label} style={{ flex: 1, textAlign: "center" }}>
-              <div
-                style={{
-                  fontFamily: "JetBrains Mono",
-                  fontSize: 13,
-                  color: s.color,
-                  fontWeight: 600,
-                }}
-              >
-                {s.val}
-              </div>
-              <div
-                style={{
-                  fontFamily: "DM Sans",
-                  fontSize: 9,
-                  color: T.muted,
-                  marginTop: 2,
-                }}
-              >
-                {s.label}
-              </div>
-            </div>
-          ))}
+        <div style={{ position: "relative", height: 120, marginBottom: 16 }}>
+          <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" style={{ overflow: "visible" }}>
+            {/* Grid lines */}
+            {[0, 25, 50, 75, 100].map((y) => (
+              <line key={y} x1="0" x2="100" y1={y} y2={y} stroke={T.border} strokeWidth="0.3" />
+            ))}
+            {/* Line */}
+            {(() => {
+              const pts = last7.filter(e => e.entry).map((e, i, arr) => {
+                const idx = last7.indexOf(e);
+                const x = (idx / (last7.length - 1)) * 100;
+                return `${x},${toY(e.entry.weight)}`;
+              });
+              return pts.length >= 2 ? <polyline points={pts.join(" ")} fill="none" stroke={T.accent} strokeWidth="1.5" strokeLinejoin="round" /> : null;
+            })()}
+            {/* Dots */}
+            {last7.map((e, idx) => {
+              if (!e.entry) return null;
+              const x = (idx / (last7.length - 1)) * 100;
+              const y = toY(e.entry.weight);
+              return <circle key={idx} cx={x} cy={y} r="2" fill={T.accent} stroke={T.card} strokeWidth="1" />;
+            })}
+          </svg>
+          {/* X labels */}
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+            {last7.map((e) => (
+              <span key={e.date} style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: e.isToday ? T.accent : T.muted, flex: 1, textAlign: "center" }}>
+                {e.dayLabel}
+              </span>
+            ))}
+          </div>
         </div>
       )}
+
+      {/* Input */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+        <input value={inputWeight} onChange={(e) => setInputWeight(e.target.value)} onKeyDown={(e) => e.key === "Enter" && logWeight()}
+          placeholder={todayEntry ? `${toDisplay(todayEntry.weight)} ${unit} (logged)` : `Log today's weight (${unit})`}
+          type="number" step="0.1"
+          style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", color: T.text, fontFamily: "JetBrains Mono", fontSize: 13, outline: "none" }}
+        />
+        <button onClick={logWeight} style={{
+          background: inputWeight ? T.accent : T.border, color: inputWeight ? T.bg : T.muted,
+          border: "none", borderRadius: 10, padding: "10px 16px",
+          fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1.5, cursor: inputWeight ? "pointer" : "default",
+        }} type="button">{saved ? "✓" : "LOG"}</button>
+      </div>
+
+      {/* Stats */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+        <div style={{ background: T.surface, borderRadius: 10, padding: "8px 10px" }}>
+          <div style={{ fontFamily: "Bebas Neue", fontSize: 20, color: T.accent }}>{todayEntry ? toDisplay(todayEntry.weight) : "—"}</div>
+          <div style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted }}>TODAY ({unit})</div>
+        </div>
+        <div style={{ background: T.surface, borderRadius: 10, padding: "8px 10px" }}>
+          <div style={{ fontFamily: "Bebas Neue", fontSize: 20, color: T.text }}>{avgWeight ? toDisplay(Number(avgWeight)) : "—"}</div>
+          <div style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted }}>AVG ({unit})</div>
+        </div>
+        <div style={{ background: T.surface, borderRadius: 10, padding: "8px 10px" }}>
+          <div style={{ fontFamily: "Bebas Neue", fontSize: 20, color: trend && Number(trend) > 0 ? T.danger : trend && Number(trend) < 0 ? T.coachGreen : T.muted }}>
+            {trend ? `${Number(trend) > 0 ? "+" : ""}${unit === "lbs" ? (Number(trend) * 2.20462).toFixed(1) : trend}` : "—"}
+          </div>
+          <div style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted }}>TREND</div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -8976,51 +8560,47 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
 ────────────────────────────────────────────────────────────────────────────── */
 function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
   const [activeId, setActiveId] = useState(null);
-  const [chatMsgs, setChatMsgs] = useState({}); // keyed by senderId
+  const [chatMsgs, setChatMsgs] = useState({});
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef(null);
 
-  // ── Real coach messages (separate conversation per coach) ───────────────────
-  const [conversations, setConversations] = useState([]);
+  // Real coach messages
+  const coachId = profile?.coachId || null;
   const [realMsgs, setRealMsgs] = useState([]);
-  const [activeCoachId, setActiveCoachId] = useState(null);
-  const msgFilter = activeId && String(activeId).endsWith("-checkin") ? "checkin" : "chat";
   const [realErrCount, setRealErrCount] = useState(0);
+  const [realUnreadMap, setRealUnreadMap] = useState({});
 
-  const loadConversations = async () => {
+  const loadUnreadCounts = async () => {
     try {
-      const rows = await apiFetch('/conversations');
-      setConversations(Array.isArray(rows) ? rows : []);
+      const rows = await apiFetch('/messages-unread');
+      const map = {};
+      (Array.isArray(rows) ? rows : []).forEach(r => { map[r.fromId] = r.count; });
+      setRealUnreadMap(map);
     } catch {}
   };
 
-  const loadReal = async (coachId) => {
+  const loadReal = async () => {
     if (!coachId) return;
     try {
-      const url = msgFilter === "checkin" ? `/messages/${coachId}?type=checkin` : `/messages/${coachId}?type=chat`;
-      const msgs = await apiFetch(url);
+      const msgs = await apiFetch(`/messages/${coachId}`);
       if (Array.isArray(msgs)) { setRealMsgs(msgs); setRealErrCount(0); }
     } catch { setRealErrCount(c => c + 1); }
   };
 
-  useEffect(() => { loadConversations(); }, [profile?.id]);
-  useEffect(() => { if (activeCoachId) loadReal(activeCoachId); }, [activeCoachId, msgFilter]);
+  useEffect(() => { if (coachId) { loadReal(); loadUnreadCounts(); } }, [coachId]);
   useEffect(() => {
-    if (!activeCoachId || realErrCount > 3) return;
-    const interval = setInterval(() => { loadReal(activeCoachId); loadConversations(); }, 12 * 1000);
-    return () => clearInterval(interval);
-  }, [activeCoachId, realErrCount, msgFilter]);
+    if (!coachId || realErrCount > 3) return;
+    const i = setInterval(() => { loadReal(); loadUnreadCounts(); }, 12000);
+    return () => clearInterval(i);
+  }, [coachId, realErrCount]);
 
   const sendReal = async () => {
-    if (!input.trim() || !activeCoachId || loading) return;
+    if (!input.trim() || !coachId || loading) return;
     setLoading(true);
     try {
-      const msg = await apiFetch(`/messages/${activeCoachId}`, {
-        method: 'POST', body: JSON.stringify({
-          content: input.trim(),
-          messageType: msgFilter === "checkin" ? "checkin" : "chat",
-        }),
+      const msg = await apiFetch(`/messages/${coachId}`, {
+        method: 'POST', body: JSON.stringify({ content: input.trim() }),
       });
       setRealMsgs(prev => [...prev, msg]);
       setInput("");
@@ -9029,54 +8609,34 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
     setLoading(false);
   };
 
-  // ── AI coach threads ───────────────────────────────────────────────────────
+  // AI coach threads
   const tot = dayTotals(plan[selectedDay]);
-
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMsgs, activeId, realMsgs]);
 
-  const activeThread = activeId && typeof activeId === "string" && !/^\d+-(chat|checkin)$/.test(activeId)
-    ? threads.find((t) => t.senderId === activeId) : null;
+  const isRealCoach = activeId === "real-coach";
+  const activeThread = activeId && !isRealCoach ? threads.find(t => t.senderId === activeId) : null;
   const coachCfg = activeId ? COACHES_CONFIG[activeId] : null;
-  const isRealCoach = activeCoachId != null;
-  const coachId = profile?.coachId || null;
-
-  const realUnread = conversations.reduce((s, c) => s + (c.unreadCount || 0), 0);
-  const totalUnread = threads.reduce((n, t) => n + t.messages.filter((m) => !m.read).length, 0) + realUnread;
+  const realUnread = coachId ? (realUnreadMap[coachId] || 0) : 0;
+  const totalUnread = threads.reduce((n, t) => n + t.messages.filter(m => !m.read).length, 0) + realUnread;
 
   const openThread = (id) => {
     setActiveId(id);
     setInput("");
-    const match = typeof id === "string" && id.match(/^(\d+)-(chat|checkin)$/);
-    if (match) {
-      const cid = Number(match[1]);
-      setActiveCoachId(cid);
-      loadReal(cid).then(loadConversations);
-      return;
-    }
-    setActiveCoachId(null);
-    setThreads((prev) =>
-      prev.map((t) =>
-        t.senderId === id
-          ? { ...t, messages: t.messages.map((m) => ({ ...m, read: true })) }
-          : t
-      )
-    );
+    if (id === "real-coach") { loadReal().then(loadUnreadCounts); return; }
+    setThreads(prev => prev.map(t => t.senderId === id ? { ...t, messages: t.messages.map(m => ({ ...m, read: true })) } : t));
     if (COACHES_CONFIG[id] && !chatMsgs[id]) {
       const cfg = COACHES_CONFIG[id];
       const firstName = profile.name.split(" ")[0];
       let greeting = "";
       if (id === "coach-sarah") {
         const calPct = macroGoals.calories > 0 ? Math.round((tot.calories / macroGoals.calories) * 100) : 0;
-        greeting = `Hey ${firstName}! 👋 I can see your macros for ${selectedDay} — you're at ${calPct}% of your calorie goal. How are you feeling today?`;
+        greeting = `Hey ${firstName}! I can see your macros for ${selectedDay} — you're at ${calPct}% of your calorie goal. How are you feeling today?`;
       } else if (id === "coach-james") {
-        greeting = `Hey ${firstName}! 💪 Ready to talk training? What's on the programme today?`;
+        greeting = `Hey ${firstName}! Ready to talk training? What's on the programme today?`;
       } else if (id === "coach-emma") {
-        greeting = `Hi ${firstName} 😊 Good to check in with you. How's your head space around your nutrition goals this week?`;
+        greeting = `Hi ${firstName}! Good to check in with you. How's your head space around your nutrition goals this week?`;
       }
-      setChatMsgs((prev) => ({
-        ...prev,
-        [id]: [{ role: "assistant", content: greeting, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }],
-      }));
+      setChatMsgs(prev => ({ ...prev, [id]: [{ role: "assistant", content: greeting, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }] }));
     }
   };
 
@@ -9084,136 +8644,82 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
     if (!input.trim() || loading || !coachCfg) return;
     const senderId = activeId;
     const userMsg = { role: "user", content: input.trim(), time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
-    const current = chatMsgs[senderId] || [];
-    const updated = [...current, userMsg];
-    setChatMsgs((prev) => ({ ...prev, [senderId]: updated }));
-    setInput("");
-    setLoading(true);
+    const updated = [...(chatMsgs[senderId] || []), userMsg];
+    setChatMsgs(prev => ({ ...prev, [senderId]: updated }));
+    setInput(""); setLoading(true);
     const sysPrompt = senderId === "coach-sarah" ? coachCfg.systemPrompt(profile, tot, macroGoals) : coachCfg.systemPrompt(profile);
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 350, system: sysPrompt, messages: updated.map((m) => ({ role: m.role, content: m.content })) }),
+        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 350, system: sysPrompt, messages: updated.map(m => ({ role: m.role, content: m.content })) }),
       });
       const data = await res.json().catch(() => ({}));
-      const reply = data.content?.map((b) => b.text || "").join("") || "Sorry, missed that!";
-      setChatMsgs((prev) => ({ ...prev, [senderId]: [...(prev[senderId] || []), { role: "assistant", content: reply, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }] }));
+      const reply = data.content?.map(b => b.text || "").join("") || "Sorry, missed that!";
+      setChatMsgs(prev => ({ ...prev, [senderId]: [...(prev[senderId] || []), { role: "assistant", content: reply, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }] }));
     } catch {
-      setChatMsgs((prev) => ({ ...prev, [senderId]: [...(prev[senderId] || []), { role: "assistant", content: "Connection issue. Try again.", time: "--:--" }] }));
+      setChatMsgs(prev => ({ ...prev, [senderId]: [...(prev[senderId] || []), { role: "assistant", content: "Connection issue. Try again.", time: "--:--" }] }));
     }
     setLoading(false);
   };
 
-  const handleSend = () => {
-    if (isRealCoach) sendReal();
-    else sendAIMessage();
-  };
+  const handleSend = () => { if (isRealCoach) sendReal(); else sendAIMessage(); };
 
-  // ── Build thread list: real coach conversations (one per coach), then AI ───
+  // Build thread list
   const allThreads = [];
-  const seenIds = new Set();
-  conversations.forEach((c) => {
-    seenIds.add(c.otherId);
-    const nameParts = (c.otherName || "Coach").split(" ");
-    const initials = nameParts.length >= 2 ? (nameParts[0][0] + nameParts[1][0]).toUpperCase() : (c.otherName || "?")[0];
-    allThreads.push({ id: `${c.otherId}-chat`, coachId: c.otherId, name: c.otherName || "Coach", sub: "Chat", role: "Coach", initials, color: T.coachGreen, isReal: true, lastMsg: c.lastMessage || "Start a conversation…", lastTime: c.lastAt ? new Date(c.lastAt) : null, unread: c.unreadCount || 0 });
-    allThreads.push({ id: `${c.otherId}-checkin`, coachId: c.otherId, name: c.otherName || "Coach", sub: "Check-in notes", role: "Coach", initials, color: T.coachGreen, isReal: true, lastMsg: "Check-in notes", lastTime: null, unread: 0 });
-  });
-  if (coachId && !seenIds.has(coachId)) {
-    allThreads.unshift({ id: `${coachId}-chat`, coachId, name: "My Coach", sub: "Chat", role: "Coach", initials: "🏋️", color: T.coachGreen, isReal: true, lastMsg: "Start a conversation…", lastTime: null, unread: 0 });
-    allThreads.unshift({ id: `${coachId}-checkin`, coachId, name: "My Coach", sub: "Check-in notes", role: "Coach", initials: "🏋️", color: T.coachGreen, isReal: true, lastMsg: "Check-in notes", lastTime: null, unread: 0 });
+  if (coachId) {
+    const lastReal = realMsgs[realMsgs.length - 1];
+    allThreads.push({ id: "real-coach", name: "My Coach", role: "Your Coach", initials: "🏋️", color: T.coachGreen, isReal: true,
+      lastMsg: lastReal?.content || "Start a conversation…", lastTime: lastReal?.created_at ? new Date(lastReal.created_at) : null, unread: realUnread });
   }
-  threads.forEach((t) => {
+  threads.forEach(t => {
     const cfg = COACHES_CONFIG[t.senderId];
     const msgs = [...t.messages].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     const latest = msgs[0];
-    allThreads.push({
-      id: t.senderId,
-      name: cfg?.name || t.senderName,
-      role: cfg?.role || "AI Coach",
-      initials: cfg?.initials || "?",
-      color: cfg?.color || T.accent,
-      isReal: false,
-      lastMsg: latest?.body || latest?.title || "New conversation",
-      lastTime: latest?.timestamp ? new Date(latest.timestamp) : null,
-      unread: t.messages.filter((m) => !m.read).length,
-    });
+    allThreads.push({ id: t.senderId, name: cfg?.name || t.senderName, role: cfg?.role || "AI Coach", initials: cfg?.initials || "?", color: cfg?.color || T.accent, isReal: false,
+      lastMsg: latest?.body || latest?.title || "New conversation", lastTime: latest?.timestamp ? new Date(latest.timestamp) : null, unread: t.messages.filter(m => !m.read).length });
   });
 
-  // ── Active chat messages (include coach name) ───────────────────────────────
   const activeChatMessages = isRealCoach
-    ? realMsgs.map(m => ({
-        role: m.fromId === profile?.id ? "user" : "assistant",
-        content: m.content,
-        time: m.created_at ? new Date(m.created_at).toLocaleString([], { hour: "2-digit", minute: "2-digit" }) : "",
-        fromName: m.fromName,
-      }))
+    ? realMsgs.map(m => ({ role: m.fromId === profile?.id ? "user" : "assistant", content: m.content, time: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "" }))
     : (chatMsgs[activeId] || []);
-
   const activeInfo = allThreads.find(t => t.id === activeId);
 
   return (
-    <div style={{ display: "flex", height: "calc(100vh - 170px)", gap: 0, background: T.bg, borderRadius: 20, overflow: "hidden", border: `1px solid ${T.border}` }}>
-      {/* ── LEFT SIDEBAR ── */}
+    <div style={{ display: "flex", height: "calc(100vh - 170px)", background: T.bg, borderRadius: 20, overflow: "hidden", border: `1px solid ${T.border}` }}>
+      {/* Sidebar */}
       <div style={{ width: 320, flexShrink: 0, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", background: T.card }}>
         <div style={{ padding: "16px 18px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div style={{ fontFamily: "Bebas Neue", fontSize: 18, letterSpacing: 2, color: T.text }}>INBOX</div>
-            <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>{allThreads.length} conversation{allThreads.length !== 1 ? "s" : ""}</div>
-          </div>
-          {totalUnread > 0 && (
-            <div style={{ background: T.danger, borderRadius: 10, padding: "2px 8px", fontFamily: "JetBrains Mono", fontSize: 10, color: "#fff", fontWeight: 700 }}>{totalUnread}</div>
-          )}
+          <div><div style={{ fontFamily: "Bebas Neue", fontSize: 18, letterSpacing: 2, color: T.text }}>INBOX</div><div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>{allThreads.length} conversation{allThreads.length !== 1 ? "s" : ""}</div></div>
+          {totalUnread > 0 && <div style={{ background: T.danger, borderRadius: 10, padding: "2px 8px", fontFamily: "JetBrains Mono", fontSize: 10, color: "#fff", fontWeight: 700 }}>{totalUnread}</div>}
         </div>
-
         <div style={{ overflowY: "auto", flex: 1 }}>
           {allThreads.map((t, idx) => {
             const isActive = activeId === t.id;
             return (
               <div key={t.id} onClick={() => openThread(t.id)} style={{
                 padding: "14px 18px", borderBottom: idx < allThreads.length - 1 ? `1px solid ${T.border}` : "none",
-                background: isActive ? T.surface : t.unread > 0 ? `${t.color}08` : "transparent",
-                cursor: "pointer", transition: "background 0.15s", position: "relative", display: "flex", gap: 12, alignItems: "center",
-              }}
-                onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = T.surface; }}
-                onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = t.unread > 0 ? `${t.color}08` : "transparent"; }}
-              >
+                background: isActive ? T.surface : t.unread > 0 ? `${t.color}08` : "transparent", cursor: "pointer", display: "flex", gap: 12, alignItems: "center",
+              }}>
                 {t.unread > 0 && <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: t.color, borderRadius: "4px 0 0 4px" }} />}
-                {/* Avatar */}
-                <div style={{ width: 40, height: 40, borderRadius: "50%", background: `${t.color}22`, border: `2px solid ${t.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: t.isReal ? 18 : 14, fontFamily: "Bebas Neue", color: t.color, flexShrink: 0 }}>
-                  {t.isReal ? t.initials : t.initials}
-                </div>
+                <div style={{ width: 40, height: 40, borderRadius: "50%", background: `${t.color}22`, border: `2px solid ${t.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: t.isReal ? 18 : 14, fontFamily: "Bebas Neue", color: t.color, flexShrink: 0 }}>{t.initials}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <span style={{ fontFamily: "DM Sans", fontSize: 13, fontWeight: t.unread > 0 ? 700 : 500, color: T.text }}>{t.name}</span>
-                      <span style={{ background: `${t.color}18`, border: `1px solid ${t.color}33`, borderRadius: 4, padding: "1px 6px", fontFamily: "DM Sans", fontSize: 8, fontWeight: 600, color: t.color }}>
-                        {t.sub || (t.isReal ? "Coach" : "AI")}
-                      </span>
+                      <span style={{ background: `${t.color}18`, border: `1px solid ${t.color}33`, borderRadius: 4, padding: "1px 6px", fontFamily: "DM Sans", fontSize: 8, fontWeight: 600, color: t.color }}>{t.isReal ? "Coach" : "AI"}</span>
                     </div>
                     {t.lastTime && <span style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: T.muted }}>{timeAgo(t.lastTime.toISOString())}</span>}
                   </div>
-                  <div style={{ fontFamily: "DM Sans", fontSize: 11, color: t.unread > 0 ? T.text : T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {t.lastMsg}
-                  </div>
+                  <div style={{ fontFamily: "DM Sans", fontSize: 11, color: t.unread > 0 ? T.text : T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.lastMsg}</div>
                 </div>
-                {t.unread > 0 && (
-                  <div style={{ background: t.color, borderRadius: "50%", width: 18, height: 18, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <span style={{ fontFamily: "JetBrains Mono", fontSize: 9, color: "#fff", fontWeight: 700 }}>{t.unread}</span>
-                  </div>
-                )}
+                {t.unread > 0 && <div style={{ background: t.color, borderRadius: "50%", width: 18, height: 18, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><span style={{ fontFamily: "JetBrains Mono", fontSize: 9, color: "#fff", fontWeight: 700 }}>{t.unread}</span></div>}
               </div>
             );
           })}
-          {allThreads.length === 0 && (
-            <div style={{ padding: 24, textAlign: "center", color: T.muted, fontFamily: "DM Sans", fontSize: 12 }}>
-              No conversations yet
-            </div>
-          )}
+          {allThreads.length === 0 && <div style={{ padding: 24, textAlign: "center", color: T.muted, fontFamily: "DM Sans", fontSize: 12 }}>No conversations yet</div>}
         </div>
       </div>
-
-      {/* ── RIGHT CHAT PANEL ── */}
+      {/* Chat */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", background: T.bg }}>
         {!activeId ? (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}>
@@ -9222,62 +8728,35 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
           </div>
         ) : (
           <>
-            {/* Chat header */}
-            <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ width: 36, height: 36, borderRadius: "50%", background: `${activeInfo?.color || T.accent}22`, border: `2px solid ${activeInfo?.color || T.accent}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: activeInfo?.isReal ? 16 : 12, fontFamily: "Bebas Neue", color: activeInfo?.color || T.accent }}>
-                {activeInfo?.isReal ? activeInfo.initials : activeInfo?.initials}
-              </div>
-                <div style={{ flex: 1 }}>
-                <div style={{ fontFamily: "DM Sans", fontSize: 14, fontWeight: 700, color: T.text }}>{activeInfo?.name}</div>
-                <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>{activeInfo?.sub || activeInfo?.role}{activeInfo?.isReal ? " · Live" : " · AI Assistant"}</div>
-              </div>
-              {activeInfo?.isReal && (
-                <div style={{ display: "flex", gap: 4, alignItems: "center", marginLeft: "auto" }}>
-                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: T.coachGreen, animation: "pulse 2s infinite" }} />
-                    <span style={{ fontFamily: "DM Sans", fontSize: 9, color: T.coachGreen }}>LIVE</span>
-                </div>
-              )}
+            <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 36, height: 36, borderRadius: "50%", background: `${activeInfo?.color || T.accent}22`, border: `2px solid ${activeInfo?.color || T.accent}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: activeInfo?.isReal ? 16 : 12, fontFamily: "Bebas Neue", color: activeInfo?.color || T.accent }}>{activeInfo?.initials}</div>
+              <div><div style={{ fontFamily: "DM Sans", fontSize: 14, fontWeight: 700, color: T.text }}>{activeInfo?.name}</div><div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>{activeInfo?.role}{activeInfo?.isReal ? " · Live" : " · AI"}</div></div>
+              {activeInfo?.isReal && <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: T.coachGreen, animation: "pulse 2s infinite" }} /><span style={{ fontFamily: "DM Sans", fontSize: 9, color: T.coachGreen }}>LIVE</span></div>}
             </div>
-
-            {/* Messages */}
             <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
               {activeChatMessages.length === 0 ? (
-                <div style={{ textAlign: "center", color: T.muted, fontFamily: "DM Sans", fontSize: 12, padding: 30 }}>
-                  {isRealCoach ? "No messages yet. Say hello to your coach!" : "Start the conversation…"}
-                </div>
+                <div style={{ textAlign: "center", color: T.muted, fontFamily: "DM Sans", fontSize: 12, padding: 30 }}>{isRealCoach ? "No messages yet. Say hello!" : "Start the conversation…"}</div>
               ) : activeChatMessages.map((m, i) => {
                 const isUser = m.role === "user";
                 return (
                   <div key={i} style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 10 }}>
                     <div style={{ maxWidth: "75%", padding: "10px 14px", borderRadius: 14, background: isUser ? T.accent : T.surface, color: isUser ? T.bg : T.text, borderBottomRightRadius: isUser ? 4 : 14, borderBottomLeftRadius: isUser ? 14 : 4 }}>
-                      {!isUser && m.fromName && <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, marginBottom: 2 }}>{m.fromName}</div>}
                       <div style={{ fontFamily: "DM Sans", fontSize: 12, lineHeight: 1.5 }}>{m.content}</div>
-                      {m.time && <div style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: isUser ? `${T.bg}88` : T.muted, marginTop: 4, textAlign: "right" }}>{m.time}</div>}
+                      {m.time && <div style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: isUser ? T.bg + "88" : T.muted, marginTop: 4, textAlign: "right" }}>{m.time}</div>}
                     </div>
                   </div>
                 );
               })}
-              {loading && (
-                <div style={{ display: "flex", gap: 4, padding: "8px 0" }}>
-                  {[0,1,2].map(i => <div key={i} style={{ width: 8, height: 8, borderRadius: "50%", background: T.muted, animation: `pulse 1s infinite ${i * 0.2}s` }} />)}
-                </div>
-              )}
+              {loading && <div style={{ display: "flex", gap: 4, padding: "8px 0" }}>{[0,1,2].map(i => <div key={i} style={{ width: 8, height: 8, borderRadius: "50%", background: T.muted, animation: `pulse 1s infinite ${i * 0.2}s` }} />)}</div>}
               <div ref={bottomRef} />
             </div>
-
-            {/* Input */}
             <div style={{ padding: "12px 20px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 8 }}>
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSend()}
+              <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSend()}
                 placeholder={isRealCoach ? "Message your coach…" : `Message ${activeInfo?.name}…`}
-                style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 12, outline: "none" }}
-              />
+                style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 12, outline: "none" }} />
               <button onClick={handleSend} disabled={loading || !input.trim()} style={{
                 background: input.trim() ? T.accent : T.border, color: input.trim() ? T.bg : T.muted,
-                border: "none", borderRadius: 10, padding: "10px 16px",
-                fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1.5, cursor: input.trim() ? "pointer" : "default",
+                border: "none", borderRadius: 10, padding: "10px 16px", fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1.5, cursor: input.trim() ? "pointer" : "default",
               }} type="button">{loading ? "…" : "SEND"}</button>
             </div>
           </>
@@ -9416,188 +8895,46 @@ export default function App() {
 
     try {
       const today = new Date();
-      const dateStr = `${today.getFullYear()}-${String(
-        today.getMonth() + 1
-      ).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      const dateStr = dateToISO(today);
 
-      // Server-side scrape (Senpro-style, no CORS) — backend fetches MFP directly
+      // Call backend server-side scraper
       let parsed = null;
       try {
         parsed = await apiFetch(`/mfp-diary/${encodeURIComponent(username)}?date=${dateStr}`);
-      } catch (_) {}
-      // Legacy client-side proxies removed — backend /mfp-diary does server-side scrape
-      if (!parsed) for (const proxyUrl of []) {
-        if (parsed) break;
-        try {
-          const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 7000);
-          const res = await fetch(proxyUrl, { signal: ctrl.signal });
-          clearTimeout(timer);
-          if (!res.ok) continue;
-          const raw = await res.text();
-
-          // Try JSON parse first (MFP .json endpoint)
-          try {
-            const j = JSON.parse(raw);
-            const items = j?.items || j?.diary?.items || [];
-            if (items.length > 0) {
-              let cal = 0, prot = 0, carb = 0, fat = 0, fibre = 0;
-              items.forEach(i => {
-                cal   += i.nutritional_contents?.energy?.value || 0;
-                prot  += i.nutritional_contents?.protein || 0;
-                carb  += i.nutritional_contents?.carbohydrates || 0;
-                fat   += i.nutritional_contents?.fat || 0;
-                fibre += i.nutritional_contents?.fiber || 0;
-              });
-              if (cal > 0) {
-                parsed = { profileFound: true, username, date: dateStr, source: "live",
-                  calories: Math.round(cal), protein: Math.round(prot),
-                  carbs: Math.round(carb), fat: Math.round(fat), fibre: Math.round(fibre),
-                  water: 0, exerciseCalories: 0, netCalories: Math.round(cal),
-                  meals: [
-                    { name: "Breakfast", calories: 0, logged: true },
-                    { name: "Lunch", calories: 0, logged: true },
-                    { name: "Dinner", calories: 0, logged: true },
-                    { name: "Snacks", calories: 0, logged: true },
-                  ],
-                  weekAdherence: [85, 90, 78, 95, 82, 88, 76],
-                };
-                break;
-              }
-            }
-          } catch (_) { /* not JSON, try HTML */ }
-
-          // Try HTML scraping
-          const html = raw.includes("{") && raw.includes("contents") 
-            ? (JSON.parse(raw).contents || "") 
-            : raw;
-          if (html.length > 500) {
-            const getN = (re) => { const m = html.match(re); return m ? parseInt(m[1].replace(/,/g,""),10) : 0; };
-            // MFP embeds nutrition data as JSON-LD or window.__data
-            const dataMatch = html.match(/"energy"[^}]*"value"\s*:\s*(\d+)/) ||
-                              html.match(/class="[^"]*total[^"]*calories[^"]*"[^>]*>[\s\S]{0,100}?(\d{3,4})/i);
-            const cal = getN(/"energy"[^}]{0,50}"value"\s*:\s*(\d+)/) ||
-                        getN(/total[^<]{0,50}calories[^<]{0,50}>([0-9,]{3,5})/i) ||
-                        getN(/"calories"\s*:\s*(\d+)/i);
-            const prot = getN(/"protein"\s*:\s*([\d.]+)/i);
-            const carb = getN(/"carbohydrates"\s*:\s*([\d.]+)/i) || getN(/"carbs"\s*:\s*([\d.]+)/i);
-            const fat  = getN(/"fat"\s*:\s*([\d.]+)/i);
-            if (cal > 50 && (prot > 0 || carb > 0)) {
-              parsed = { profileFound: true, username, date: dateStr, source: "live",
-                calories: cal, protein: prot, carbs: carb, fat,
-                fibre: getN(/"fiber"\s*:\s*([\d.]+)/i),
-                water: 0, exerciseCalories: 0, netCalories: cal,
-                meals: [
-                  { name: "Breakfast", calories: 0, logged: html.toLowerCase().includes("breakfast") },
-                  { name: "Lunch", calories: 0, logged: html.toLowerCase().includes("lunch") },
-                  { name: "Dinner", calories: 0, logged: html.toLowerCase().includes("dinner") },
-                  { name: "Snacks", calories: 0, logged: html.toLowerCase().includes("snack") },
-                ],
-                weekAdherence: [85, 90, 78, 95, 82, 88, 76],
-              };
-            }
-          }
-        } catch (_proxyErr) { /* try next proxy */ }
+      } catch (e) {
+        console.warn('MFP backend fetch failed:', e.message);
       }
 
-      // Fallback removed — backend /mfp-diary is the single source
-      if (false && (!parsed || !parsed.profileFound || !parsed.calories)) {
-        const response = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 2000,
-            tools: [{ type: "web_search_20250305", name: "web_search" }],
-            messages: [
-              {
-                role: "user",
-                content: `TASK: Fetch this public MyFitnessPal diary page and return the nutrition totals as JSON.
-
-URL to fetch: https://www.myfitnesspal.com/food/diary/${username}?date=${dateStr}
-
-The diary is PUBLIC (no login needed). Use web_search to retrieve it.
-
-Look for the daily totals row showing: Calories, Protein (g), Carbs (g), Fat (g). These appear at the bottom of the food diary table.
-
-Return ONLY this exact JSON (fill in real numbers, no markdown, no text):
-{"profileFound":true,"username":"${username}","date":"${dateStr}","source":"live","calories":0,"protein":0,"carbs":0,"fat":0,"fibre":0,"water":0,"exerciseCalories":0,"netCalories":0,"meals":[{"name":"Breakfast","calories":0,"logged":false},{"name":"Lunch","calories":0,"logged":false},{"name":"Dinner","calories":0,"logged":false},{"name":"Snacks","calories":0,"logged":false}],"weekAdherence":[85,90,78,95,82,88,76]}
-
-If the page requires login or is private, return ONLY: {"profileFound":false}`,
-              },
-            ],
-          }),
-        });
-
-        if (response.ok) {
-          const apiData = await response.json();
-          const allText = (apiData.content || [])
-            .filter((b) => b.type === "text")
-            .map((b) => b.text)
-            .join("\n")
-            .replace(/```json\s*/gi, "")
-            .replace(/```/g, "")
-            .trim();
-          const jsonMatch = allText.match(/\{[\s\S]*\}/);
-          try {
-            parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-          } catch {
-            parsed = null;
-          }
-        }
-      }
-
-      // ── Compatibility shim ────────────────────────────────────────────────
-      const jsonMatch = null; // already parsed above
-
-      // ── Use live data if we got real numbers ──────────────────────────────
-      if (
-        parsed &&
-        parsed.profileFound &&
-        parsed.calories > 0 &&
-        (parsed.protein > 0 || parsed.carbs > 0 || parsed.fat > 0)
-      ) {
-        const result = { ...parsed, source: "live" };
-        setMfpData(result);
+      if (parsed && parsed.profileFound && parsed.calories > 0) {
+        // Success — set MFP data and import to plan
+        setMfpData(parsed);
         setMfpConnected(true);
         setMfpLastSync(new Date());
-        setMfpError(null);
-        setMfpManualMode(false);
         setMfpSyncCount((c) => c + 1);
-        // Auto-push updates to meal plan on every refresh
-        importMFPDay(selectedDay, result);
-        return result;
+        setMfpError(null);
+        // Auto-import into today's plan
+        importMFPDay(selectedDay, parsed);
+        return;
       }
 
-      // ── Fallback: use realistic data based on the linked profile ──────────
-      // (MFP requires auth cookies — diary content isn't accessible without login,
-      //  but we maintain the live-link feel with profile-calibrated estimates)
-      const fallback = getRealisticData(username, dayPlan);
-      setMfpData(fallback);
-      setMfpConnected(true);
-      setMfpLastSync(new Date());
-      setMfpManualMode(false);
-      setMfpSyncCount((c) => c + 1);
-      // Show a soft note rather than a hard error
-      setMfpError(
-        parsed?.profileFound === false
-          ? `Diary for ${username} is private or not logged today — showing calibrated estimates.`
-          : null
-      );
-      // Auto-push to meal plan
-      importMFPDay(selectedDay, fallback);
-      return fallback;
+      if (parsed && !parsed.profileFound) {
+        setMfpError("MFP profile not found or diary is private. Ensure the diary is set to public in MFP settings.");
+        return;
+      }
+
+      if (parsed && parsed.profileFound && parsed.calories === 0) {
+        setMfpError("Diary found but no food logged for today yet.");
+        setMfpConnected(true);
+        setMfpData(parsed);
+        return;
+      }
+
+      // No data at all
+      if (!isAutoRefresh) {
+        setMfpError("Could not fetch MFP data. Check the username and ensure the diary is public.");
+      }
     } catch (err) {
-      // Network/API error — still show calibrated data, don't break the UI
-      const fallback = getRealisticData(username, dayPlan);
-      setMfpData(fallback);
-      setMfpConnected(true);
-      setMfpLastSync(new Date());
-      setMfpManualMode(false);
-      setMfpSyncCount((c) => c + 1);
-      setMfpError(null);
-      importMFPDay(selectedDay, fallback);
-      return fallback;
+      if (!isAutoRefresh) setMfpError("MFP sync failed. Try again.");
     } finally {
       setMfpSyncing(false);
     }
@@ -9689,31 +9026,43 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
   // Convert MFP diary data into plan food entries for a given day
   const importMFPDay = (day, data) => {
     const source = data || mfpData;
-    if (!source) return;
-    const loggedMeals = source.meals.filter((m) => m.logged);
-    const totalCal = loggedMeals.reduce((s, m) => s + m.calories, 0) || 1;
+    if (!source || !source.calories) return;
     setPlan((prev) => {
       const next = { ...prev, [day]: {} };
-      // Keep non-MFP entries, wipe MFP entries
       MEALS.forEach((m) => {
         next[day][m] = (prev[day][m] || []).filter((f) => f.source !== "mfp");
       });
-      loggedMeals.forEach((mfpMeal) => {
-        const ratio = mfpMeal.calories / totalCal;
+      const loggedMeals = (source.meals || []).filter((m) => m.logged && m.calories > 0);
+      if (loggedMeals.length > 0) {
+        // Individual meal breakdowns available
+        const totalCal = loggedMeals.reduce((s, m) => s + m.calories, 0) || 1;
+        loggedMeals.forEach((mfpMeal) => {
+          const ratio = mfpMeal.calories / totalCal;
+          const entry = {
+            name: `${mfpMeal.name} (MFP)`,
+            calories: mfpMeal.calories,
+            protein: Math.round(source.protein * ratio),
+            carbs: Math.round(source.carbs * ratio),
+            fat: Math.round(source.fat * ratio),
+            source: "mfp",
+          };
+          const planMeal = mfpMealToPlan(mfpMeal.name);
+          next[day][planMeal] = [...(next[day][planMeal] || []), entry];
+        });
+      } else {
+        // Only totals available — add as single entry
         const entry = {
-          name: `${mfpMeal.name} ↗ MFP`,
-          calories: mfpMeal.calories,
-          protein: Math.round(source.protein * ratio),
-          carbs: Math.round(source.carbs * ratio),
-          fat: Math.round(source.fat * ratio),
+          name: `MFP Daily Total`,
+          calories: Math.round(source.calories),
+          protein: Math.round(source.protein),
+          carbs: Math.round(source.carbs),
+          fat: Math.round(source.fat),
           source: "mfp",
         };
-        const planMeal = mfpMealToPlan(mfpMeal.name);
-        next[day][planMeal] = [...(next[day][planMeal] || []), entry];
-      });
+        next[day]["Breakfast"] = [...(next[day]["Breakfast"] || []), entry];
+      }
       return next;
     });
-    // useEffect auto-save will handle persisting to backend
   };
 
   // Auto-fetch on login if account has mfpUsername
@@ -9748,38 +9097,30 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
       try {
         const rows = await apiFetch(`/moods/${profile.id}`);
         if (!Array.isArray(rows)) return;
-        const byDay = {};
+        const byDate = {};
         rows.forEach((r) => {
-          // Convert date to day key (MON/TUE/etc) for current week display
-          const d = new Date(r.date + 'T00:00:00');
-          const dayIdx = d.getDay(); // 0=Sun
-          const key = DAYS[dayIdx === 0 ? 6 : dayIdx - 1];
-          byDay[key] = {
-            day: key,
+          byDate[r.date] = {
             id: r.mood_id,
             emoji: r.emoji,
             label: r.label,
             color: r.color,
             note: r.note,
             date: r.date,
-            timestamp: new Date().toISOString(),
           };
         });
-        setMoodLog(byDay);
+        setMoodLog(byDate);
       } catch (e) { /* keep empty */ }
     })();
   }, [profile?.id]);
 
   // ── Save mood to backend when updated ─────────────────────────────────────
-  const saveMoodToBackend = async (dayKey, entry) => {
+  const saveMoodToBackend = async (dateStr, entry) => {
     if (!profile?.id || !entry) return;
-    const today = new Date();
-    const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
     try {
       await apiFetch(`/moods/${profile.id}`, {
         method: 'POST',
         body: JSON.stringify({
-          date: todayStr,
+          date: dateStr,
           id: entry.id,
           emoji: entry.emoji,
           label: entry.label,
