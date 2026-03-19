@@ -8902,6 +8902,15 @@ export default function App() {
         parsed = await apiFetch(`/mfp-diary/${encodeURIComponent(username)}?date=${dateStr}`);
       } catch (e) {
         console.warn('MFP backend fetch failed:', e.message);
+        // Try to parse error body for debug info
+        if (!isAutoRefresh) {
+          const debugMsg = e.message || "";
+          if (debugMsg.includes("502") || debugMsg.includes("unavailable")) {
+            setMfpError("MFP is currently unreachable from the server. The diary may be private, or MFP is blocking automated access. Try setting the diary to public and retrying.");
+          } else {
+            setMfpError(`MFP sync failed: ${debugMsg}`);
+          }
+        }
       }
 
       if (parsed && parsed.profileFound && parsed.calories > 0) {
