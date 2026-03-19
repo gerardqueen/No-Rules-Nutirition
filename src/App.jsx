@@ -8863,16 +8863,16 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
    Real Coach Messages — loads from backend, polls every 10s
 ────────────────────────────────────────────────────────────────────────────── */
 function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
-  const [activeId, setActiveId] = useState(null);
-  const [chatMsgs, setChatMsgs] = useState({});
+  const [view, setView] = useState("list"); // "list" | "thread" | "compose"
+  const [threadList, setThreadList] = useState([]);
+  const [activeThread, setActiveThread] = useState(null); // { threadId, subject, otherId, otherName }
+  const [threadMessages, setThreadMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [composeSubject, setComposeSubject] = useState("");
   const bottomRef = useRef(null);
 
-  // Real coach messages
   const coachId = profile?.coachId || null;
-  const [realMsgs, setRealMsgs] = useState([]);
-  const [realErrCount, setRealErrCount] = useState(0);
   const [realUnreadMap, setRealUnreadMap] = useState({});
 
   const loadUnreadCounts = async () => {
@@ -8884,52 +8884,119 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
     } catch {}
   };
 
-  const loadReal = async () => {
+  // Load threads from coach
+  const loadThreads = async () => {
     if (!coachId) return;
     try {
-      const msgs = await apiFetch(`/messages/${coachId}`);
-      if (Array.isArray(msgs)) { setRealMsgs(msgs); setRealErrCount(0); }
-    } catch { setRealErrCount(c => c + 1); }
+      const rows = await apiFetch(`/messages/threads/${coachId}`);
+      if (Array.isArray(rows)) setThreadList(rows);
+    } catch {}
   };
 
-  useEffect(() => { if (coachId) { loadReal(); loadUnreadCounts(); } }, [coachId]);
+  useEffect(() => { if (coachId) { loadThreads(); loadUnreadCounts(); } }, [coachId]);
   useEffect(() => {
-    if (!coachId || realErrCount > 3) return;
-    const i = setInterval(() => { loadReal(); loadUnreadCounts(); }, 12000);
+    if (!coachId) return;
+    const i = setInterval(() => { loadThreads(); loadUnreadCounts(); }, 15000);
     return () => clearInterval(i);
-  }, [coachId, realErrCount]);
+  }, [coachId]);
 
-  const sendReal = async () => {
-    if (!input.trim() || !coachId || loading) return;
+  // Load messages for a specific thread
+  const openThread = async (thread) => {
+    setActiveThread(thread);
+    setView("thread");
+    setInput("");
+    try {
+      const msgs = await apiFetch(`/messages/thread/${coachId}/${thread.threadId}`);
+      if (Array.isArray(msgs)) setThreadMessages(msgs);
+    } catch { setThreadMessages([]); }
+    loadUnreadCounts();
+  };
+
+  // Poll active thread
+  useEffect(() => {
+    if (view !== "thread" || !activeThread || !coachId) return;
+    const i = setInterval(async () => {
+      try {
+        const msgs = await apiFetch(`/messages/thread/${coachId}/${activeThread.threadId}`);
+        if (Array.isArray(msgs)) setThreadMessages(msgs);
+      } catch {}
+    }, 10000);
+    return () => clearInterval(i);
+  }, [view, activeThread?.threadId, coachId]);
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [threadMessages]);
+
+  // Send reply in thread
+  const sendReply = async () => {
+    if (!input.trim() || !coachId || loading || !activeThread) return;
     setLoading(true);
     try {
       const msg = await apiFetch(`/messages/${coachId}`, {
-        method: 'POST', body: JSON.stringify({ content: input.trim() }),
+        method: 'POST',
+        body: JSON.stringify({ content: input.trim(), threadId: activeThread.threadId, subject: activeThread.subject }),
       });
-      setRealMsgs(prev => [...prev, msg]);
+      setThreadMessages(prev => [...prev, msg]);
       setInput("");
-      setRealErrCount(0);
     } catch (e) { console.warn('Send failed:', e); }
     setLoading(false);
   };
 
-  // AI coach threads
+  // Compose new thread
+  const sendNewThread = async () => {
+    if (!input.trim() || !composeSubject.trim() || !coachId || loading) return;
+    setLoading(true);
+    try {
+      const msg = await apiFetch(`/messages/${coachId}`, {
+        method: 'POST',
+        body: JSON.stringify({ content: input.trim(), subject: composeSubject.trim() }),
+      });
+      setInput("");
+      setComposeSubject("");
+      await loadThreads();
+      // Open the new thread
+      setActiveThread({ threadId: msg.threadId, subject: msg.subject || composeSubject.trim(), otherId: coachId });
+      setThreadMessages([msg]);
+      setView("thread");
+    } catch (e) { console.warn('Compose failed:', e); }
+    setLoading(false);
+  };
+
+  const totalUnread = threadList.reduce((n, t) => n + (t.unreadCount || 0), 0);
+
+  // AI coach threads (keep existing)
   const tot = dayTotals(plan[selectedDay] || {});
   const selectedDayLabel = dateStrToDayKey(selectedDay);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMsgs, activeId, realMsgs]);
+  const [aiChatMsgs, setAiChatMsgs] = useState({});
+  const [aiActiveId, setAiActiveId] = useState(null);
 
-  const isRealCoach = activeId === "real-coach";
-  const activeThread = activeId && !isRealCoach ? threads.find(t => t.senderId === activeId) : null;
-  const coachCfg = activeId ? COACHES_CONFIG[activeId] : null;
-  const realUnread = coachId ? (realUnreadMap[coachId] || 0) : 0;
-  const totalUnread = threads.reduce((n, t) => n + t.messages.filter(m => !m.read).length, 0) + realUnread;
+  const sendAIMessage = async () => {
+    if (!input.trim() || loading || !aiActiveId) return;
+    const coachCfg = COACHES_CONFIG[aiActiveId];
+    if (!coachCfg) return;
+    const userMsg = { role: "user", content: input.trim(), time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
+    const updated = [...(aiChatMsgs[aiActiveId] || []), userMsg];
+    setAiChatMsgs(prev => ({ ...prev, [aiActiveId]: updated }));
+    setInput(""); setLoading(true);
+    const sysPrompt = aiActiveId === "coach-sarah" ? coachCfg.systemPrompt(profile, tot, macroGoals) : coachCfg.systemPrompt(profile);
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 350, system: sysPrompt, messages: updated.map(m => ({ role: m.role, content: m.content })) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const reply = data.content?.map(b => b.text || "").join("") || "Sorry, missed that!";
+      setAiChatMsgs(prev => ({ ...prev, [aiActiveId]: [...(prev[aiActiveId] || []), { role: "assistant", content: reply, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }] }));
+    } catch {
+      setAiChatMsgs(prev => ({ ...prev, [aiActiveId]: [...(prev[aiActiveId] || []), { role: "assistant", content: "Connection issue. Try again.", time: "--:--" }] }));
+    }
+    setLoading(false);
+  };
 
-  const openThread = (id) => {
-    setActiveId(id);
+  const openAICoach = (id) => {
+    setAiActiveId(id);
+    setView("ai-thread");
     setInput("");
-    if (id === "real-coach") { loadReal().then(loadUnreadCounts); return; }
-    setThreads(prev => prev.map(t => t.senderId === id ? { ...t, messages: t.messages.map(m => ({ ...m, read: true })) } : t));
-    if (COACHES_CONFIG[id] && !chatMsgs[id]) {
+    if (!aiChatMsgs[id]) {
       const cfg = COACHES_CONFIG[id];
       const firstName = profile.name.split(" ")[0];
       let greeting = "";
@@ -8941,113 +9008,172 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
       } else if (id === "coach-emma") {
         greeting = `Hi ${firstName}! Good to check in with you. How's your head space around your nutrition goals this week?`;
       }
-      setChatMsgs(prev => ({ ...prev, [id]: [{ role: "assistant", content: greeting, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }] }));
+      setAiChatMsgs(prev => ({ ...prev, [id]: [{ role: "assistant", content: greeting, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }] }));
     }
   };
 
-  const sendAIMessage = async () => {
-    if (!input.trim() || loading || !coachCfg) return;
-    const senderId = activeId;
-    const userMsg = { role: "user", content: input.trim(), time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
-    const updated = [...(chatMsgs[senderId] || []), userMsg];
-    setChatMsgs(prev => ({ ...prev, [senderId]: updated }));
-    setInput(""); setLoading(true);
-    const sysPrompt = senderId === "coach-sarah" ? coachCfg.systemPrompt(profile, tot, macroGoals) : coachCfg.systemPrompt(profile);
-    try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 350, system: sysPrompt, messages: updated.map(m => ({ role: m.role, content: m.content })) }),
-      });
-      const data = await res.json().catch(() => ({}));
-      const reply = data.content?.map(b => b.text || "").join("") || "Sorry, missed that!";
-      setChatMsgs(prev => ({ ...prev, [senderId]: [...(prev[senderId] || []), { role: "assistant", content: reply, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }] }));
-    } catch {
-      setChatMsgs(prev => ({ ...prev, [senderId]: [...(prev[senderId] || []), { role: "assistant", content: "Connection issue. Try again.", time: "--:--" }] }));
-    }
-    setLoading(false);
+  const handleSend = () => {
+    if (view === "thread") sendReply();
+    else if (view === "compose") sendNewThread();
+    else if (view === "ai-thread") sendAIMessage();
   };
 
-  const handleSend = () => { if (isRealCoach) sendReal(); else sendAIMessage(); };
-
-  // Build thread list
-  const allThreads = [];
-  if (coachId) {
-    const lastReal = realMsgs[realMsgs.length - 1];
-    allThreads.push({ id: "real-coach", name: "My Coach", role: "Your Coach", initials: "🏋️", color: T.coachGreen, isReal: true,
-      lastMsg: lastReal?.content || "Start a conversation…", lastTime: lastReal?.created_at ? new Date(lastReal.created_at) : null, unread: realUnread });
-  }
-  threads.forEach(t => {
-    const cfg = COACHES_CONFIG[t.senderId];
-    const msgs = [...t.messages].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    const latest = msgs[0];
-    allThreads.push({ id: t.senderId, name: cfg?.name || t.senderName, role: cfg?.role || "AI Coach", initials: cfg?.initials || "?", color: cfg?.color || T.accent, isReal: false,
-      lastMsg: latest?.body || latest?.title || "New conversation", lastTime: latest?.timestamp ? new Date(latest.timestamp) : null, unread: t.messages.filter(m => !m.read).length });
-  });
-
-  const activeChatMessages = isRealCoach
-    ? realMsgs.map(m => ({ role: m.fromId === profile?.id ? "user" : "assistant", content: m.content, time: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "" }))
-    : (chatMsgs[activeId] || []);
-  const activeInfo = allThreads.find(t => t.id === activeId);
+  // Build AI coach entries for the sidebar
+  const aiCoaches = Object.entries(COACHES_CONFIG).map(([id, cfg]) => ({ id, ...cfg }));
 
   return (
     <div style={{ display: "flex", height: "calc(100vh - 170px)", background: T.bg, borderRadius: 20, overflow: "hidden", border: `1px solid ${T.border}` }}>
-      {/* Sidebar */}
-      <div style={{ width: 320, flexShrink: 0, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", background: T.card }}>
+      {/* ── SIDEBAR ── */}
+      <div style={{ width: 340, flexShrink: 0, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", background: T.card }}>
         <div style={{ padding: "16px 18px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div><div style={{ fontFamily: "Bebas Neue", fontSize: 18, letterSpacing: 2, color: T.text }}>INBOX</div><div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>{allThreads.length} conversation{allThreads.length !== 1 ? "s" : ""}</div></div>
-          {totalUnread > 0 && <div style={{ background: T.danger, borderRadius: 10, padding: "2px 8px", fontFamily: "JetBrains Mono", fontSize: 10, color: "#fff", fontWeight: 700 }}>{totalUnread}</div>}
+          <div>
+            <div style={{ fontFamily: "Bebas Neue", fontSize: 18, letterSpacing: 2, color: T.text }}>INBOX</div>
+            <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>{threadList.length} thread{threadList.length !== 1 ? "s" : ""}{totalUnread > 0 ? ` · ${totalUnread} unread` : ""}</div>
+          </div>
+          <button
+            onClick={() => { setView("compose"); setComposeSubject(""); setInput(""); }}
+            style={{
+              background: T.accent, color: T.bg, border: "none", borderRadius: 8,
+              padding: "6px 12px", fontFamily: "Bebas Neue", fontSize: 12,
+              letterSpacing: 1, cursor: "pointer",
+            }}
+          >
+            ✉ COMPOSE
+          </button>
         </div>
         <div style={{ overflowY: "auto", flex: 1 }}>
-          {allThreads.map((t, idx) => {
-            const isActive = activeId === t.id;
-            return (
-              <div key={t.id} onClick={() => openThread(t.id)} style={{
-                padding: "14px 18px", borderBottom: idx < allThreads.length - 1 ? `1px solid ${T.border}` : "none",
-                background: isActive ? T.surface : t.unread > 0 ? `${t.color}08` : "transparent", cursor: "pointer", display: "flex", gap: 12, alignItems: "center",
-              }}>
-                {t.unread > 0 && <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: t.color, borderRadius: "4px 0 0 4px" }} />}
-                <div style={{ width: 40, height: 40, borderRadius: "50%", background: `${t.color}22`, border: `2px solid ${t.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: t.isReal ? 18 : 14, fontFamily: "Bebas Neue", color: t.color, flexShrink: 0 }}>{t.initials}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontFamily: "DM Sans", fontSize: 13, fontWeight: t.unread > 0 ? 700 : 500, color: T.text }}>{t.name}</span>
-                      <span style={{ background: `${t.color}18`, border: `1px solid ${t.color}33`, borderRadius: 4, padding: "1px 6px", fontFamily: "DM Sans", fontSize: 8, fontWeight: 600, color: t.color }}>{t.isReal ? "Coach" : "AI"}</span>
+          {/* Real coach threads */}
+          {coachId && (
+            <div style={{ borderBottom: `1px solid ${T.border}30` }}>
+              <div style={{ padding: "8px 18px", fontFamily: "DM Sans", fontSize: 9, color: T.muted, letterSpacing: 1, textTransform: "uppercase", background: T.surface }}>Coach Messages</div>
+              {threadList.length === 0 && (
+                <div style={{ padding: "14px 18px", fontFamily: "DM Sans", fontSize: 11, color: T.muted }}>No threads yet — compose a message to your coach</div>
+              )}
+              {threadList.map((t, idx) => {
+                const isActive = view === "thread" && activeThread?.threadId === t.threadId;
+                const hasUnread = (t.unreadCount || 0) > 0;
+                return (
+                  <div key={t.threadId} onClick={() => openThread({ ...t, otherId: coachId })} style={{
+                    padding: "12px 18px", borderBottom: idx < threadList.length - 1 ? `1px solid ${T.border}15` : "none",
+                    background: isActive ? T.surface : hasUnread ? `${T.accent}06` : "transparent",
+                    cursor: "pointer", transition: "background 0.15s",
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                      <span style={{ fontFamily: "DM Sans", fontSize: 13, fontWeight: hasUnread ? 700 : 500, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                        {t.subject || "General"}
+                      </span>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0, marginLeft: 8 }}>
+                        {hasUnread && <div style={{ background: T.accent, borderRadius: "50%", width: 18, height: 18, display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontFamily: "JetBrains Mono", fontSize: 9, color: T.bg, fontWeight: 700 }}>{t.unreadCount}</span></div>}
+                        {t.lastAt && <span style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: T.muted }}>{timeAgo(t.lastAt)}</span>}
+                      </div>
                     </div>
-                    {t.lastTime && <span style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: T.muted }}>{timeAgo(t.lastTime.toISOString())}</span>}
+                    <div style={{ fontFamily: "DM Sans", fontSize: 11, color: hasUnread ? T.text : T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {t.lastMessage || "No messages"}
+                    </div>
+                    <div style={{ fontFamily: "JetBrains Mono", fontSize: 9, color: T.border, marginTop: 3 }}>
+                      {t.messageCount} message{t.messageCount !== 1 ? "s" : ""}
+                    </div>
                   </div>
-                  <div style={{ fontFamily: "DM Sans", fontSize: 11, color: t.unread > 0 ? T.text : T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.lastMsg}</div>
+                );
+              })}
+            </div>
+          )}
+          {/* AI coaches */}
+          <div>
+            <div style={{ padding: "8px 18px", fontFamily: "DM Sans", fontSize: 9, color: T.muted, letterSpacing: 1, textTransform: "uppercase", background: T.surface }}>AI Coaches</div>
+            {aiCoaches.map((cfg) => {
+              const isActive = view === "ai-thread" && aiActiveId === cfg.id;
+              const msgs = aiChatMsgs[cfg.id] || [];
+              const lastMsg = msgs[msgs.length - 1]?.content || "Start a conversation…";
+              return (
+                <div key={cfg.id} onClick={() => openAICoach(cfg.id)} style={{
+                  padding: "12px 18px", borderBottom: `1px solid ${T.border}15`,
+                  background: isActive ? T.surface : "transparent", cursor: "pointer",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: "50%", background: `${cfg.color}22`, border: `2px solid ${cfg.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Bebas Neue", fontSize: 10, color: cfg.color }}>{cfg.initials}</div>
+                    <span style={{ fontFamily: "DM Sans", fontSize: 12, fontWeight: 600, color: T.text }}>{cfg.name}</span>
+                    <span style={{ background: `${cfg.color}18`, border: `1px solid ${cfg.color}33`, borderRadius: 4, padding: "1px 6px", fontFamily: "DM Sans", fontSize: 8, fontWeight: 600, color: cfg.color }}>AI</span>
+                  </div>
+                  <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingLeft: 36 }}>
+                    {lastMsg.slice(0, 60)}{lastMsg.length > 60 ? "…" : ""}
+                  </div>
                 </div>
-                {t.unread > 0 && <div style={{ background: t.color, borderRadius: "50%", width: 18, height: 18, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><span style={{ fontFamily: "JetBrains Mono", fontSize: 9, color: "#fff", fontWeight: 700 }}>{t.unread}</span></div>}
-              </div>
-            );
-          })}
-          {allThreads.length === 0 && <div style={{ padding: 24, textAlign: "center", color: T.muted, fontFamily: "DM Sans", fontSize: 12 }}>No conversations yet</div>}
+              );
+            })}
+          </div>
         </div>
       </div>
-      {/* Chat */}
+
+      {/* ── MAIN PANEL ── */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", background: T.bg }}>
-        {!activeId ? (
+        {/* Empty state */}
+        {view === "list" && (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}>
-            <div style={{ fontSize: 40, opacity: 0.3 }}>💬</div>
-            <div style={{ fontFamily: "DM Sans", fontSize: 14, color: T.muted }}>Select a conversation</div>
+            <div style={{ fontSize: 40, opacity: 0.3 }}>✉</div>
+            <div style={{ fontFamily: "DM Sans", fontSize: 14, color: T.muted }}>Select a thread or compose a new message</div>
           </div>
-        ) : (
-          <>
+        )}
+
+        {/* Compose new thread */}
+        {view === "compose" && (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
             <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ width: 36, height: 36, borderRadius: "50%", background: `${activeInfo?.color || T.accent}22`, border: `2px solid ${activeInfo?.color || T.accent}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: activeInfo?.isReal ? 16 : 12, fontFamily: "Bebas Neue", color: activeInfo?.color || T.accent }}>{activeInfo?.initials}</div>
-              <div><div style={{ fontFamily: "DM Sans", fontSize: 14, fontWeight: 700, color: T.text }}>{activeInfo?.name}</div><div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>{activeInfo?.role}{activeInfo?.isReal ? " · Live" : " · AI"}</div></div>
-              {activeInfo?.isReal && <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: T.coachGreen, animation: "pulse 2s infinite" }} /><span style={{ fontFamily: "DM Sans", fontSize: 9, color: T.coachGreen }}>LIVE</span></div>}
+              <button onClick={() => setView("list")} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 18, padding: 0 }}>←</button>
+              <div style={{ fontFamily: "Bebas Neue", fontSize: 18, letterSpacing: 2, color: T.text }}>NEW MESSAGE</div>
+            </div>
+            <div style={{ padding: "16px 20px", borderBottom: `1px solid ${T.border}` }}>
+              <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Subject</div>
+              <input
+                value={composeSubject}
+                onChange={e => setComposeSubject(e.target.value)}
+                placeholder="e.g. Question about macros, Weekly update, Meal plan query…"
+                style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 13, outline: "none" }}
+              />
+            </div>
+            <div style={{ flex: 1, padding: "20px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ textAlign: "center", color: T.muted }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>✉</div>
+                <div style={{ fontFamily: "DM Sans", fontSize: 12 }}>Write your message below and hit send to start a new conversation</div>
+              </div>
+            </div>
+            <div style={{ padding: "12px 20px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 8 }}>
+              <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSend()}
+                placeholder="Write your message…"
+                style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 12, outline: "none" }} />
+              <button onClick={handleSend} disabled={loading || !input.trim() || !composeSubject.trim()} style={{
+                background: input.trim() && composeSubject.trim() ? T.accent : T.border, color: input.trim() && composeSubject.trim() ? T.bg : T.muted,
+                border: "none", borderRadius: 10, padding: "10px 16px", fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1.5, cursor: input.trim() && composeSubject.trim() ? "pointer" : "default",
+              }} type="button">{loading ? "…" : "SEND"}</button>
+            </div>
+          </div>
+        )}
+
+        {/* Thread view (real coach) */}
+        {view === "thread" && activeThread && (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+            <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 12 }}>
+              <button onClick={() => { setView("list"); loadThreads(); }} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 18, padding: 0 }}>←</button>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: "DM Sans", fontSize: 14, fontWeight: 700, color: T.text }}>{activeThread.subject || "General"}</div>
+                <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>with Coach · {threadMessages.length} message{threadMessages.length !== 1 ? "s" : ""}</div>
+              </div>
             </div>
             <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
-              {activeChatMessages.length === 0 ? (
-                <div style={{ textAlign: "center", color: T.muted, fontFamily: "DM Sans", fontSize: 12, padding: 30 }}>{isRealCoach ? "No messages yet. Say hello!" : "Start the conversation…"}</div>
-              ) : activeChatMessages.map((m, i) => {
-                const isUser = m.role === "user";
+              {threadMessages.length === 0 ? (
+                <div style={{ textAlign: "center", color: T.muted, fontFamily: "DM Sans", fontSize: 12, padding: 30 }}>No messages yet</div>
+              ) : threadMessages.map((m, i) => {
+                const isUser = m.fromId === profile?.id;
+                const showDate = i === 0 || new Date(m.created_at).toDateString() !== new Date(threadMessages[i-1]?.created_at).toDateString();
                 return (
-                  <div key={i} style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 10 }}>
-                    <div style={{ maxWidth: "75%", padding: "10px 14px", borderRadius: 14, background: isUser ? T.accent : T.surface, color: isUser ? T.bg : T.text, borderBottomRightRadius: isUser ? 4 : 14, borderBottomLeftRadius: isUser ? 14 : 4 }}>
-                      <div style={{ fontFamily: "DM Sans", fontSize: 12, lineHeight: 1.5 }}>{m.content}</div>
-                      {m.time && <div style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: isUser ? T.bg + "88" : T.muted, marginTop: 4, textAlign: "right" }}>{m.time}</div>}
+                  <div key={m.id || i}>
+                    {showDate && <div style={{ textAlign: "center", fontFamily: "JetBrains Mono", fontSize: 9, color: T.muted, margin: "12px 0", padding: "4px 12px", background: T.surface, borderRadius: 20, display: "inline-block", width: "auto", marginLeft: "auto", marginRight: "auto", left: "50%", position: "relative", transform: "translateX(-50%)" }}>{new Date(m.created_at).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}</div>}
+                    <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 10 }}>
+                      <div style={{ maxWidth: "75%", padding: "10px 14px", borderRadius: 14, background: isUser ? T.accent : T.surface, color: isUser ? T.bg : T.text, borderBottomRightRadius: isUser ? 4 : 14, borderBottomLeftRadius: isUser ? 14 : 4 }}>
+                        {!isUser && m.fromName && <div style={{ fontFamily: "DM Sans", fontSize: 10, fontWeight: 700, color: T.coachGreen, marginBottom: 4 }}>{m.fromName}</div>}
+                        <div style={{ fontFamily: "DM Sans", fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{m.content}</div>
+                        {m.created_at && <div style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: isUser ? T.bg + "88" : T.muted, marginTop: 4, textAlign: "right" }}>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>}
+                      </div>
                     </div>
                   </div>
                 );
@@ -9057,15 +9183,54 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
             </div>
             <div style={{ padding: "12px 20px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 8 }}>
               <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSend()}
-                placeholder={isRealCoach ? "Message your coach…" : `Message ${activeInfo?.name}…`}
+                placeholder="Reply…"
                 style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 12, outline: "none" }} />
               <button onClick={handleSend} disabled={loading || !input.trim()} style={{
                 background: input.trim() ? T.accent : T.border, color: input.trim() ? T.bg : T.muted,
                 border: "none", borderRadius: 10, padding: "10px 16px", fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1.5, cursor: input.trim() ? "pointer" : "default",
-              }} type="button">{loading ? "…" : "SEND"}</button>
+              }} type="button">{loading ? "…" : "REPLY"}</button>
             </div>
-          </>
+          </div>
         )}
+
+        {/* AI Coach thread */}
+        {view === "ai-thread" && aiActiveId && (() => {
+          const cfg = COACHES_CONFIG[aiActiveId];
+          const msgs = aiChatMsgs[aiActiveId] || [];
+          return (
+            <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+              <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 12 }}>
+                <button onClick={() => setView("list")} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 18, padding: 0 }}>←</button>
+                <div style={{ width: 32, height: 32, borderRadius: "50%", background: `${cfg.color}22`, border: `2px solid ${cfg.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Bebas Neue", fontSize: 11, color: cfg.color }}>{cfg.initials}</div>
+                <div><div style={{ fontFamily: "DM Sans", fontSize: 14, fontWeight: 700, color: T.text }}>{cfg.name}</div><div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>{cfg.role} · AI</div></div>
+              </div>
+              <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
+                {msgs.map((m, i) => {
+                  const isUser = m.role === "user";
+                  return (
+                    <div key={i} style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 10 }}>
+                      <div style={{ maxWidth: "75%", padding: "10px 14px", borderRadius: 14, background: isUser ? T.accent : T.surface, color: isUser ? T.bg : T.text, borderBottomRightRadius: isUser ? 4 : 14, borderBottomLeftRadius: isUser ? 14 : 4 }}>
+                        <div style={{ fontFamily: "DM Sans", fontSize: 12, lineHeight: 1.5 }}>{m.content}</div>
+                        {m.time && <div style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: isUser ? T.bg + "88" : T.muted, marginTop: 4, textAlign: "right" }}>{m.time}</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+                {loading && <div style={{ display: "flex", gap: 4, padding: "8px 0" }}>{[0,1,2].map(i => <div key={i} style={{ width: 8, height: 8, borderRadius: "50%", background: T.muted, animation: `pulse 1s infinite ${i * 0.2}s` }} />)}</div>}
+                <div ref={bottomRef} />
+              </div>
+              <div style={{ padding: "12px 20px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 8 }}>
+                <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSend()}
+                  placeholder={`Message ${cfg.name}…`}
+                  style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 12, outline: "none" }} />
+                <button onClick={handleSend} disabled={loading || !input.trim()} style={{
+                  background: input.trim() ? T.accent : T.border, color: input.trim() ? T.bg : T.muted,
+                  border: "none", borderRadius: 10, padding: "10px 16px", fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1.5, cursor: input.trim() ? "pointer" : "default",
+                }} type="button">{loading ? "…" : "SEND"}</button>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
