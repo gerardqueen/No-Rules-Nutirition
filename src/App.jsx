@@ -6217,9 +6217,6 @@ function WeeklyPlanner({
   const [cameraActive, setCameraActive] = useState(false);
   const [offSearching, setOffSearching] = useState(false);
   const [offResults, setOffResults] = useState([]);
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  const scanIntervalRef = useRef(null);
 
   // ── Open Food Facts barcode lookup (real API via server proxy) ──
   const lookupBarcode = async (code) => {
@@ -6256,55 +6253,122 @@ function WeeklyPlanner({
     setScanning(false);
   };
 
-  // ── Camera barcode scanning ──
-  const startCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } },
-      });
-      streamRef.current = stream;
-      setCameraActive(true);
-    } catch (e) {
-      setBarcodeError("Camera access denied or not available. Enter barcode manually.");
-    }
-  };
+  // ── Camera barcode scanning (QuaggaJS live mode — Safari/iOS compatible) ──
+  const scannerContainerRef = useRef(null);
+  const quaggaLoadedRef = useRef(false);
+  const quaggaRunningRef = useRef(false);
 
-  // Attach stream to video element once cameraActive flips on and video is rendered
-  useEffect(() => {
-    if (!cameraActive || !streamRef.current) return;
-    const tryAttach = () => {
-      if (videoRef.current) {
-        videoRef.current.srcObject = streamRef.current;
-        videoRef.current.play().catch(() => {});
-
-        // Start BarcodeDetector if available
-        if ("BarcodeDetector" in window) {
-          const detector = new BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e"] });
-          scanIntervalRef.current = setInterval(async () => {
-            if (!videoRef.current || videoRef.current.readyState < 2) return;
-            try {
-              const barcodes = await detector.detect(videoRef.current);
-              if (barcodes.length > 0) {
-                const code = barcodes[0].rawValue;
-                stopCamera();
-                setBarcodeInput(code);
-                lookupBarcode(code);
-              }
-            } catch {}
-          }, 300);
-        }
-      }
-    };
-    // Small delay to let React commit the <video> element to DOM
-    const t = setTimeout(tryAttach, 50);
-    return () => clearTimeout(t);
-  }, [cameraActive]);
+  // Load QuaggaJS from CDN (only once, on demand)
+  const loadQuagga = () => new Promise((resolve) => {
+    if (window.Quagga) { quaggaLoadedRef.current = true; return resolve(true); }
+    if (quaggaLoadedRef.current) return resolve(!!window.Quagga);
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js";
+    script.onload = () => { quaggaLoadedRef.current = true; resolve(true); };
+    script.onerror = () => { quaggaLoadedRef.current = true; resolve(false); };
+    document.head.appendChild(script);
+  });
 
   const stopCamera = () => {
-    if (scanIntervalRef.current) { clearInterval(scanIntervalRef.current); scanIntervalRef.current = null; }
-    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
+    if (quaggaRunningRef.current && window.Quagga) {
+      try { window.Quagga.offDetected(); window.Quagga.stop(); } catch {}
+      quaggaRunningRef.current = false;
+    }
     setCameraActive(false);
   };
+
+  const startCamera = async () => {
+    setBarcodeError("");
+    setBarcodeResult(null);
+    setCameraActive(true);
+  };
+
+  // Once cameraActive + container rendered + Quagga loaded → init live scanner
+  useEffect(() => {
+    if (!cameraActive) return;
+    let cancelled = false;
+
+    const initScanner = async () => {
+      const loaded = await loadQuagga();
+      if (cancelled) return;
+      if (!loaded || !window.Quagga) {
+        setBarcodeError("Barcode scanner failed to load. Type the number manually.");
+        setCameraActive(false);
+        return;
+      }
+
+      // Wait for the container div to be in the DOM
+      await new Promise(r => setTimeout(r, 150));
+      if (cancelled || !scannerContainerRef.current) return;
+
+      window.Quagga.init({
+        inputStream: {
+          name: "Live",
+          type: "LiveStream",
+          target: scannerContainerRef.current,
+          constraints: {
+            facingMode: "environment",
+            width: { min: 320, ideal: 640 },
+            height: { min: 240, ideal: 480 },
+          },
+        },
+        decoder: {
+          readers: ["ean_reader", "ean_8_reader", "upc_reader", "upc_e_reader"],
+        },
+        locate: true,
+        frequency: 5,
+      }, (err) => {
+        if (cancelled) return;
+        if (err) {
+          console.warn("Quagga init error:", err);
+          setBarcodeError("Camera access denied or not available. Enter barcode manually.");
+          setCameraActive(false);
+          return;
+        }
+        quaggaRunningRef.current = true;
+        window.Quagga.start();
+
+        // Style the auto-created video element for Safari compatibility
+        try {
+          const vEl = scannerContainerRef.current?.querySelector("video");
+          if (vEl) {
+            vEl.setAttribute("playsinline", "true");
+            vEl.setAttribute("muted", "true");
+            vEl.style.width = "100%";
+            vEl.style.height = "100%";
+            vEl.style.objectFit = "cover";
+            vEl.style.position = "absolute";
+            vEl.style.top = "0";
+            vEl.style.left = "0";
+          }
+          // Hide the debug canvas overlay Quagga adds
+          const canvases = scannerContainerRef.current?.querySelectorAll("canvas");
+          if (canvases) canvases.forEach(c => { c.style.display = "none"; });
+        } catch {}
+      });
+
+      // Listen for successful barcode detection
+      window.Quagga.onDetected((result) => {
+        if (cancelled) return;
+        const code = result?.codeResult?.code;
+        if (code && /^\d{8,14}$/.test(code)) {
+          stopCamera();
+          setBarcodeInput(code);
+          lookupBarcode(code);
+        }
+      });
+    };
+
+    initScanner();
+
+    return () => {
+      cancelled = true;
+      if (quaggaRunningRef.current && window.Quagga) {
+        try { window.Quagga.offDetected(); window.Quagga.stop(); } catch {}
+        quaggaRunningRef.current = false;
+      }
+    };
+  }, [cameraActive]);
 
   // Cleanup camera on unmount or tab change
   useEffect(() => { return () => stopCamera(); }, []);
@@ -7450,25 +7514,24 @@ function WeeklyPlanner({
                 >
                   <div
                     style={{
-                      height: cameraActive ? 240 : 180,
+                      height: cameraActive ? 280 : 180,
                       background: `linear-gradient(135deg, #0a0a0a, #111)`,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       position: "relative",
+                      overflow: "hidden",
                     }}
                   >
-                    {/* Live camera feed */}
+                    {/* QuaggaJS live scanner container */}
                     {cameraActive && (
-                      <video
-                        ref={videoRef}
+                      <div
+                        ref={scannerContainerRef}
                         style={{
                           position: "absolute",
                           top: 0, left: 0, width: "100%", height: "100%",
-                          objectFit: "cover",
+                          overflow: "hidden",
                         }}
-                        playsInline
-                        muted
                       />
                     )}
                     {/* Corner brackets */}
@@ -7850,7 +7913,7 @@ function WeeklyPlanner({
                       Point your camera at any barcode or type the number manually.
                     </div>
                     <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.border, marginTop: 8 }}>
-                      Camera scanning uses the BarcodeDetector API (Chrome/Edge on mobile). On unsupported browsers, type the barcode number instead.
+                      Camera scanning works on all modern browsers (uses QuaggaJS). Hold the barcode steady and well-lit for best results.
                     </div>
                   </div>
                 )}
