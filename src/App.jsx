@@ -6215,6 +6215,7 @@ function WeeklyPlanner({
   const [barcodeError, setBarcodeError] = useState("");
   const [scanning, setScanning] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
+  const [scanProgress, setScanProgress] = useState(0); // 0-3, shows read confirmation dots
   const [offSearching, setOffSearching] = useState(false);
   const [offResults, setOffResults] = useState([]);
 
@@ -6275,6 +6276,7 @@ function WeeklyPlanner({
       quaggaRunningRef.current = false;
     }
     setCameraActive(false);
+    setScanProgress(0);
   };
 
   const startCamera = async () => {
@@ -6284,9 +6286,12 @@ function WeeklyPlanner({
   };
 
   // Once cameraActive + container rendered + Quagga loaded → init live scanner
+  const detectionBufferRef = useRef([]); // stores last N detected codes for validation
+
   useEffect(() => {
     if (!cameraActive) return;
     let cancelled = false;
+    detectionBufferRef.current = [];
 
     const initScanner = async () => {
       const loaded = await loadQuagga();
@@ -6311,12 +6316,18 @@ function WeeklyPlanner({
             width: { min: 320, ideal: 640 },
             height: { min: 240, ideal: 480 },
           },
+          area: { top: "20%", right: "10%", left: "10%", bottom: "20%" },
+        },
+        locator: {
+          patchSize: "medium",
+          halfSample: true,
         },
         decoder: {
           readers: ["ean_reader", "ean_8_reader", "upc_reader", "upc_e_reader"],
+          multiple: false,
         },
         locate: true,
-        frequency: 5,
+        frequency: 10,
       }, (err) => {
         if (cancelled) return;
         if (err) {
@@ -6347,11 +6358,36 @@ function WeeklyPlanner({
         } catch {}
       });
 
-      // Listen for successful barcode detection
+      // Confidence check: average error must be below threshold
+      const isHighConfidence = (result) => {
+        const errors = result?.codeResult?.decodedCodes
+          ?.filter(d => d.error != null)
+          ?.map(d => d.error) || [];
+        if (errors.length === 0) return false;
+        const avgError = errors.reduce((s, e) => s + e, 0) / errors.length;
+        return avgError < 0.08; // lower = more confident
+      };
+
+      // Listen for barcode detection — require same code 3 times for validation
+      const REQUIRED_READS = 3;
+
       window.Quagga.onDetected((result) => {
         if (cancelled) return;
         const code = result?.codeResult?.code;
-        if (code && /^\d{8,14}$/.test(code)) {
+        if (!code || !/^\d{8,14}$/.test(code)) return;
+        if (!isHighConfidence(result)) return;
+
+        // Push to buffer, keep last 8 reads
+        detectionBufferRef.current.push(code);
+        if (detectionBufferRef.current.length > 8) detectionBufferRef.current.shift();
+
+        // Count how many of the last reads match this code
+        const matches = detectionBufferRef.current.filter(c => c === code).length;
+        setScanProgress(Math.min(matches, REQUIRED_READS));
+
+        if (matches >= REQUIRED_READS) {
+          detectionBufferRef.current = [];
+          setScanProgress(0);
           stopCamera();
           setBarcodeInput(code);
           lookupBarcode(code);
@@ -7534,6 +7570,25 @@ function WeeklyPlanner({
                         }}
                       />
                     )}
+                    {/* Scan progress indicator overlay */}
+                    {cameraActive && (
+                      <div style={{
+                        position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)",
+                        zIndex: 5, display: "flex", gap: 8, alignItems: "center",
+                        background: "rgba(0,0,0,0.7)", borderRadius: 20, padding: "6px 14px",
+                      }}>
+                        {[1, 2, 3].map(i => (
+                          <div key={i} style={{
+                            width: 10, height: 10, borderRadius: "50%",
+                            background: scanProgress >= i ? T.coachGreen : T.border,
+                            transition: "background 0.15s",
+                          }} />
+                        ))}
+                        <span style={{ fontFamily: "DM Sans", fontSize: 10, color: scanProgress > 0 ? T.coachGreen : T.muted, marginLeft: 4 }}>
+                          {scanProgress === 0 ? "Scanning…" : `Reading (${scanProgress}/3)`}
+                        </span>
+                      </div>
+                    )}
                     {/* Corner brackets */}
                     {[
                       ["0%", "0%", "right", "bottom"],
@@ -7910,10 +7965,9 @@ function WeeklyPlanner({
                   }}>
                     <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, lineHeight: 1.6 }}>
                       <strong style={{ color: T.text }}>Powered by Open Food Facts</strong> — 3M+ products including UK supermarket brands (Tesco, Sainsbury's, Aldi, Lidl, M&S, etc).
-                      Point your camera at any barcode or type the number manually.
                     </div>
                     <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.border, marginTop: 8 }}>
-                      Camera scanning works on all modern browsers (uses QuaggaJS). Hold the barcode steady and well-lit for best results.
+                      <strong style={{ color: T.muted }}>Scanning tips:</strong> Hold the barcode flat and centred in the viewfinder. Keep about 15cm distance. Good lighting helps — avoid shadows across the barcode. The scanner needs 3 consistent reads to confirm.
                     </div>
                   </div>
                 )}
