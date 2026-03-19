@@ -6214,165 +6214,15 @@ function WeeklyPlanner({
   const [barcodeResult, setBarcodeResult] = useState(null);
   const [barcodeError, setBarcodeError] = useState("");
   const [scanning, setScanning] = useState(false);
+  const [cameraActive, setCameraActive] = useState(false);
+  const [offSearching, setOffSearching] = useState(false);
+  const [offResults, setOffResults] = useState([]);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const scanIntervalRef = useRef(null);
 
-  // Mock barcode database (EAN-13 / UPC-A style)
-  const BARCODE_DB = {
-    5000112637939: {
-      n: "Weetabix Original",
-      cal: 134,
-      p: 4.5,
-      c: 26,
-      f: 0.8,
-      s: [
-        ["2 biscuits", 37],
-        ["4 biscuits", 74],
-      ],
-    },
-    5000159484695: {
-      n: "Quaker Oats Original Porridge",
-      cal: 374,
-      p: 11,
-      c: 60,
-      f: 8,
-      s: [
-        ["1 serving", 40],
-        ["2 servings", 80],
-      ],
-    },
-    7310865004703: {
-      n: "Arla Skyr Plain Yoghurt",
-      cal: 63,
-      p: 11,
-      c: 4,
-      f: 0.2,
-      s: [
-        ["100g serving", 100],
-        ["200g pot", 200],
-      ],
-    },
-    5010477348778: {
-      n: "Kellogg's Special K Original",
-      cal: 378,
-      p: 15,
-      c: 69,
-      f: 1.5,
-      s: [
-        ["1 bowl", 30],
-        ["2 bowls", 60],
-      ],
-    },
-    4001724819993: {
-      n: "Ritter Sport Marzipan Chocolate",
-      cal: 497,
-      p: 5.4,
-      c: 58,
-      f: 26,
-      s: [
-        ["2 squares", 25],
-        ["Half bar", 50],
-      ],
-    },
-    5000213013701: {
-      n: "Walkers Ready Salted Crisps",
-      cal: 531,
-      p: 5.7,
-      c: 49,
-      f: 34,
-      s: [
-        ["Small bag", 25],
-        ["Large bag", 65],
-      ],
-    },
-    8001120000477: {
-      n: "Barilla Spaghetti No.5",
-      cal: 353,
-      p: 13,
-      c: 70,
-      f: 1.5,
-      s: [
-        ["1 portion", 80],
-        ["2 portions", 160],
-      ],
-    },
-    "0737628064502": {
-      n: "Justin's Classic Almond Butter",
-      cal: 614,
-      p: 21,
-      c: 19,
-      f: 54,
-      s: [
-        ["1 tbsp", 16],
-        ["2 tbsp", 32],
-      ],
-    },
-    5000118029016: {
-      n: "Müller Corner Strawberry Yoghurt",
-      cal: 115,
-      p: 4.4,
-      c: 20,
-      f: 1.8,
-      s: [["1 pot", 150]],
-    },
-    8076809513555: {
-      n: "Barilla Penne Rigate",
-      cal: 357,
-      p: 13,
-      c: 71,
-      f: 1.7,
-      s: [
-        ["1 portion", 80],
-        ["2 portions", 160],
-      ],
-    },
-    5010477352218: {
-      n: "Kellogg's Corn Flakes",
-      cal: 376,
-      p: 7.7,
-      c: 84,
-      f: 0.9,
-      s: [["1 bowl", 30]],
-    },
-    "0041498137588": {
-      n: "Siggi's Icelandic Plain Skyr",
-      cal: 65,
-      p: 12,
-      c: 3.5,
-      f: 0.2,
-      s: [
-        ["100g", 100],
-        ["170g pot", 170],
-      ],
-    },
-    5449000054227: {
-      n: "Coca-Cola Original (330ml)",
-      cal: 139,
-      p: 0,
-      c: 35,
-      f: 0,
-      s: [["1 can", 330]],
-    },
-    5000112627572: {
-      n: "Kind Dark Chocolate Nuts & Sea Salt Bar",
-      cal: 477,
-      p: 9,
-      c: 38,
-      f: 33,
-      s: [["1 bar", 40]],
-    },
-    8000500037560: {
-      n: "Ferrero Rocher (3 pack)",
-      cal: 596,
-      p: 7.8,
-      c: 49,
-      f: 41,
-      s: [
-        ["1 piece", 13],
-        ["3 pieces", 37.5],
-      ],
-    },
-  };
-
-  const lookupBarcode = (code) => {
+  // ── Open Food Facts barcode lookup (real API via server proxy) ──
+  const lookupBarcode = async (code) => {
     const clean = code.replace(/\D/g, "");
     setBarcodeError("");
     setBarcodeResult(null);
@@ -6381,20 +6231,74 @@ function WeeklyPlanner({
       return;
     }
     setScanning(true);
-    setTimeout(() => {
-      setScanning(false);
-      const found = BARCODE_DB[clean];
-      if (found) {
-        setBarcodeResult({ ...found, barcode: clean });
-        setServingGrams(found.s?.[0]?.[1] || 100);
-        setServingLabel(found.s?.[0]?.[0] || "100g");
+    try {
+      const data = await apiFetch(`/off/barcode/${clean}`);
+      if (data.found) {
+        const servings = (data.servings || []).map(([label, grams]) => [label, grams]);
+        setBarcodeResult({
+          n: data.brand ? `${data.name} (${data.brand})` : data.name,
+          cal: data.calories,
+          p: data.protein,
+          c: data.carbs,
+          f: data.fat,
+          s: servings,
+          barcode: data.barcode || clean,
+          image: data.image || null,
+        });
+        setServingGrams(servings[0]?.[1] || 100);
+        setServingLabel(servings[0]?.[0] || "100g");
       } else {
-        setBarcodeError(
-          `No product found for barcode ${clean}. Try one of the demo barcodes below.`
-        );
+        setBarcodeError(`No product found for barcode ${clean}. Check the number or try searching by name.`);
       }
-    }, 900);
+    } catch (e) {
+      setBarcodeError(`Lookup failed: ${e.message}`);
+    }
+    setScanning(false);
   };
+
+  // ── Camera barcode scanning ──
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } },
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+      }
+      setCameraActive(true);
+
+      // Use BarcodeDetector API if available (Chrome/Edge)
+      if ("BarcodeDetector" in window) {
+        const detector = new BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e"] });
+        scanIntervalRef.current = setInterval(async () => {
+          if (!videoRef.current || videoRef.current.readyState < 2) return;
+          try {
+            const barcodes = await detector.detect(videoRef.current);
+            if (barcodes.length > 0) {
+              const code = barcodes[0].rawValue;
+              stopCamera();
+              setBarcodeInput(code);
+              lookupBarcode(code);
+            }
+          } catch {}
+        }, 300);
+      }
+    } catch (e) {
+      setBarcodeError("Camera access denied or not available. Enter barcode manually.");
+    }
+  };
+
+  const stopCamera = () => {
+    if (scanIntervalRef.current) { clearInterval(scanIntervalRef.current); scanIntervalRef.current = null; }
+    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
+    setCameraActive(false);
+  };
+
+  // Cleanup camera on unmount or tab change
+  useEffect(() => { return () => stopCamera(); }, []);
+  useEffect(() => { if (pickerTab !== "barcode") stopCamera(); }, [pickerTab]);
 
   const selectFromBarcode = () => {
     if (!barcodeResult) return;
@@ -6421,22 +6325,50 @@ function WeeklyPlanner({
     setBarcodeResult(null);
     setBarcodeInput("");
     setBarcodeError("");
+    setOffResults([]);
+    setOffSearching(false);
+    stopCamera();
   };
 
-  // Search the FOOD_DB on input change
+  // Search USDA food DB locally + Open Food Facts via server (debounced)
+  const offTimerRef = useRef(null);
   const handleFoodSearch = (query) => {
     setFoodSearch(query);
     setSelectedFoodItem(null);
     if (query.trim().length < 2) {
       setFoodSearchResults([]);
+      setOffResults([]);
       return;
     }
     const q = query.toLowerCase();
-    const results = FOOD_DB.filter((f) => f.n.toLowerCase().includes(q)).slice(
-      0,
-      50
-    );
+    // Instant local USDA results
+    const results = FOOD_DB.filter((f) => f.n.toLowerCase().includes(q)).slice(0, 30);
     setFoodSearchResults(results);
+
+    // Debounced Open Food Facts search (500ms)
+    if (offTimerRef.current) clearTimeout(offTimerRef.current);
+    offTimerRef.current = setTimeout(async () => {
+      if (query.trim().length < 3) return;
+      setOffSearching(true);
+      try {
+        const data = await apiFetch(`/off/search?q=${encodeURIComponent(query.trim())}`);
+        if (data.products) {
+          // Convert OFF results to FOOD_DB-compatible format
+          const offItems = data.products.map(p => ({
+            n: p.brand ? `${p.name} (${p.brand})` : p.name,
+            c: p.calories,
+            p: p.protein,
+            b: p.carbs,
+            f: p.fat,
+            s: (p.servings || []).map(([label, grams]) => [label, grams]),
+            _off: true, // flag to show OFF badge
+            _img: p.image || null,
+          }));
+          setOffResults(offItems);
+        }
+      } catch (e) { /* OFF search failed silently — USDA results still shown */ }
+      setOffSearching(false);
+    }, 500);
   };
 
   const selectFoodItem = (item) => {
@@ -6873,7 +6805,7 @@ function WeeklyPlanner({
                       color: T.muted,
                     }}
                   >
-                    Search 8,200+ foods or scan a barcode
+                    Search 8,200+ foods + UK brands or scan a barcode
                   </div>
                 </div>
                 <button
@@ -7261,7 +7193,7 @@ function WeeklyPlanner({
                     >
                       <div style={{ fontSize: 36, marginBottom: 12 }}>🥗</div>
                       <div style={{ fontFamily: "DM Sans", fontSize: 13 }}>
-                        Start typing to search the USDA food database
+                        Start typing to search 8,200+ USDA foods + UK branded products
                       </div>
                       <div
                         style={{
@@ -7285,6 +7217,8 @@ function WeeklyPlanner({
                   {/* No results */}
                   {foodSearch.length >= 2 &&
                     foodSearchResults.length === 0 &&
+                    offResults.length === 0 &&
+                    !offSearching &&
                     !selectedFoodItem && (
                       <div
                         style={{
@@ -7304,11 +7238,11 @@ function WeeklyPlanner({
                             marginTop: 6,
                           }}
                         >
-                          Try a different spelling or shorter search
+                          Try a different spelling or scan the barcode instead
                         </div>
                       </div>
                     )}
-                  {/* Search results */}
+                  {/* USDA Search results */}
                   {foodSearchResults.length > 0 && (
                     <div>
                       <div
@@ -7319,9 +7253,9 @@ function WeeklyPlanner({
                           marginBottom: 8,
                         }}
                       >
-                        {foodSearchResults.length === 50
-                          ? "TOP 50 RESULTS"
-                          : `${foodSearchResults.length} RESULTS`}
+                        {foodSearchResults.length === 30
+                          ? "TOP 30 · USDA DATABASE"
+                          : `${foodSearchResults.length} RESULTS · USDA DATABASE`}
                       </div>
                       {foodSearchResults.map((item, i) => (
                         <button
@@ -7406,6 +7340,86 @@ function WeeklyPlanner({
                       ))}
                     </div>
                   )}
+                  {/* Open Food Facts results (UK branded/packaged foods) */}
+                  {offSearching && foodSearchResults.length === 0 && (
+                    <div style={{ textAlign: "center", padding: "20px 0", color: T.muted }}>
+                      <div style={{ fontFamily: "DM Sans", fontSize: 12 }}>Searching UK products...</div>
+                    </div>
+                  )}
+                  {offResults.length > 0 && (
+                    <div style={{ marginTop: foodSearchResults.length > 0 ? 16 : 0 }}>
+                      <div
+                        style={{
+                          fontFamily: "DM Sans",
+                          fontSize: 11,
+                          color: T.muted,
+                          marginBottom: 8,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        <span style={{ background: "#22c55e", color: "#000", padding: "1px 6px", borderRadius: 4, fontSize: 9, fontWeight: 600, letterSpacing: 0.5 }}>OFF</span>
+                        {offResults.length} UK BRANDED PRODUCTS
+                        {offSearching && <span style={{ fontSize: 10 }}>  ⟳</span>}
+                      </div>
+                      {offResults.map((item, i) => (
+                        <button
+                          key={`off-${i}`}
+                          onClick={() => selectFoodItem(item)}
+                          style={{
+                            width: "100%",
+                            textAlign: "left",
+                            padding: "10px 12px",
+                            background:
+                              selectedFoodItem?.n === item.n
+                                ? T.accent + "15"
+                                : T.card,
+                            border: `1px solid ${
+                              selectedFoodItem?.n === item.n
+                                ? T.accent
+                                : T.border
+                            }`,
+                            borderRadius: 10,
+                            marginBottom: 6,
+                            cursor: "pointer",
+                            transition: "all 0.15s",
+                          }}
+                          onMouseEnter={(e) => {
+                            if (selectedFoodItem?.n !== item.n)
+                              e.currentTarget.style.borderColor = T.accent + "66";
+                          }}
+                          onMouseLeave={(e) => {
+                            if (selectedFoodItem?.n !== item.n)
+                              e.currentTarget.style.borderColor = T.border;
+                          }}
+                        >
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1 }}>
+                              {item._img && (
+                                <img src={item._img} alt="" style={{ width: 28, height: 28, borderRadius: 6, objectFit: "cover", background: T.surface }} />
+                              )}
+                              <span style={{ fontFamily: "DM Sans", fontSize: 12, color: T.text, fontWeight: 500, lineHeight: 1.3, flex: 1 }}>
+                                {item.n}
+                              </span>
+                            </div>
+                            <span style={{ fontFamily: "JetBrains Mono", fontSize: 11, color: T.accent, whiteSpace: "nowrap" }}>
+                              {item.c} kcal
+                            </span>
+                          </div>
+                          <div style={{ fontFamily: "JetBrains Mono", fontSize: 10, color: T.muted, marginTop: 3 }}>
+                            P:{item.p}g · C:{item.b}g · F:{item.f}g{" "}
+                            <span style={{ color: T.border }}>per 100g</span>
+                            {item.s && item.s[0] && (
+                              <span style={{ marginLeft: 8, color: T.border }}>
+                                · {item.s[0][0]} = {item.s[0][1]}g
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </>
             )}
@@ -7413,7 +7427,7 @@ function WeeklyPlanner({
             {/* ── BARCODE TAB ── */}
             {pickerTab === "barcode" && (
               <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
-                {/* Scanner viewfinder */}
+                {/* Camera viewfinder / scanner */}
                 <div
                   style={{
                     background: T.card,
@@ -7426,7 +7440,7 @@ function WeeklyPlanner({
                 >
                   <div
                     style={{
-                      height: 180,
+                      height: cameraActive ? 240 : 180,
                       background: `linear-gradient(135deg, #0a0a0a, #111)`,
                       display: "flex",
                       alignItems: "center",
@@ -7434,6 +7448,19 @@ function WeeklyPlanner({
                       position: "relative",
                     }}
                   >
+                    {/* Live camera feed */}
+                    {cameraActive && (
+                      <video
+                        ref={videoRef}
+                        style={{
+                          position: "absolute",
+                          top: 0, left: 0, width: "100%", height: "100%",
+                          objectFit: "cover",
+                        }}
+                        playsInline
+                        muted
+                      />
+                    )}
                     {/* Corner brackets */}
                     {[
                       ["0%", "0%", "right", "bottom"],
@@ -7449,6 +7476,7 @@ function WeeklyPlanner({
                           top: t,
                           width: 24,
                           height: 24,
+                          zIndex: 2,
                           transform: `translate(${i % 2 === 0 ? 16 : -16}px, ${
                             i < 2 ? 16 : -16
                           }px)`,
@@ -7463,92 +7491,59 @@ function WeeklyPlanner({
                         }}
                       />
                     ))}
-                    {/* Barcode icon / scan line */}
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        gap: 10,
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: 2,
-                          alignItems: "flex-end",
-                          opacity: scanning ? 0.4 : 0.6,
-                        }}
-                      >
-                        {[3, 6, 4, 7, 3, 5, 4, 8, 3, 6, 4, 5, 3].map((h, i) => (
-                          <div
-                            key={i}
-                            style={{
-                              width: i % 3 === 0 ? 3 : 2,
-                              height: h * 4,
-                              background: T.accent,
-                              borderRadius: 1,
-                            }}
-                          />
-                        ))}
-                      </div>
-                      {scanning ? (
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: 6,
-                            alignItems: "center",
-                          }}
-                        >
-                          {[0, 1, 2].map((i) => (
-                            <div
-                              key={i}
-                              style={{
-                                width: 7,
-                                height: 7,
-                                borderRadius: "50%",
-                                background: T.accent,
-                                animation: `pulse 1s ${i * 0.25}s infinite`,
-                              }}
-                            />
+                    {/* Status text overlay */}
+                    {!cameraActive && (
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, zIndex: 2 }}>
+                        <div style={{ display: "flex", gap: 2, alignItems: "flex-end", opacity: scanning ? 0.4 : 0.6 }}>
+                          {[3, 6, 4, 7, 3, 5, 4, 8, 3, 6, 4, 5, 3].map((h, i) => (
+                            <div key={i} style={{ width: i % 3 === 0 ? 3 : 2, height: h * 4, background: T.accent, borderRadius: 1 }} />
                           ))}
                         </div>
-                      ) : (
-                        <div
-                          style={{
-                            fontFamily: "DM Sans",
-                            fontSize: 11,
-                            color: T.muted,
-                          }}
-                        >
-                          {barcodeResult
-                            ? "✓ Product found!"
-                            : "Enter barcode number below"}
-                        </div>
-                      )}
-                    </div>
+                        {scanning ? (
+                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            {[0, 1, 2].map((i) => (
+                              <div key={i} style={{ width: 7, height: 7, borderRadius: "50%", background: T.accent, animation: `pulse 1s ${i * 0.25}s infinite` }} />
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted }}>
+                            {barcodeResult ? "✓ Product found!" : "Tap camera or enter barcode below"}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {/* Scan animation line */}
-                    {scanning && (
-                      <div
-                        style={{
-                          position: "absolute",
-                          left: 20,
-                          right: 20,
-                          height: 2,
-                          background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)`,
-                          animation:
-                            "scanLine 0.9s ease-in-out infinite alternate",
-                          top: "50%",
-                        }}
-                      />
+                    {(scanning || cameraActive) && (
+                      <div style={{
+                        position: "absolute", left: 20, right: 20, height: 2, zIndex: 3,
+                        background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)`,
+                        animation: "scanLine 0.9s ease-in-out infinite alternate",
+                        top: "50%",
+                      }} />
                     )}
                   </div>
                 </div>
 
-                {/* Barcode input */}
+                {/* Camera + manual input row */}
                 <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+                  <button
+                    onClick={() => cameraActive ? stopCamera() : startCamera()}
+                    style={{
+                      background: cameraActive ? T.danger : T.accent,
+                      color: cameraActive ? "#fff" : T.bg,
+                      border: "none",
+                      borderRadius: 10,
+                      padding: "10px 14px",
+                      fontFamily: "Bebas Neue",
+                      fontSize: 13,
+                      letterSpacing: 1,
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {cameraActive ? "STOP" : "📷 SCAN"}
+                  </button>
                   <input
-                    autoFocus={pickerTab === "barcode"}
                     value={barcodeInput}
                     onChange={(e) => {
                       setBarcodeInput(e.target.value);
@@ -7558,7 +7553,7 @@ function WeeklyPlanner({
                     onKeyDown={(e) =>
                       e.key === "Enter" && lookupBarcode(barcodeInput)
                     }
-                    placeholder="Enter barcode number e.g. 5000112637939"
+                    placeholder="Or type barcode e.g. 5000112637939"
                     style={{
                       flex: 1,
                       background: T.card,
@@ -7832,77 +7827,20 @@ function WeeklyPlanner({
                     );
                   })()}
 
-                {/* Demo barcodes */}
-                {!barcodeResult && (
-                  <div>
-                    <div
-                      style={{
-                        fontFamily: "DM Sans",
-                        fontSize: 10,
-                        color: T.muted,
-                        letterSpacing: 1,
-                        textTransform: "uppercase",
-                        marginBottom: 10,
-                      }}
-                    >
-                      Demo barcodes to try:
+                {/* Open Food Facts info */}
+                {!barcodeResult && !scanning && (
+                  <div style={{
+                    background: T.surface,
+                    border: `1px solid ${T.border}`,
+                    borderRadius: 12,
+                    padding: "14px 16px",
+                  }}>
+                    <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, lineHeight: 1.6 }}>
+                      <strong style={{ color: T.text }}>Powered by Open Food Facts</strong> — 3M+ products including UK supermarket brands (Tesco, Sainsbury's, Aldi, Lidl, M&S, etc).
+                      Point your camera at any barcode or type the number manually.
                     </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 6,
-                      }}
-                    >
-                      {Object.entries(BARCODE_DB)
-                        .slice(0, 6)
-                        .map(([code, product]) => (
-                          <button
-                            key={code}
-                            onClick={() => {
-                              setBarcodeInput(code);
-                              lookupBarcode(code);
-                            }}
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              alignItems: "center",
-                              background: T.card,
-                              border: `1px solid ${T.border}`,
-                              borderRadius: 10,
-                              padding: "9px 14px",
-                              cursor: "pointer",
-                              transition: "all 0.15s",
-                              textAlign: "left",
-                            }}
-                            onMouseEnter={(e) =>
-                              (e.currentTarget.style.borderColor =
-                                T.accent + "66")
-                            }
-                            onMouseLeave={(e) =>
-                              (e.currentTarget.style.borderColor = T.border)
-                            }
-                          >
-                            <span
-                              style={{
-                                fontFamily: "DM Sans",
-                                fontSize: 12,
-                                color: T.text,
-                              }}
-                            >
-                              {product.n}
-                            </span>
-                            <span
-                              style={{
-                                fontFamily: "JetBrains Mono",
-                                fontSize: 9,
-                                color: T.muted,
-                              }}
-                            >
-                              {code}
-                            </span>
-                          </button>
-                        ))}
+                    <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.border, marginTop: 8 }}>
+                      Camera scanning uses the BarcodeDetector API (Chrome/Edge on mobile). On unsupported browsers, type the barcode number instead.
                     </div>
                   </div>
                 )}
