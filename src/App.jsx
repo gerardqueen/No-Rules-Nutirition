@@ -1820,7 +1820,7 @@ function MFPPanel({
                 marginBottom: 3,
               }}
             >
-              Live sync unavailable in sandbox mode
+              Live sync unavailable — MFP blocks automated access
             </div>
             <div
               style={{
@@ -1830,9 +1830,9 @@ function MFPPanel({
                 lineHeight: 1.6,
               }}
             >
-              MFP requires authentication to access diary data directly. Enter
-              your numbers below — they'll sync straight into your {selectedDay}{" "}
-              meal plan and macro tracker.
+              MFP restricts server-side access to diary pages. Enter
+              your daily totals below — they'll sync into your {selectedDay}{" "}
+              meal plan and show on your coach's dashboard.
               {mfpUsername && (
                 <>
                   {" "}
@@ -8896,37 +8896,33 @@ export default function App() {
       const today = new Date();
       const dateStr = dateToISO(today);
 
-      // Call backend server-side scraper
       let parsed = null;
       try {
         parsed = await apiFetch(`/mfp-diary/${encodeURIComponent(username)}?date=${dateStr}`);
       } catch (e) {
         console.warn('MFP backend fetch failed:', e.message);
-        // Try to parse error body for debug info
         if (!isAutoRefresh) {
-          const debugMsg = e.message || "";
-          if (debugMsg.includes("502") || debugMsg.includes("unavailable")) {
-            setMfpError("MFP is currently unreachable from the server. The diary may be private, or MFP is blocking automated access. Try setting the diary to public and retrying.");
-          } else {
-            setMfpError(`MFP sync failed: ${debugMsg}`);
-          }
+          // MFP blocks server-side access (403) — switch to manual mode
+          setMfpError("MFP blocks automated access from our server. Use manual entry below — open your MFP diary, copy today's totals, and enter them here.");
+          setMfpManualMode(true);
+          setMfpConnected(true); // show the panel with manual entry
         }
+        return;
       }
 
       if (parsed && parsed.profileFound && parsed.calories > 0) {
-        // Success — set MFP data and import to plan
         setMfpData(parsed);
         setMfpConnected(true);
+        setMfpManualMode(false);
         setMfpLastSync(new Date());
         setMfpSyncCount((c) => c + 1);
         setMfpError(null);
-        // Auto-import into today's plan
         importMFPDay(selectedDay, parsed);
         return;
       }
 
       if (parsed && !parsed.profileFound) {
-        setMfpError("MFP profile not found or diary is private. Ensure the diary is set to public in MFP settings.");
+        setMfpError("MFP username not found. Check the spelling and ensure the diary is set to public.");
         return;
       }
 
@@ -8937,12 +8933,18 @@ export default function App() {
         return;
       }
 
-      // No data at all
+      // No data — fall back to manual
       if (!isAutoRefresh) {
-        setMfpError("Could not fetch MFP data. Check the username and ensure the diary is public.");
+        setMfpError("Auto-sync unavailable. Use manual entry below to log your MFP totals.");
+        setMfpManualMode(true);
+        setMfpConnected(true);
       }
     } catch (err) {
-      if (!isAutoRefresh) setMfpError("MFP sync failed. Try again.");
+      if (!isAutoRefresh) {
+        setMfpError("MFP sync unavailable. Use manual entry to log your totals.");
+        setMfpManualMode(true);
+        setMfpConnected(true);
+      }
     } finally {
       setMfpSyncing(false);
     }
@@ -9001,7 +9003,7 @@ export default function App() {
     setMfpData(result);
     setMfpConnected(true);
     setMfpLastSync(new Date());
-    setMfpManualMode(false);
+    setMfpManualMode(true); // stay in manual mode to avoid re-triggering 403s
     setMfpError(null);
     setMfpSyncCount((c) => c + 1);
     importMFPDay(selectedDay, result);
