@@ -6263,32 +6263,42 @@ function WeeklyPlanner({
         video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } },
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-      }
       setCameraActive(true);
-
-      // Use BarcodeDetector API if available (Chrome/Edge)
-      if ("BarcodeDetector" in window) {
-        const detector = new BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e"] });
-        scanIntervalRef.current = setInterval(async () => {
-          if (!videoRef.current || videoRef.current.readyState < 2) return;
-          try {
-            const barcodes = await detector.detect(videoRef.current);
-            if (barcodes.length > 0) {
-              const code = barcodes[0].rawValue;
-              stopCamera();
-              setBarcodeInput(code);
-              lookupBarcode(code);
-            }
-          } catch {}
-        }, 300);
-      }
     } catch (e) {
       setBarcodeError("Camera access denied or not available. Enter barcode manually.");
     }
   };
+
+  // Attach stream to video element once cameraActive flips on and video is rendered
+  useEffect(() => {
+    if (!cameraActive || !streamRef.current) return;
+    const tryAttach = () => {
+      if (videoRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+        videoRef.current.play().catch(() => {});
+
+        // Start BarcodeDetector if available
+        if ("BarcodeDetector" in window) {
+          const detector = new BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e"] });
+          scanIntervalRef.current = setInterval(async () => {
+            if (!videoRef.current || videoRef.current.readyState < 2) return;
+            try {
+              const barcodes = await detector.detect(videoRef.current);
+              if (barcodes.length > 0) {
+                const code = barcodes[0].rawValue;
+                stopCamera();
+                setBarcodeInput(code);
+                lookupBarcode(code);
+              }
+            } catch {}
+          }, 300);
+        }
+      }
+    };
+    // Small delay to let React commit the <video> element to DOM
+    const t = setTimeout(tryAttach, 50);
+    return () => clearTimeout(t);
+  }, [cameraActive]);
 
   const stopCamera = () => {
     if (scanIntervalRef.current) { clearInterval(scanIntervalRef.current); scanIntervalRef.current = null; }
