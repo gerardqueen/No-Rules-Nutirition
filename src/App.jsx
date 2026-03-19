@@ -691,7 +691,7 @@ function ProfileMenu({ profile, onLogout, onNavigate }) {
 }
 
 // ── Check-In Countdown ────────────────────────────────────────────────────────
-function CheckInCountdown({ daysLeft }) {
+function CheckInCountdown({ daysLeft, coachName }) {
   if (daysLeft == null) {
     return (
       <div
@@ -826,7 +826,7 @@ function CheckInCountdown({ daysLeft }) {
             marginBottom: 6,
           }}
         >
-          Coach: Sarah Mitchell
+          {coachName || "Your Coach"}
         </div>
         <div
           style={{
@@ -992,7 +992,7 @@ function CoachPanel({ plan, selectedDay, profile }) {
   const carbsPct = Math.round((tot.carbs / macroGoals.carbs) * 100);
   const fatPct = Math.round((tot.fat / macroGoals.fat) * 100);
 
-  const systemPrompt = `You are Sarah Mitchell, a professional nutrition coach. You are in a 1-on-1 chat with ${profile.name}, a ${profile.sport} athlete (goal: ${profile.goal}). Live macro data for ${selectedDayLabel}: Calories ${tot.calories}/${macroGoals.calories} (${calPct}%), Protein ${tot.protein}/${macroGoals.protein}g (${protPct}%), Carbs ${tot.carbs}/${macroGoals.carbs}g (${carbsPct}%), Fat ${tot.fat}/${macroGoals.fat}g (${fatPct}%). Be warm, concise, and data-driven — like a real coach text. Reference their numbers when relevant. Sign off as "Sarah" occasionally.`;
+  const systemPrompt = `You are ${profile.coachName || "a nutrition coach"}, a professional nutrition coach. You are in a 1-on-1 chat with ${profile.name}, a ${profile.sport} athlete (goal: ${profile.goal}). Live macro data for ${selectedDayLabel}: Calories ${tot.calories}/${macroGoals.calories} (${calPct}%), Protein ${tot.protein}/${macroGoals.protein}g (${protPct}%), Carbs ${tot.carbs}/${macroGoals.carbs}g (${carbsPct}%), Fat ${tot.fat}/${macroGoals.fat}g (${fatPct}%). Be warm, concise, and data-driven — like a real coach text. Reference their numbers when relevant.`;
 
   useEffect(() => {
     if (messages.length === 0) {
@@ -1125,7 +1125,7 @@ function CoachPanel({ plan, selectedDay, profile }) {
               color: T.text,
             }}
           >
-            Sarah Mitchell
+            {profile.coachName || "Your Coach"}
           </div>
           <div
             style={{ fontFamily: "DM Sans", fontSize: 11, color: T.coachGreen }}
@@ -3843,7 +3843,7 @@ const COACH_VIDEOS = [
   {
     id: 1,
     title: "Hitting Your Protein Target",
-    coach: "Sarah Mitchell",
+    coach: "Your Coach",
     duration: "8:24",
     category: "Nutrition",
     thumb: "💪",
@@ -3853,7 +3853,7 @@ const COACH_VIDEOS = [
   {
     id: 2,
     title: "Pre-Workout Meal Timing Guide",
-    coach: "Sarah Mitchell",
+    coach: "Your Coach",
     duration: "12:05",
     category: "Nutrition",
     thumb: "⏱️",
@@ -3863,7 +3863,7 @@ const COACH_VIDEOS = [
   {
     id: 3,
     title: "Carb Cycling for Performance",
-    coach: "Sarah Mitchell",
+    coach: "Your Coach",
     duration: "15:40",
     category: "Advanced",
     thumb: "🔄",
@@ -3873,7 +3873,7 @@ const COACH_VIDEOS = [
   {
     id: 4,
     title: "Managing Macros on Rest Days",
-    coach: "Sarah Mitchell",
+    coach: "Your Coach",
     duration: "9:18",
     category: "Recovery",
     thumb: "😴",
@@ -3883,7 +3883,7 @@ const COACH_VIDEOS = [
   {
     id: 5,
     title: "Hydration & Electrolytes Explained",
-    coach: "Sarah Mitchell",
+    coach: "Your Coach",
     duration: "6:52",
     category: "Basics",
     thumb: "💧",
@@ -3893,7 +3893,7 @@ const COACH_VIDEOS = [
   {
     id: 6,
     title: "Supplement Stack Breakdown",
-    coach: "Sarah Mitchell",
+    coach: "Your Coach",
     duration: "18:30",
     category: "Supplements",
     thumb: "🧪",
@@ -3942,7 +3942,7 @@ function CoachVideos() {
               marginTop: 2,
             }}
           >
-            Latest content from Sarah Mitchell · Your personal nutrition coach
+            Latest content from your coaching team · Nutrition tips & guidance
           </div>
         </div>
         <div
@@ -4567,32 +4567,32 @@ function MoodTracker({ moodLog, setMoodLog, onMoodSaved }) {
 // Coaches each have their own AI persona for 2-way chat.
 const COACHES_CONFIG = {
   "coach-sarah": {
-    name: "Sarah Mitchell",
-    role: "Nutrition Coach",
-    initials: "SM",
+    name: "NutriBot",
+    role: "AI Nutrition Coach",
+    initials: "NB",
     color: "#22c55e",
     systemPrompt: (profile, tot, goals) =>
-      `You are Sarah Mitchell, a professional nutrition coach. You are messaging ${profile.name}, a ${profile.sport} athlete (goal: ${profile.goal}). Today's macros: Cal ${tot.calories}/${goals.calories} kcal, Protein ${tot.protein}/${goals.protein}g, Carbs ${tot.carbs}/${goals.carbs}g, Fat ${tot.fat}/${goals.fat}g. Be warm, concise, data-driven. Sign off as "Sarah" occasionally.`,
+      `You are NutriBot, an AI nutrition coaching assistant. You are helping ${profile.name}, a ${profile.sport} athlete (goal: ${profile.goal}). Today's macros: Cal ${tot.calories}/${goals.calories} kcal, Protein ${tot.protein}/${goals.protein}g, Carbs ${tot.carbs}/${goals.carbs}g, Fat ${tot.fat}/${goals.fat}g. Be warm, concise, data-driven. You are an AI assistant — not a replacement for their real coach.`,
   },
   "coach-james": {
-    name: "James Carter",
-    role: "Strength & Conditioning",
-    initials: "JC",
+    name: "TrainBot",
+    role: "AI Training Coach",
+    initials: "TB",
     color: "#3b82f6",
     systemPrompt: (profile) =>
-      `You are James Carter, a strength and conditioning specialist. You work alongside the nutrition team for ${profile.name}, a ${profile.sport} athlete. Focus on performance, training load, recovery, and how nutrition supports training. Keep messages concise like a coach text. Sign off as "James" occasionally.`,
+      `You are TrainBot, an AI strength and conditioning assistant. You help ${profile.name}, a ${profile.sport} athlete, with performance, training load, recovery, and how nutrition supports training. Keep messages concise. You are an AI assistant — not a replacement for their real coach.`,
   },
   "coach-emma": {
-    name: "Emma Wilson",
-    role: "Mindset & Performance",
-    initials: "EW",
+    name: "MindBot",
+    role: "AI Mindset Coach",
+    initials: "MB",
     color: "#a855f7",
     systemPrompt: (profile) =>
-      `You are Emma Wilson, a sports psychologist and performance mindset coach. You work with ${profile.name}, a ${profile.sport} athlete. Focus on motivation, mental resilience, habit consistency, and psychological aspects of nutrition and training. Be empathetic, encouraging, and brief. Sign off as "Emma" occasionally.`,
+      `You are MindBot, an AI sports psychology assistant. You help ${profile.name}, a ${profile.sport} athlete, with motivation, mental resilience, habit consistency, and psychological aspects of nutrition and training. Be empathetic, encouraging, and brief. You are an AI assistant — not a replacement for their real coach.`,
   },
 };
 
-const MSG_SEED = [];
+// Old thread seed removed — email-style threading in InboxPage now
 
 function timeAgo(isoString) {
   const diff = (Date.now() - new Date(isoString)) / 1000;
@@ -4600,738 +4600,6 @@ function timeAgo(isoString) {
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   return `${Math.floor(diff / 86400)}d ago`;
-}
-
-function InboxBell({ threads, setThreads }) {
-  const [open, setOpen] = useState(false);
-  const [activeId, setActiveId] = useState(null); // null = inbox, string = thread view
-  const panelRef = useRef(null);
-
-  const totalUnread = threads.reduce(
-    (n, t) => n + t.messages.filter((m) => !m.read).length,
-    0
-  );
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e) => {
-      if (panelRef.current && !panelRef.current.contains(e.target)) {
-        setOpen(false);
-        setActiveId(null);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  const markThreadRead = (senderId) =>
-    setThreads((prev) =>
-      prev.map((t) =>
-        t.senderId === senderId
-          ? { ...t, messages: t.messages.map((m) => ({ ...m, read: true })) }
-          : t
-      )
-    );
-
-  const markAllRead = () =>
-    setThreads((prev) =>
-      prev.map((t) => ({
-        ...t,
-        messages: t.messages.map((m) => ({ ...m, read: true })),
-      }))
-    );
-
-  const activeThread = activeId
-    ? threads.find((t) => t.senderId === activeId)
-    : null;
-
-  const openThread = (senderId) => {
-    setActiveId(senderId);
-    markThreadRead(senderId);
-  };
-
-  return (
-    <div ref={panelRef} style={{ position: "relative" }}>
-      {/* Bell / inbox icon */}
-      <button
-        onClick={() => {
-          setOpen((o) => !o);
-          if (open) setActiveId(null);
-        }}
-        style={{
-          position: "relative",
-          background: open ? T.surface : "none",
-          border: `1px solid ${open ? T.border : "transparent"}`,
-          borderRadius: 10,
-          width: 40,
-          height: 40,
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          transition: "all 0.2s",
-          color: open ? T.text : T.muted,
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = T.surface;
-          e.currentTarget.style.borderColor = T.border;
-        }}
-        onMouseLeave={(e) => {
-          if (!open) {
-            e.currentTarget.style.background = "none";
-            e.currentTarget.style.borderColor = "transparent";
-          }
-        }}
-      >
-        {/* Inbox icon */}
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <polyline points="22 13 16 13 14 16 10 16 8 13 2 13" />
-          <path d="M5.45 5.11L2 13v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-7.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-        </svg>
-        {totalUnread > 0 && (
-          <div
-            style={{
-              position: "absolute",
-              top: 5,
-              right: 5,
-              width: 16,
-              height: 16,
-              background: T.danger,
-              borderRadius: "50%",
-              border: `2px solid ${T.bg}`,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <span
-              style={{
-                fontFamily: "JetBrains Mono",
-                fontSize: 8,
-                color: "#fff",
-                fontWeight: 700,
-                lineHeight: 1,
-              }}
-            >
-              {totalUnread > 9 ? "9+" : totalUnread}
-            </span>
-          </div>
-        )}
-      </button>
-
-      {/* Panel */}
-      {open && (
-        <div
-          style={{
-            position: "absolute",
-            top: "calc(100% + 10px)",
-            right: 0,
-            width: 400,
-            maxHeight: 560,
-            background: T.card,
-            border: `1px solid ${T.border}`,
-            borderRadius: 16,
-            boxShadow: `0 20px 60px #00000088`,
-            display: "flex",
-            flexDirection: "column",
-            animation: "fadeUp 0.18s ease",
-            zIndex: 200,
-            overflow: "hidden",
-          }}
-        >
-          {/* ── INBOX VIEW ── */}
-          {!activeThread && (
-            <>
-              {/* Header */}
-              <div
-                style={{
-                  padding: "16px 18px 14px",
-                  borderBottom: `1px solid ${T.border}`,
-                  flexShrink: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                }}
-              >
-                <div
-                  style={{
-                    fontFamily: "Bebas Neue",
-                    fontSize: 18,
-                    letterSpacing: 2,
-                    color: T.text,
-                  }}
-                >
-                  MESSAGES
-                  {totalUnread > 0 && (
-                    <span
-                      style={{
-                        marginLeft: 8,
-                        background: `${T.danger}22`,
-                        border: `1px solid ${T.danger}55`,
-                        borderRadius: 20,
-                        padding: "1px 8px",
-                        fontFamily: "DM Sans",
-                        fontSize: 10,
-                        color: T.danger,
-                        fontWeight: 600,
-                        letterSpacing: 0,
-                      }}
-                    >
-                      {totalUnread} new
-                    </span>
-                  )}
-                </div>
-                {totalUnread > 0 && (
-                  <button
-                    onClick={markAllRead}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      fontFamily: "DM Sans",
-                      fontSize: 11,
-                      color: T.accent,
-                      cursor: "pointer",
-                      padding: "2px 6px",
-                    }}
-                  >
-                    Mark all read
-                  </button>
-                )}
-              </div>
-
-              {/* Thread list */}
-              <div style={{ overflowY: "auto", flex: 1 }}>
-                {threads.map((thread, idx) => {
-                  const isCoach = thread.type === "coach";
-                  const accentCol = isCoach ? T.coachGreen : T.mfp;
-                  const msgs = [...thread.messages].sort(
-                    (a, b) => new Date(b.timestamp) - new Date(a.timestamp)
-                  );
-                  const latest = msgs[0];
-                  const unreadCt = thread.messages.filter(
-                    (m) => !m.read
-                  ).length;
-                  const hasUnread = unreadCt > 0;
-
-                  return (
-                    <div
-                      key={thread.senderId}
-                      onClick={() => openThread(thread.senderId)}
-                      style={{
-                        padding: "14px 18px",
-                        borderBottom:
-                          idx < threads.length - 1
-                            ? `1px solid ${T.border}`
-                            : "none",
-                        background: hasUnread
-                          ? `${accentCol}08`
-                          : "transparent",
-                        cursor: "pointer",
-                        transition: "background 0.15s",
-                        position: "relative",
-                        display: "flex",
-                        gap: 14,
-                        alignItems: "center",
-                      }}
-                      onMouseEnter={(e) =>
-                        (e.currentTarget.style.background = T.surface)
-                      }
-                      onMouseLeave={(e) =>
-                        (e.currentTarget.style.background = hasUnread
-                          ? `${accentCol}08`
-                          : "transparent")
-                      }
-                    >
-                      {/* Unread indicator bar */}
-                      {hasUnread && (
-                        <div
-                          style={{
-                            position: "absolute",
-                            left: 0,
-                            top: 0,
-                            bottom: 0,
-                            width: 3,
-                            background: accentCol,
-                            borderRadius: "4px 0 0 4px",
-                          }}
-                        />
-                      )}
-
-                      {/* Avatar */}
-                      <div
-                        style={{
-                          width: 44,
-                          height: 44,
-                          borderRadius: 12,
-                          flexShrink: 0,
-                          background: isCoach
-                            ? `linear-gradient(135deg, ${T.coachGreen}99, ${T.coachGreen}55)`
-                            : `linear-gradient(135deg, ${T.accent}99, ${T.accent}55)`,
-                          border: `2px solid ${
-                            isCoach ? T.coachGreen + "55" : T.accent + "55"
-                          }`,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          position: "relative",
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontFamily: "Bebas Neue",
-                            fontSize: 14,
-                            color: "#fff",
-                            letterSpacing: 0.5,
-                          }}
-                        >
-                          {thread.avatar}
-                        </span>
-                        {hasUnread && (
-                          <div
-                            style={{
-                              position: "absolute",
-                              bottom: -3,
-                              right: -3,
-                              width: 14,
-                              height: 14,
-                              background: T.danger,
-                              borderRadius: "50%",
-                              border: `2px solid ${T.card}`,
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontFamily: "JetBrains Mono",
-                                fontSize: 7,
-                                color: "#fff",
-                                fontWeight: 700,
-                              }}
-                            >
-                              {unreadCt}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Preview */}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            marginBottom: 3,
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 7,
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontFamily: "DM Sans",
-                                fontSize: 13,
-                                fontWeight: hasUnread ? 700 : 500,
-                                color: T.text,
-                                letterSpacing: 0.1,
-                              }}
-                            >
-                              {thread.senderName}
-                            </span>
-                            <span
-                              style={{
-                                background: isCoach
-                                  ? `${T.coachGreen}18`
-                                  : `${T.accent}18`,
-                                border: `1px solid ${
-                                  isCoach
-                                    ? T.coachGreen + "33"
-                                    : T.accent + "33"
-                                }`,
-                                borderRadius: 4,
-                                padding: "1px 6px",
-                                fontFamily: "DM Sans",
-                                fontSize: 9,
-                                fontWeight: 600,
-                                color: isCoach ? T.coachGreen : T.accent,
-                              }}
-                            >
-                              {isCoach ? "Coach" : "Company"}
-                            </span>
-                          </div>
-                          <span
-                            style={{
-                              fontFamily: "JetBrains Mono",
-                              fontSize: 9,
-                              color: T.muted,
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {timeAgo(latest.timestamp)}
-                          </span>
-                        </div>
-
-                        <div
-                          style={{
-                            fontFamily: "DM Sans",
-                            fontSize: 11,
-                            fontWeight: hasUnread ? 600 : 400,
-                            color: hasUnread ? T.text : T.muted,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {latest.title}
-                        </div>
-                        <div
-                          style={{
-                            fontFamily: "DM Sans",
-                            fontSize: 11,
-                            color: T.muted,
-                            marginTop: 1,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {latest.body}
-                        </div>
-                      </div>
-
-                      {/* Chevron */}
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke={T.muted}
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        style={{ flexShrink: 0 }}
-                      >
-                        <polyline points="9 18 15 12 9 6" />
-                      </svg>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Footer */}
-              <div
-                style={{
-                  padding: "10px 18px",
-                  borderTop: `1px solid ${T.border}`,
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  flexShrink: 0,
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: "DM Sans",
-                    fontSize: 10,
-                    color: T.muted,
-                  }}
-                >
-                  {threads.length} conversations · {totalUnread} unread
-                </span>
-                <button
-                  onClick={() => setThreads(MSG_SEED)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    fontFamily: "DM Sans",
-                    fontSize: 10,
-                    color: T.muted,
-                    cursor: "pointer",
-                    padding: "2px 4px",
-                  }}
-                  onMouseEnter={(e) => (e.target.style.color = T.text)}
-                  onMouseLeave={(e) => (e.target.style.color = T.muted)}
-                >
-                  Reset demo ↺
-                </button>
-              </div>
-            </>
-          )}
-
-          {/* ── THREAD VIEW ── */}
-          {activeThread &&
-            (() => {
-              const isCoach = activeThread.type === "coach";
-              const accentCol = isCoach ? T.coachGreen : T.mfp;
-              const sorted = [...activeThread.messages].sort(
-                (a, b) => new Date(b.timestamp) - new Date(a.timestamp)
-              );
-
-              return (
-                <>
-                  {/* Thread header */}
-                  <div
-                    style={{
-                      padding: "12px 16px",
-                      borderBottom: `1px solid ${T.border}`,
-                      flexShrink: 0,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 12,
-                    }}
-                  >
-                    <button
-                      onClick={() => setActiveId(null)}
-                      style={{
-                        background: "none",
-                        border: `1px solid ${T.border}`,
-                        borderRadius: 8,
-                        width: 32,
-                        height: 32,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        cursor: "pointer",
-                        color: T.muted,
-                        flexShrink: 0,
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.background = T.surface;
-                        e.currentTarget.style.color = T.text;
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = "none";
-                        e.currentTarget.style.color = T.muted;
-                      }}
-                    >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <polyline points="15 18 9 12 15 6" />
-                      </svg>
-                    </button>
-
-                    <div
-                      style={{
-                        width: 36,
-                        height: 36,
-                        borderRadius: 10,
-                        flexShrink: 0,
-                        background: isCoach
-                          ? `linear-gradient(135deg, ${T.coachGreen}99, ${T.coachGreen}55)`
-                          : `linear-gradient(135deg, ${T.accent}99, ${T.accent}55)`,
-                        border: `2px solid ${
-                          isCoach ? T.coachGreen + "55" : T.accent + "55"
-                        }`,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontFamily: "Bebas Neue",
-                          fontSize: 12,
-                          color: "#fff",
-                        }}
-                      >
-                        {activeThread.avatar}
-                      </span>
-                    </div>
-
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontFamily: "DM Sans",
-                          fontSize: 13,
-                          fontWeight: 700,
-                          color: T.text,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {activeThread.senderName}
-                      </div>
-                      <div
-                        style={{
-                          fontFamily: "DM Sans",
-                          fontSize: 10,
-                          color: isCoach ? T.coachGreen : T.accent,
-                        }}
-                      >
-                        {activeThread.subtitle}
-                      </div>
-                    </div>
-
-                    <span
-                      style={{
-                        background: isCoach
-                          ? `${T.coachGreen}18`
-                          : `${T.accent}18`,
-                        border: `1px solid ${
-                          isCoach ? T.coachGreen + "33" : T.accent + "33"
-                        }`,
-                        borderRadius: 6,
-                        padding: "3px 9px",
-                        fontFamily: "DM Sans",
-                        fontSize: 10,
-                        fontWeight: 600,
-                        color: isCoach ? T.coachGreen : T.accent,
-                        flexShrink: 0,
-                      }}
-                    >
-                      {isCoach ? "Coach" : "Company"}
-                    </span>
-                  </div>
-
-                  {/* Messages */}
-                  <div style={{ overflowY: "auto", flex: 1, padding: "8px 0" }}>
-                    {sorted.map((msg, idx) => (
-                      <div
-                        key={msg.id}
-                        style={{
-                          padding: "14px 18px",
-                          borderBottom:
-                            idx < sorted.length - 1
-                              ? `1px solid ${T.border}44`
-                              : "none",
-                        }}
-                      >
-                        {/* Message meta */}
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            marginBottom: 8,
-                          }}
-                        >
-                          <div
-                            style={{
-                              fontFamily: "DM Sans",
-                              fontSize: 12,
-                              fontWeight: 700,
-                              color: T.text,
-                              lineHeight: 1.3,
-                              flex: 1,
-                              marginRight: 12,
-                            }}
-                          >
-                            {msg.title}
-                          </div>
-                          <span
-                            style={{
-                              fontFamily: "JetBrains Mono",
-                              fontSize: 9,
-                              color: T.muted,
-                              whiteSpace: "nowrap",
-                              flexShrink: 0,
-                            }}
-                          >
-                            {timeAgo(msg.timestamp)}
-                          </span>
-                        </div>
-
-                        {/* Message body */}
-                        <div
-                          style={{
-                            background: T.surface,
-                            border: `1px solid ${T.border}`,
-                            borderRadius: 10,
-                            borderTopLeftRadius: 3,
-                            padding: "12px 14px",
-                            fontFamily: "DM Sans",
-                            fontSize: 12,
-                            color: T.text,
-                            lineHeight: 1.7,
-                          }}
-                        >
-                          {msg.body}
-                        </div>
-
-                        {/* Left accent for unread (already marked read on open, show faint line instead) */}
-                        <div
-                          style={{
-                            marginTop: 6,
-                            display: "flex",
-                            justifyContent: "flex-end",
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontFamily: "DM Sans",
-                              fontSize: 9,
-                              color: T.muted,
-                            }}
-                          >
-                            {new Date(msg.timestamp).toLocaleString("en-GB", {
-                              day: "numeric",
-                              month: "short",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Reply hint footer (read-only coaching — no compose) */}
-                  <div
-                    style={{
-                      padding: "10px 16px",
-                      borderTop: `1px solid ${T.border}`,
-                      flexShrink: 0,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    <div
-                      style={{
-                        flex: 1,
-                        background: T.surface,
-                        border: `1px solid ${T.border}`,
-                        borderRadius: 10,
-                        padding: "8px 12px",
-                        fontFamily: "DM Sans",
-                        fontSize: 11,
-                        color: T.muted,
-                      }}
-                    >
-                      Reply via the app or email your coach directly…
-                    </div>
-                  </div>
-                </>
-              );
-            })()}
-        </div>
-      )}
-    </div>
-  );
 }
 
 // ── Weight Tracker ────────────────────────────────────────────────────────────
@@ -6014,9 +5282,9 @@ function Dashboard({
               .sort((a, b) => a.date.localeCompare(b.date))[0];
             if (nextCheckin) {
               const diff = Math.ceil((new Date(nextCheckin.date + "T00:00:00") - new Date(todayISO + "T00:00:00")) / 86400000);
-              return <CheckInCountdown daysLeft={diff} />;
+              return <CheckInCountdown daysLeft={diff} coachName={profile.coachName} />;
             }
-            return <CheckInCountdown daysLeft={null} />;
+            return <CheckInCountdown daysLeft={null} coachName={profile.coachName} />;
           })()}
 
           {/* Weekly calorie bar chart */}
@@ -9264,7 +8532,7 @@ export default function App() {
   const [selectedDay, setSelectedDay] = useState(() => getTodayISO());
   const weekDates = getCurrentWeekDates(); // [{dayKey, date, isToday}, ...]
   const [macroGoalsState, setMacroGoalsState] = useState(() => macroGoals);
-  const [threads, setThreads] = useState(MSG_SEED);
+  const [threads, setThreads] = useState([]);
 
   // ✅ Restore session using /auth/me (keeps login after refresh)
   useEffect(() => {
@@ -9892,7 +9160,21 @@ export default function App() {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <InboxBell threads={threads} setThreads={setThreads} />
+          <button
+            onClick={() => setTab("inbox")}
+            style={{
+              background: tab === "inbox" ? T.surface : "none",
+              border: `1px solid ${tab === "inbox" ? T.border : "transparent"}`,
+              borderRadius: 10, width: 40, height: 40, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: tab === "inbox" ? T.text : T.muted,
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="22 13 16 13 14 16 10 16 8 13 2 13" />
+              <path d="M5.45 5.11L2 13v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-7.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+            </svg>
+          </button>
           <ProfileMenu
             profile={profile}
             onLogout={() => {
