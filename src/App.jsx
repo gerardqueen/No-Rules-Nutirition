@@ -84,6 +84,30 @@ function dateToISO(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// Get the 7 dates (Mon-Sun) for the current week
+function getCurrentWeekDates() {
+  const today = new Date();
+  const todayDow = today.getDay(); // 0=Sun
+  const todayIdx = todayDow === 0 ? 6 : todayDow - 1; // 0=Mon
+  const dates = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() + (i - todayIdx));
+    dates.push({ dayKey: DAYS[i], date: dateToISO(d), isToday: i === todayIdx });
+  }
+  return dates;
+}
+
+// Convert YYYY-MM-DD → "MON"/"TUE"/etc
+function dateStrToDayKey(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  const dow = d.getDay();
+  return DAYS[dow === 0 ? 6 : dow - 1];
+}
+
+// Get today's date as YYYY-MM-DD
+function getTodayISO() { return dateToISO(new Date()); }
+
 // ── USDA FoodData Central Database (8,200+ foods) ────────────────────────────
 // Fields: n=name, c=calories/100g, p=protein/100g, b=carbs/100g, f=fat/100g
 /* FOOD_DB moved to src/foodDb.js */
@@ -100,13 +124,13 @@ function scaleMacros(item, grams) {
   };
 }
 
-// initWeekPlan starts empty — coach sets targets, athlete logs food manually
+// initWeekPlan starts empty — keyed by YYYY-MM-DD for the current week
 const initWeekPlan = () => {
   const plan = {};
-  DAYS.forEach((d) => {
-    plan[d] = {};
+  getCurrentWeekDates().forEach(({ date }) => {
+    plan[date] = {};
     MEALS.forEach((m) => {
-      plan[d][m] = [];
+      plan[date][m] = [];
     });
   });
   return plan;
@@ -926,13 +950,14 @@ function CoachPanel({ plan, selectedDay, profile }) {
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef(null);
 
-  const tot = dayTotals(plan[selectedDay]);
+  const tot = dayTotals(plan[selectedDay] || {});
+  const selectedDayLabel = dateStrToDayKey(selectedDay);
   const calPct = Math.round((tot.calories / macroGoals.calories) * 100);
   const protPct = Math.round((tot.protein / macroGoals.protein) * 100);
   const carbsPct = Math.round((tot.carbs / macroGoals.carbs) * 100);
   const fatPct = Math.round((tot.fat / macroGoals.fat) * 100);
 
-  const systemPrompt = `You are Sarah Mitchell, a professional nutrition coach. You are in a 1-on-1 chat with ${profile.name}, a ${profile.sport} athlete (goal: ${profile.goal}). Live macro data for ${selectedDay}: Calories ${tot.calories}/${macroGoals.calories} (${calPct}%), Protein ${tot.protein}/${macroGoals.protein}g (${protPct}%), Carbs ${tot.carbs}/${macroGoals.carbs}g (${carbsPct}%), Fat ${tot.fat}/${macroGoals.fat}g (${fatPct}%). Be warm, concise, and data-driven — like a real coach text. Reference their numbers when relevant. Sign off as "Sarah" occasionally.`;
+  const systemPrompt = `You are Sarah Mitchell, a professional nutrition coach. You are in a 1-on-1 chat with ${profile.name}, a ${profile.sport} athlete (goal: ${profile.goal}). Live macro data for ${selectedDayLabel}: Calories ${tot.calories}/${macroGoals.calories} (${calPct}%), Protein ${tot.protein}/${macroGoals.protein}g (${protPct}%), Carbs ${tot.carbs}/${macroGoals.carbs}g (${carbsPct}%), Fat ${tot.fat}/${macroGoals.fat}g (${fatPct}%). Be warm, concise, and data-driven — like a real coach text. Reference their numbers when relevant. Sign off as "Sarah" occasionally.`;
 
   useEffect(() => {
     if (messages.length === 0) {
@@ -942,7 +967,7 @@ function CoachPanel({ plan, selectedDay, profile }) {
           isCoach: true,
           content: `Hey ${
             profile.name.split(" ")[0]
-          }! 👋 I can see your macros for ${selectedDay} — you're at ${calPct}% of your calorie goal. Looking good! How are you feeling today?`,
+          }! 👋 I can see your macros for ${selectedDayLabel} — you're at ${calPct}% of your calorie goal. Looking good! How are you feeling today?`,
           time: new Date().toLocaleTimeString([], {
             hour: "2-digit",
             minute: "2-digit",
@@ -1535,7 +1560,7 @@ function ManualEntryForm({ onSubmit, username, selectedDay }) {
               color: T.text,
             }}
           >
-            ENTER TODAY'S DATA — {selectedDay}
+            ENTER TODAY'S DATA — {dateStrToDayKey(selectedDay)}
           </div>
           <div
             style={{
@@ -1735,7 +1760,7 @@ function ManualEntryForm({ onSubmit, username, selectedDay }) {
           marginTop: 8,
         }}
       >
-        Data will be pushed to your {selectedDay} meal plan and macro tracker
+        Data will be pushed to your {dateStrToDayKey(selectedDay)} meal plan and macro tracker
         automatically
       </div>
     </div>
@@ -1831,7 +1856,7 @@ function MFPPanel({
               }}
             >
               MFP restricts server-side access to diary pages. Enter
-              your daily totals below — they'll sync into your {selectedDay}{" "}
+              your daily totals below — they'll sync into your {dateStrToDayKey(selectedDay)}{" "}
               meal plan and show on your coach's dashboard.
               {mfpUsername && (
                 <>
@@ -2597,7 +2622,7 @@ function MFPPanel({
               marginBottom: 16,
             }}
           >
-            MFP LOGGED — {selectedDay}
+            MFP LOGGED — {dateStrToDayKey(selectedDay)}
           </div>
           {[
             {
@@ -2943,8 +2968,8 @@ function MFPPanel({
             }}
           >
             {imported
-              ? `Meals are live in your ${selectedDay} plan — macros updated`
-              : `Logged meals will populate ${selectedDay}'s meal cards and update macro tracking`}
+              ? `Meals are live in your ${dateStrToDayKey(selectedDay)} plan — macros updated`
+              : `Logged meals will populate ${dateStrToDayKey(selectedDay)}'s meal cards and update macro tracking`}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
@@ -5446,9 +5471,12 @@ function Dashboard({
   onWeightSaved,
 }) {
   // Aggregate totals across the whole week for the overview
-  const weekTotals = DAYS.reduce(
-    (acc, d) => {
-      const t = dayTotals(plan[d]);
+  const wd = getCurrentWeekDates();
+  const weekTotals = wd.reduce(
+    (acc, { date }) => {
+      const dayPlan = plan[date];
+      if (!dayPlan) return acc;
+      const t = dayTotals(dayPlan);
       return {
         calories: acc.calories + t.calories,
         protein: acc.protein + t.protein,
@@ -5459,9 +5487,8 @@ function Dashboard({
     { calories: 0, protein: 0, carbs: 0, fat: 0 }
   );
 
-  const todayKey =
-    DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
-  const todayData = dayTotals(plan[todayKey] || plan["MON"]);
+  const todayDate = getTodayISO();
+  const todayData = dayTotals(plan[todayDate] || {});
   const weekGoal = {
     calories: macroGoals.calories * 7,
     protein: macroGoals.protein * 7,
@@ -5976,13 +6003,12 @@ function Dashboard({
                 height: 90,
               }}
             >
-              {DAYS.map((d) => {
-                const cal = dayTotals(plan[d]).calories;
+              {wd.map(({ dayKey, date, isToday }) => {
+                const cal = dayTotals(plan[date] || {}).calories;
                 const h = Math.max((cal / macroGoals.calories) * 100, 4);
-                const isToday = d === todayKey;
                 return (
                   <div
-                    key={d}
+                    key={date}
                     style={{
                       flex: 1,
                       display: "flex",
@@ -6018,7 +6044,7 @@ function Dashboard({
                         letterSpacing: 1,
                       }}
                     >
-                      {d}
+                      {dayKey}
                     </div>
                   </div>
                 );
@@ -6047,7 +6073,7 @@ function Dashboard({
                 {
                   label: "Days logged",
                   val: `${
-                    DAYS.filter((d) => dayTotals(plan[d]).calories > 0).length
+                    wd.filter(({ date }) => dayTotals(plan[date] || {}).calories > 0).length
                   } / 7`,
                   color: T.coachGreen,
                 },
@@ -6466,9 +6492,10 @@ function WeeklyPlanner({
   const addFood = (food) => {
     setPlan((prev) => {
       const next = { ...prev };
+      if (!next[selectedDay]) { next[selectedDay] = {}; MEALS.forEach(m => next[selectedDay][m] = []); }
       next[selectedDay] = { ...next[selectedDay] };
       next[selectedDay][selectedMeal] = [
-        ...next[selectedDay][selectedMeal],
+        ...(next[selectedDay][selectedMeal] || []),
         food,
       ];
       return next;
@@ -6605,19 +6632,19 @@ function WeeklyPlanner({
 
       {/* Day tabs */}
       <div style={{ display: "flex", gap: 8 }}>
-        {DAYS.map((d) => {
-          const tot = dayTotals(plan[d]);
+        {getCurrentWeekDates().map(({ dayKey, date }) => {
+          const tot = dayTotals(plan[date] || {});
           const pct = Math.min(tot.calories / macroGoals.calories, 1);
           return (
             <button
-              key={d}
-              onClick={() => setSelectedDay(d)}
+              key={date}
+              onClick={() => setSelectedDay(date)}
               style={{
                 flex: 1,
                 padding: "12px 4px",
                 borderRadius: 10,
-                background: selectedDay === d ? T.accent : T.card,
-                border: `1px solid ${selectedDay === d ? T.accent : T.border}`,
+                background: selectedDay === date ? T.accent : T.card,
+                border: `1px solid ${selectedDay === date ? T.accent : T.border}`,
                 cursor: "pointer",
                 transition: "all 0.2s",
                 textAlign: "center",
@@ -6628,15 +6655,15 @@ function WeeklyPlanner({
                   fontFamily: "Bebas Neue",
                   fontSize: 15,
                   letterSpacing: 1,
-                  color: selectedDay === d ? T.bg : T.muted,
+                  color: selectedDay === date ? T.bg : T.muted,
                 }}
               >
-                {d}
+                {dayKey}
               </div>
               <div
                 style={{
                   height: 2,
-                  background: selectedDay === d ? T.bg + "44" : T.border,
+                  background: selectedDay === date ? T.bg + "44" : T.border,
                   borderRadius: 99,
                   margin: "6px 4px 4px",
                   position: "relative",
@@ -6650,7 +6677,7 @@ function WeeklyPlanner({
                     top: 0,
                     height: "100%",
                     width: `${pct * 100}%`,
-                    background: selectedDay === d ? T.bg : T.accent,
+                    background: selectedDay === date ? T.bg : T.accent,
                     borderRadius: 99,
                   }}
                 />
@@ -6659,7 +6686,7 @@ function WeeklyPlanner({
                 style={{
                   fontFamily: "JetBrains Mono",
                   fontSize: 10,
-                  color: selectedDay === d ? T.bg + "cc" : T.muted,
+                  color: selectedDay === date ? T.bg + "cc" : T.muted,
                 }}
               >
                 {tot.calories} kcal
@@ -6678,7 +6705,7 @@ function WeeklyPlanner({
         }}
       >
         {MEALS.map((meal) => {
-          const foods = plan[selectedDay][meal];
+          const foods = (plan[selectedDay] || {})[meal] || [];
           const tot = sumMacros(foods);
           return (
             <div
@@ -7898,7 +7925,7 @@ function WeeklyPlanner({
 
 // ── Macro Tracker ─────────────────────────────────────────────────────────────
 function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
-  const tot = dayTotals(plan[selectedDay]);
+  const tot = dayTotals(plan[selectedDay] || {});
   const hasMfp = mfpConnected && mfpData;
 
   const macros = [
@@ -7967,7 +7994,7 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
               color: T.text,
             }}
           >
-            MACRO OVERVIEW — {selectedDay}
+            MACRO OVERVIEW — {dateStrToDayKey(selectedDay)}
           </div>
           {hasMfp && (
             <div style={{ display: "flex", gap: 16 }}>
@@ -8419,19 +8446,19 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
             height: 100,
           }}
         >
-          {DAYS.map((d) => {
-            const planCal = dayTotals(plan[d]).calories;
+          {getCurrentWeekDates().map(({ dayKey, date }) => {
+            const planCal = dayTotals(plan[date] || {}).calories;
             const mfpCal =
-              hasMfp && d === selectedDay ? mfpData.calories : null;
+              hasMfp && date === selectedDay ? mfpData.calories : null;
             const maxCal = Math.max(planCal, mfpCal || 0, 1);
             const hPlan = Math.max((planCal / macroGoals.calories) * 100, 4);
             const hMfp = mfpCal
               ? Math.max((mfpCal / macroGoals.calories) * 100, 4)
               : 0;
-            const isActive = d === selectedDay;
+            const isActive = date === selectedDay;
             return (
               <div
-                key={d}
+                key={date}
                 style={{
                   flex: 1,
                   display: "flex",
@@ -8494,7 +8521,7 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
                     letterSpacing: 1,
                   }}
                 >
-                  {d}
+                  {dayKey}
                 </div>
               </div>
             );
@@ -8590,7 +8617,8 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
   };
 
   // AI coach threads
-  const tot = dayTotals(plan[selectedDay]);
+  const tot = dayTotals(plan[selectedDay] || {});
+  const selectedDayLabel = dateStrToDayKey(selectedDay);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMsgs, activeId, realMsgs]);
 
   const isRealCoach = activeId === "real-coach";
@@ -8610,7 +8638,7 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
       let greeting = "";
       if (id === "coach-sarah") {
         const calPct = macroGoals.calories > 0 ? Math.round((tot.calories / macroGoals.calories) * 100) : 0;
-        greeting = `Hey ${firstName}! I can see your macros for ${selectedDay} — you're at ${calPct}% of your calorie goal. How are you feeling today?`;
+        greeting = `Hey ${firstName}! I can see your macros for ${selectedDayLabel} — you're at ${calPct}% of your calorie goal. How are you feeling today?`;
       } else if (id === "coach-james") {
         greeting = `Hey ${firstName}! Ready to talk training? What's on the programme today?`;
       } else if (id === "coach-emma") {
@@ -8771,10 +8799,8 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [tab, setTab] = useState("dashboard");
   const [plan, setPlan] = useState(initWeekPlan);
-  const [selectedDay, setSelectedDay] = useState(() => {
-    const dow = new Date().getDay(); // 0=Sun
-    return DAYS[dow === 0 ? 6 : dow - 1];
-  });
+  const [selectedDay, setSelectedDay] = useState(() => getTodayISO());
+  const weekDates = getCurrentWeekDates(); // [{dayKey, date, isToday}, ...]
   const [macroGoalsState, setMacroGoalsState] = useState(() => macroGoals);
   const [threads, setThreads] = useState(MSG_SEED);
 
@@ -9147,30 +9173,22 @@ export default function App() {
     if (!profile?.id) return;
     (async () => {
       try {
-        const today = new Date();
-        const start = new Date(today);
-        start.setDate(today.getDate() - 7);
-        const startStr = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
-        const endStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+        // Only fetch dates for the current week
+        const wd = getCurrentWeekDates();
+        const startStr = wd[0].date;
+        const endStr = wd[6].date;
+        const validDates = new Set(wd.map(w => w.date));
+
         const rows = await apiFetch(`/food-logs/${profile.id}?start=${startStr}&end=${endStr}`);
         if (Array.isArray(rows) && rows.length > 0) {
-          // Build a lookup of which actual date belongs to each dayKey for THIS week
-          const currentWeekDates = {};
-          DAYS.forEach(dk => { currentWeekDates[dk] = dayKeyToDate(dk); });
-
           setPlan((prev) => {
             const next = { ...prev };
             rows.forEach((dayLog) => {
               const logDate = dayLog.date; // "YYYY-MM-DD"
-              const d = new Date(logDate + 'T00:00:00');
-              const dayIdx = d.getDay();
-              const dayKey = DAYS[dayIdx === 0 ? 6 : dayIdx - 1];
+              // Only load if this date belongs to the current week
+              if (!validDates.has(logDate)) return;
 
-              // ✅ Only load this log if its date matches the CURRENT week's date for that dayKey
-              if (currentWeekDates[dayKey] !== logDate) return;
-
-              if (!next[dayKey]) { next[dayKey] = {}; MEALS.forEach(m => next[dayKey][m] = []); }
-              // Group foods back into meals (default to Snack if no meal info)
+              if (!next[logDate]) { next[logDate] = {}; MEALS.forEach(m => next[logDate][m] = []); }
               const foods = (dayLog.foods || []).map(f => ({
                 name: f.name,
                 calories: Number(f.calories || 0),
@@ -9179,11 +9197,11 @@ export default function App() {
                 fat: Number(f.fat_g ?? f.fat ?? 0),
                 meal: f.meal || 'Snack',
               }));
-              // Reset this day's meals
-              MEALS.forEach(m => next[dayKey][m] = []);
+              // Reset this day's meals then populate
+              MEALS.forEach(m => next[logDate][m] = []);
               foods.forEach(f => {
                 const meal = MEALS.includes(f.meal) ? f.meal : 'Snack';
-                next[dayKey][meal].push(f);
+                next[logDate][meal].push(f);
               });
             });
             return next;
@@ -9210,25 +9228,24 @@ export default function App() {
   }, [profile?.id]);
 
   // ── Auto-save food logs + daily totals when plan changes ────────────────────
-  // Fires after React commits the new plan state. 1s debounce, no caching.
-  // Server uses upsert so redundant saves are harmless.
   const saveTimerRef = useRef(null);
   useEffect(() => {
     if (!profile?.id) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       let hasFoods = false;
-      DAYS.forEach(dayKey => {
-        const dayPlan = plan[dayKey];
+      // Iterate over all date keys in the plan
+      Object.keys(plan).forEach(dateStr => {
+        const dayPlan = plan[dateStr];
         if (!dayPlan) return;
         MEALS.forEach(meal => { if ((dayPlan[meal] || []).length > 0) hasFoods = true; });
       });
       if (!hasFoods) return; // Don't save empty initial state
-      DAYS.forEach(dayKey => {
-        const dayPlan = plan[dayKey];
+      Object.keys(plan).forEach(dateStr => {
+        const dayPlan = plan[dateStr];
         if (!dayPlan) return;
-        const dateStr = dayKeyToDate(dayKey);
-        if (!dateStr) return;
+        // Validate dateStr looks like YYYY-MM-DD
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return;
         const foods = [];
         MEALS.forEach(meal => {
           (dayPlan[meal] || []).forEach(f => {
