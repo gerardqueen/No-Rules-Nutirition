@@ -8790,7 +8790,10 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [tab, setTab] = useState("dashboard");
   const [plan, setPlan] = useState(initWeekPlan);
-  const [selectedDay, setSelectedDay] = useState("MON");
+  const [selectedDay, setSelectedDay] = useState(() => {
+    const dow = new Date().getDay(); // 0=Sun
+    return DAYS[dow === 0 ? 6 : dow - 1];
+  });
   const [macroGoalsState, setMacroGoalsState] = useState(() => macroGoals);
   const [threads, setThreads] = useState(MSG_SEED);
 
@@ -9170,13 +9173,21 @@ export default function App() {
         const endStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
         const rows = await apiFetch(`/food-logs/${profile.id}?start=${startStr}&end=${endStr}`);
         if (Array.isArray(rows) && rows.length > 0) {
-          // Rebuild plan from food logs
+          // Build a lookup of which actual date belongs to each dayKey for THIS week
+          const currentWeekDates = {};
+          DAYS.forEach(dk => { currentWeekDates[dk] = dayKeyToDate(dk); });
+
           setPlan((prev) => {
             const next = { ...prev };
             rows.forEach((dayLog) => {
-              const d = new Date(dayLog.date + 'T00:00:00');
+              const logDate = dayLog.date; // "YYYY-MM-DD"
+              const d = new Date(logDate + 'T00:00:00');
               const dayIdx = d.getDay();
               const dayKey = DAYS[dayIdx === 0 ? 6 : dayIdx - 1];
+
+              // ✅ Only load this log if its date matches the CURRENT week's date for that dayKey
+              if (currentWeekDates[dayKey] !== logDate) return;
+
               if (!next[dayKey]) { next[dayKey] = {}; MEALS.forEach(m => next[dayKey][m] = []); }
               // Group foods back into meals (default to Snack if no meal info)
               const foods = (dayLog.foods || []).map(f => ({
