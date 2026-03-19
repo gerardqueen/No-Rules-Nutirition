@@ -3838,425 +3838,94 @@ function MiniCalendar({ events, setEvents, profileId }) {
   );
 }
 
-// ── Coach Videos ──────────────────────────────────────────────────────────────
-const COACH_VIDEOS = [
-  {
-    id: 1,
-    title: "Hitting Your Protein Target",
-    coach: "Your Coach",
-    duration: "8:24",
-    category: "Nutrition",
-    thumb: "💪",
-    views: "1.2k",
-    date: "2 days ago",
-  },
-  {
-    id: 2,
-    title: "Pre-Workout Meal Timing Guide",
-    coach: "Your Coach",
-    duration: "12:05",
-    category: "Nutrition",
-    thumb: "⏱️",
-    views: "892",
-    date: "5 days ago",
-  },
-  {
-    id: 3,
-    title: "Carb Cycling for Performance",
-    coach: "Your Coach",
-    duration: "15:40",
-    category: "Advanced",
-    thumb: "🔄",
-    views: "2.1k",
-    date: "1 week ago",
-  },
-  {
-    id: 4,
-    title: "Managing Macros on Rest Days",
-    coach: "Your Coach",
-    duration: "9:18",
-    category: "Recovery",
-    thumb: "😴",
-    views: "674",
-    date: "2 weeks ago",
-  },
-  {
-    id: 5,
-    title: "Hydration & Electrolytes Explained",
-    coach: "Your Coach",
-    duration: "6:52",
-    category: "Basics",
-    thumb: "💧",
-    views: "1.8k",
-    date: "3 weeks ago",
-  },
-  {
-    id: 6,
-    title: "Supplement Stack Breakdown",
-    coach: "Your Coach",
-    duration: "18:30",
-    category: "Supplements",
-    thumb: "🧪",
-    views: "3.4k",
-    date: "1 month ago",
-  },
-];
-
+// ── Coach Videos (loaded from DB — YouTube links posted by coach) ─────────────
 const categoryColors = {
   Nutrition: "#FF9A52",
-  Advanced: T.protein,
+  Training: T.protein,
   Recovery: T.coachGreen,
-  Basics: T.mfp,
-  Supplements: T.fat,
+  Mindset: T.mfp,
+  General: T.accent,
 };
 
-function CoachVideos() {
+function CoachVideos({ profileId }) {
+  const [videos, setVideos] = useState([]);
   const [activeVideo, setActiveVideo] = useState(null);
 
+  useEffect(() => {
+    if (!profileId) return;
+    (async () => {
+      try {
+        const rows = await apiFetch(`/coach-videos/${profileId}`);
+        if (Array.isArray(rows)) setVideos(rows);
+      } catch {}
+    })();
+  }, [profileId]);
+
+  if (videos.length === 0) return null; // Hide section if no videos
+
   return (
-    <div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 16,
-        }}
-      >
+    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div>
-          <div
-            style={{
-              fontFamily: "Bebas Neue",
-              fontSize: 22,
-              letterSpacing: 2,
-              color: T.text,
-            }}
-          >
-            COACH VIDEOS
+          <div style={{ fontFamily: "Bebas Neue", fontSize: 20, letterSpacing: 2, color: T.text }}>COACH VIDEOS</div>
+          <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, marginTop: 2 }}>
+            Latest content from your coaching team
           </div>
-          <div
-            style={{
-              fontFamily: "DM Sans",
-              fontSize: 12,
-              color: T.muted,
-              marginTop: 2,
-            }}
-          >
-            Latest content from your coaching team · Nutrition tips & guidance
-          </div>
-        </div>
-        <div
-          style={{
-            fontFamily: "DM Sans",
-            fontSize: 11,
-            color: T.accent,
-            cursor: "pointer",
-            letterSpacing: 0.5,
-          }}
-        >
-          View all →
         </div>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3,1fr)",
-          gap: 14,
-        }}
-      >
-        {COACH_VIDEOS.map((v) => (
-          <div
-            key={v.id}
-            onClick={() => setActiveVideo(v)}
-            style={{
-              background: T.card,
-              border: `1px solid ${T.border}`,
-              borderRadius: 14,
-              overflow: "hidden",
-              cursor: "pointer",
-              transition: "all 0.2s",
-              position: "relative",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = T.accent;
-              e.currentTarget.style.transform = "translateY(-2px)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = T.border;
-              e.currentTarget.style.transform = "translateY(0)";
-            }}
-          >
-            {/* Thumbnail */}
-            <div
-              style={{
-                height: 110,
-                background: `linear-gradient(135deg, ${T.surface}, ${T.border})`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                position: "relative",
-              }}
-            >
-              <span style={{ fontSize: 38 }}>{v.thumb}</span>
-              {/* Play button overlay */}
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "#00000044",
-                }}
-              >
-                <div
-                  style={{
-                    width: 38,
-                    height: 38,
-                    borderRadius: "50%",
-                    background: `${T.accent}ee`,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <span style={{ fontSize: 14, marginLeft: 3 }}>▶</span>
-                </div>
-              </div>
-              {/* Duration badge */}
-              <div
-                style={{
-                  position: "absolute",
-                  bottom: 8,
-                  right: 8,
-                  background: "#000000cc",
-                  borderRadius: 4,
-                  padding: "2px 6px",
-                  fontFamily: "JetBrains Mono",
-                  fontSize: 10,
-                  color: "#fff",
-                }}
-              >
-                {v.duration}
-              </div>
-              {/* Category badge */}
-              <div
-                style={{
-                  position: "absolute",
-                  top: 8,
-                  left: 8,
-                  background: `${categoryColors[v.category] || T.accent}22`,
-                  border: `1px solid ${
-                    categoryColors[v.category] || T.accent
-                  }55`,
-                  borderRadius: 4,
-                  padding: "2px 8px",
-                  fontFamily: "DM Sans",
-                  fontSize: 9,
-                  color: categoryColors[v.category] || T.accent,
-                  letterSpacing: 0.5,
-                }}
-              >
-                {v.category}
-              </div>
-            </div>
-
-            {/* Info */}
-            <div style={{ padding: "12px 14px" }}>
-              <div
-                style={{
-                  fontFamily: "DM Sans",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: T.text,
-                  lineHeight: 1.4,
-                  marginBottom: 8,
-                }}
-              >
-                {v.title}
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: "DM Sans",
-                    fontSize: 10,
-                    color: T.muted,
-                  }}
-                >
-                  {v.coach}
-                </span>
-                <div style={{ display: "flex", gap: 10 }}>
-                  <span
-                    style={{
-                      fontFamily: "JetBrains Mono",
-                      fontSize: 9,
-                      color: T.muted,
-                    }}
-                  >
-                    {v.views} views
-                  </span>
-                  <span
-                    style={{
-                      fontFamily: "JetBrains Mono",
-                      fontSize: 9,
-                      color: T.muted,
-                    }}
-                  >
-                    {v.date}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Video Modal */}
+      {/* YouTube embed */}
       {activeVideo && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "#000000dd",
-            zIndex: 200,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 24,
-          }}
-          onClick={() => setActiveVideo(null)}
-        >
-          <div
-            style={{
-              background: T.card,
-              border: `1px solid ${T.border}`,
-              borderRadius: 20,
-              width: "100%",
-              maxWidth: 640,
-              overflow: "hidden",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Mock video player */}
-            <div
-              style={{
-                height: 320,
-                background: `linear-gradient(135deg, ${T.surface}, #1a1a1a)`,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 16,
-                position: "relative",
-              }}
-            >
-              <span style={{ fontSize: 56 }}>{activeVideo.thumb}</span>
-              <div
-                style={{
-                  width: 56,
-                  height: 56,
-                  borderRadius: "50%",
-                  background: `${T.accent}cc`,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: "pointer",
-                }}
-              >
-                <span style={{ fontSize: 20, marginLeft: 4 }}>▶</span>
-              </div>
-              <div
-                style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted }}
-              >
-                Click to play · {activeVideo.duration}
-              </div>
-              <button
-                onClick={() => setActiveVideo(null)}
-                style={{
-                  position: "absolute",
-                  top: 12,
-                  right: 12,
-                  background: `${T.border}cc`,
-                  border: "none",
-                  color: T.muted,
-                  borderRadius: 8,
-                  width: 32,
-                  height: 32,
-                  cursor: "pointer",
-                  fontSize: 16,
-                }}
-              >
-                ×
-              </button>
-            </div>
-            <div style={{ padding: 20 }}>
-              <div
-                style={{
-                  fontFamily: "Bebas Neue",
-                  fontSize: 22,
-                  letterSpacing: 1,
-                  color: T.text,
-                  marginBottom: 4,
-                }}
-              >
-                {activeVideo.title}
-              </div>
-              <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-                <span
-                  style={{
-                    fontFamily: "DM Sans",
-                    fontSize: 12,
-                    color: T.muted,
-                  }}
-                >
-                  {activeVideo.coach}
-                </span>
-                <span
-                  style={{
-                    fontFamily: "JetBrains Mono",
-                    fontSize: 10,
-                    color: T.muted,
-                  }}
-                >
-                  {activeVideo.views} views
-                </span>
-                <span
-                  style={{
-                    fontFamily: "JetBrains Mono",
-                    fontSize: 10,
-                    color: T.muted,
-                  }}
-                >
-                  {activeVideo.date}
-                </span>
-                <div
-                  style={{
-                    marginLeft: "auto",
-                    background: `${categoryColors[activeVideo.category]}22`,
-                    border: `1px solid ${
-                      categoryColors[activeVideo.category]
-                    }55`,
-                    borderRadius: 6,
-                    padding: "3px 10px",
-                    fontFamily: "DM Sans",
-                    fontSize: 10,
-                    color: categoryColors[activeVideo.category],
-                  }}
-                >
-                  {activeVideo.category}
-                </div>
-              </div>
-            </div>
-          </div>
+        <div style={{ marginBottom: 16, borderRadius: 14, overflow: "hidden", background: "#000", position: "relative", paddingBottom: "56.25%" }}>
+          <iframe
+            src={`https://www.youtube.com/embed/${activeVideo.youtube_id}?autoplay=1`}
+            style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: "none" }}
+            allow="autoplay; encrypted-media"
+            allowFullScreen
+          />
         </div>
       )}
+
+      {/* Video grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
+        {videos.map((v) => {
+          const isActive = activeVideo?.id === v.id;
+          const catColor = categoryColors[v.category] || T.accent;
+          return (
+            <div
+              key={v.id}
+              onClick={() => setActiveVideo(isActive ? null : v)}
+              style={{
+                background: isActive ? `${T.accent}15` : T.surface,
+                border: `1px solid ${isActive ? T.accent : T.border}`,
+                borderRadius: 12,
+                overflow: "hidden",
+                cursor: "pointer",
+                transition: "all 0.2s",
+              }}
+            >
+              {/* YouTube thumbnail */}
+              <div style={{ position: "relative", paddingBottom: "56.25%", background: "#111" }}>
+                <img
+                  src={`https://img.youtube.com/vi/${v.youtube_id}/mqdefault.jpg`}
+                  alt={v.title}
+                  style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "cover" }}
+                />
+                <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{ width: 40, height: 40, borderRadius: "50%", background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>▶</div>
+                </div>
+              </div>
+              <div style={{ padding: "10px 12px" }}>
+                <div style={{ fontFamily: "DM Sans", fontSize: 12, fontWeight: 600, color: T.text, lineHeight: 1.3, marginBottom: 6 }}>{v.title}</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ background: catColor + "22", color: catColor, borderRadius: 4, padding: "2px 8px", fontFamily: "DM Sans", fontSize: 9, fontWeight: 600 }}>{v.category}</span>
+                  <span style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted }}>{v.coach_name || "Coach"}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -5512,16 +5181,7 @@ function Dashboard({
       <WeightTracker onWeightSaved={onWeightSaved} profileId={profileId} />
 
       {/* ── Coach Videos (full width below) ── */}
-      <div
-        style={{
-          background: T.card,
-          border: `1px solid ${T.border}`,
-          borderRadius: 16,
-          padding: 24,
-        }}
-      >
-        <CoachVideos />
-      </div>
+      <CoachVideos profileId={profileId} />
     </div>
   );
 }
@@ -8328,7 +7988,7 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
                   }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                       <span style={{ fontFamily: "DM Sans", fontSize: 13, fontWeight: hasUnread ? 700 : 500, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-                        {t.subject || "General"}
+                        {t.subject}
                       </span>
                       <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0, marginLeft: 8 }}>
                         {hasUnread && <div style={{ background: T.accent, borderRadius: "50%", width: 18, height: 18, display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontFamily: "JetBrains Mono", fontSize: 9, color: T.bg, fontWeight: 700 }}>{t.unreadCount}</span></div>}
@@ -8390,30 +8050,50 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
               <button onClick={() => setView("list")} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 18, padding: 0 }}>←</button>
               <div style={{ fontFamily: "Bebas Neue", fontSize: 18, letterSpacing: 2, color: T.text }}>NEW MESSAGE</div>
             </div>
-            <div style={{ padding: "16px 20px", borderBottom: `1px solid ${T.border}` }}>
-              <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Subject</div>
-              <input
-                value={composeSubject}
-                onChange={e => setComposeSubject(e.target.value)}
-                placeholder="e.g. Question about macros, Weekly update, Meal plan query…"
-                style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 13, outline: "none" }}
-              />
-            </div>
-            <div style={{ flex: 1, padding: "20px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <div style={{ textAlign: "center", color: T.muted }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>✉</div>
-                <div style={{ fontFamily: "DM Sans", fontSize: 12 }}>Write your message below and hit send to start a new conversation</div>
+            {!coachId ? (
+              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, padding: 30 }}>
+                <div style={{ fontSize: 36 }}>🔗</div>
+                <div style={{ fontFamily: "DM Sans", fontSize: 14, color: T.text, fontWeight: 600 }}>No coach assigned</div>
+                <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, textAlign: "center" }}>You need to be assigned to a coach before you can send messages. Contact your admin.</div>
               </div>
-            </div>
-            <div style={{ padding: "12px 20px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 8 }}>
-              <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSend()}
-                placeholder="Write your message…"
-                style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 12, outline: "none" }} />
-              <button onClick={handleSend} disabled={loading || !input.trim() || !composeSubject.trim()} style={{
-                background: input.trim() && composeSubject.trim() ? T.accent : T.border, color: input.trim() && composeSubject.trim() ? T.bg : T.muted,
-                border: "none", borderRadius: 10, padding: "10px 16px", fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1.5, cursor: input.trim() && composeSubject.trim() ? "pointer" : "default",
-              }} type="button">{loading ? "…" : "SEND"}</button>
-            </div>
+            ) : (
+              <>
+                <div style={{ padding: "12px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", gap: 16 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>To</div>
+                    <div style={{ fontFamily: "DM Sans", fontSize: 13, color: T.coachGreen, fontWeight: 600 }}>{profile.coachName || "Your Coach"}</div>
+                  </div>
+                </div>
+                <div style={{ padding: "12px 20px", borderBottom: `1px solid ${T.border}` }}>
+                  <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Subject</div>
+                  <input
+                    autoFocus
+                    value={composeSubject}
+                    onChange={e => setComposeSubject(e.target.value)}
+                    placeholder="e.g. Question about macros, Weekly update…"
+                    style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 13, outline: "none" }}
+                  />
+                </div>
+                <div style={{ flex: 1, padding: "12px 20px" }}>
+                  <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Message</div>
+                  <textarea
+                    value={input}
+                    onChange={e => setInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                    placeholder="Write your message…"
+                    rows={6}
+                    style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 12, outline: "none", resize: "vertical" }}
+                  />
+                </div>
+                <div style={{ padding: "12px 20px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                  <button onClick={() => setView("list")} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 16px", fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1.5, color: T.muted, cursor: "pointer" }}>CANCEL</button>
+                  <button onClick={handleSend} disabled={loading || !input.trim() || !composeSubject.trim()} style={{
+                    background: input.trim() && composeSubject.trim() ? T.accent : T.border, color: input.trim() && composeSubject.trim() ? T.bg : T.muted,
+                    border: "none", borderRadius: 10, padding: "10px 20px", fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1.5, cursor: input.trim() && composeSubject.trim() ? "pointer" : "default",
+                  }} type="button">{loading ? "…" : "SEND ➜"}</button>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -8423,8 +8103,8 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
             <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 12 }}>
               <button onClick={() => { setView("list"); loadThreads(); }} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 18, padding: 0 }}>←</button>
               <div style={{ flex: 1 }}>
-                <div style={{ fontFamily: "DM Sans", fontSize: 14, fontWeight: 700, color: T.text }}>{activeThread.subject || "General"}</div>
-                <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>with Coach · {threadMessages.length} message{threadMessages.length !== 1 ? "s" : ""}</div>
+                <div style={{ fontFamily: "DM Sans", fontSize: 14, fontWeight: 700, color: T.text }}>{activeThread.subject || "No subject"}</div>
+                <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>with {profile.coachName || "Coach"} · {threadMessages.length} message{threadMessages.length !== 1 ? "s" : ""}</div>
               </div>
             </div>
             <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
