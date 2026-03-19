@@ -429,15 +429,15 @@ function ProfileMenu({ profile, onLogout, onNavigate }) {
       icon: "🎯",
       label: "Goals & Macros",
       action: () => {
-        onNavigate("tracker");
+        onNavigate("meals");
         setOpen(false);
       },
     },
     {
-      icon: "🔗",
-      label: "MFP Integration",
+      icon: "🛒",
+      label: "Shopping List",
       action: () => {
-        onNavigate("mfp");
+        onNavigate("shopping");
         setOpen(false);
       },
     },
@@ -692,6 +692,41 @@ function ProfileMenu({ profile, onLogout, onNavigate }) {
 
 // ── Check-In Countdown ────────────────────────────────────────────────────────
 function CheckInCountdown({ daysLeft }) {
+  if (daysLeft == null) {
+    return (
+      <div
+        style={{
+          background: T.card,
+          border: `1px solid ${T.border}`,
+          borderRadius: 16,
+          padding: "18px 22px",
+          display: "flex",
+          alignItems: "center",
+          gap: 18,
+        }}
+      >
+        <div style={{
+          width: 56, height: 56, borderRadius: "50%",
+          background: `${T.muted}18`, border: `2px solid ${T.muted}`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontFamily: "Bebas Neue", fontSize: 20, color: T.muted,
+        }}>
+          —
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: "Bebas Neue", fontSize: 12, letterSpacing: 2, color: T.muted, marginBottom: 3 }}>
+            NEXT COACH CHECK-IN
+          </div>
+          <div style={{ fontFamily: "DM Sans", fontSize: 14, color: T.text, fontWeight: 500 }}>
+            No check-in scheduled
+          </div>
+          <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, marginTop: 4 }}>
+            Your coach will add one to the calendar soon
+          </div>
+        </div>
+      </div>
+    );
+  }
   const urgent = daysLeft <= 1;
   const soon = daysLeft <= 3;
   const color = urgent ? T.danger : soon ? T.accent : T.coachGreen;
@@ -3097,16 +3132,15 @@ function MiniCalendar({ events, setEvents, profileId }) {
     setEditEvent(ev);
     setForm({
       title: ev.title,
-      type: ev.type,
+      type: ev.type || "reminder",
       date: ev.date,
-      note: ev.note || "",
+      note: ev.notes || ev.note || "",
     });
     setShowModal(true);
   };
   const save = async () => {
     if (!form.title.trim()) return;
     if (editEvent) {
-      // For edits, delete old and create new (simple approach)
       if (profileId) {
         try { await apiFetch(`/calendar-events/${profileId}/${editEvent.id}`, { method: 'DELETE' }); } catch {}
       }
@@ -3114,7 +3148,8 @@ function MiniCalendar({ events, setEvents, profileId }) {
         evs.filter((e) => e.id !== editEvent.id)
       );
     }
-    // Create new event
+    // Encode type in notes as [type:xxx] prefix for persistence
+    const notesWithType = `[type:${form.type}]${form.note || ''}`;
     if (profileId) {
       try {
         const created = await apiFetch(`/calendar-events/${profileId}`, {
@@ -3124,12 +3159,11 @@ function MiniCalendar({ events, setEvents, profileId }) {
             title: form.title,
             startISO: form.date,
             endISO: form.date,
-            notes: form.note || '',
+            notes: notesWithType,
           }),
         });
-        setEvents((evs) => [...evs, { id: created.id, date: created.date, title: created.title, notes: created.notes, type: form.type }]);
+        setEvents((evs) => [...evs, { id: created.id, date: created.date, title: created.title, notes: form.note, type: form.type }]);
       } catch (e) {
-        // Fallback to local
         setEvents((evs) => [...evs, { id: Date.now(), ...form }]);
       }
     } else {
@@ -5972,8 +6006,18 @@ function Dashboard({
             })}
           </div>
 
-          {/* Check-in countdown */}
-          <CheckInCountdown daysLeft={profile.nextCheckIn} />
+          {/* Check-in countdown — computed from calendar events */}
+          {(() => {
+            const todayISO = getTodayISO();
+            const nextCheckin = [...(events || [])]
+              .filter(e => e.date >= todayISO && (e.type === "checkin" || (e.title || "").toLowerCase().includes("check")))
+              .sort((a, b) => a.date.localeCompare(b.date))[0];
+            if (nextCheckin) {
+              const diff = Math.ceil((new Date(nextCheckin.date + "T00:00:00") - new Date(todayISO + "T00:00:00")) / 86400000);
+              return <CheckInCountdown daysLeft={diff} />;
+            }
+            return <CheckInCountdown daysLeft={null} />;
+          })()}
 
           {/* Weekly calorie bar chart */}
           <div
@@ -6227,6 +6271,8 @@ function WeeklyPlanner({
   mfpLastSync,
   onImportMFP,
   onSyncNow,
+  shoppingItems,
+  addToShoppingList,
 }) {
   const [selectedMeal, setSelectedMeal] = useState(null);
   const [showFoodPicker, setShowFoodPicker] = useState(false);
@@ -6821,6 +6867,24 @@ function WeeklyPlanner({
                     onMouseLeave={(e) => (e.target.style.color = T.muted)}
                   >
                     ×
+                  </button>
+                  <button
+                    onClick={() => addToShoppingList(f.name)}
+                    title="Add to shopping list"
+                    style={{
+                      background: shoppingItems.some(s => s.name === f.name && !s.checked) ? `${T.coachGreen}22` : "none",
+                      border: shoppingItems.some(s => s.name === f.name && !s.checked) ? `1px solid ${T.coachGreen}44` : "1px solid transparent",
+                      color: shoppingItems.some(s => s.name === f.name && !s.checked) ? T.coachGreen : T.muted,
+                      cursor: "pointer",
+                      fontSize: 13,
+                      padding: "2px 5px",
+                      borderRadius: 4,
+                      lineHeight: 1,
+                    }}
+                    onMouseEnter={(e) => { if (!shoppingItems.some(s => s.name === f.name && !s.checked)) e.currentTarget.style.color = T.coachGreen; }}
+                    onMouseLeave={(e) => { if (!shoppingItems.some(s => s.name === f.name && !s.checked)) e.currentTarget.style.color = T.muted; }}
+                  >
+                    🛒
                   </button>
                 </div>
               ))}
@@ -7923,6 +7987,239 @@ function WeeklyPlanner({
   );
 }
 
+// ── Shopping List ─────────────────────────────────────────────────────────────
+function ShoppingList({ items, onToggle, onRemove, onClear, plan, addToShoppingList }) {
+  const unchecked = items.filter(i => !i.checked);
+  const checked = items.filter(i => i.checked);
+
+  // Gather all unique food names from this week's plan for quick-add
+  const allFoods = new Set();
+  const wd = getCurrentWeekDates();
+  wd.forEach(({ date }) => {
+    const dayPlan = plan[date];
+    if (!dayPlan) return;
+    MEALS.forEach(meal => {
+      (dayPlan[meal] || []).forEach(f => { if (f.name) allFoods.add(f.name); });
+    });
+  });
+  const weekFoods = [...allFoods].sort();
+  const notOnList = weekFoods.filter(name => !items.some(i => i.name === name));
+
+  // Manual add
+  const [manualInput, setManualInput] = useState("");
+  const addManual = () => {
+    const name = manualInput.trim();
+    if (!name) return;
+    addToShoppingList(name);
+    setManualInput("");
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* Header */}
+      <div>
+        <div style={{ fontFamily: "Bebas Neue", fontSize: 28, letterSpacing: 2, color: T.text }}>
+          SHOPPING LIST
+        </div>
+        <div style={{ fontFamily: "DM Sans", fontSize: 13, color: T.muted, marginTop: 4 }}>
+          Add items from your meal plan using the 🛒 button, or add manually below
+        </div>
+      </div>
+
+      {/* Manual add */}
+      <div style={{ display: "flex", gap: 8 }}>
+        <input
+          value={manualInput}
+          onChange={e => setManualInput(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && addManual()}
+          placeholder="Add custom item..."
+          style={{
+            flex: 1, background: T.card, border: `1px solid ${T.border}`,
+            borderRadius: 10, padding: "10px 14px", color: T.text,
+            fontFamily: "DM Sans", fontSize: 13, outline: "none",
+          }}
+        />
+        <button
+          onClick={addManual}
+          disabled={!manualInput.trim()}
+          style={{
+            background: manualInput.trim() ? T.accent : T.border,
+            color: manualInput.trim() ? T.bg : T.muted,
+            border: "none", borderRadius: 10, padding: "10px 18px",
+            fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1,
+            cursor: manualInput.trim() ? "pointer" : "default",
+          }}
+        >
+          ADD
+        </button>
+      </div>
+
+      {/* Quick-add from this week's meals */}
+      {notOnList.length > 0 && (
+        <div style={{
+          background: T.card, border: `1px solid ${T.border}`,
+          borderRadius: 14, padding: 16,
+        }}>
+          <div style={{
+            fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 2,
+            color: T.muted, marginBottom: 10,
+          }}>
+            ADD FROM THIS WEEK'S MEALS
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {notOnList.slice(0, 20).map(name => (
+              <button
+                key={name}
+                onClick={() => addToShoppingList(name)}
+                style={{
+                  background: T.surface, border: `1px solid ${T.border}`,
+                  borderRadius: 20, padding: "5px 12px",
+                  fontFamily: "DM Sans", fontSize: 11, color: T.text,
+                  cursor: "pointer", transition: "all 0.15s",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = T.coachGreen; e.currentTarget.style.color = T.coachGreen; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.color = T.text; }}
+              >
+                + {name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Items to buy */}
+      <div style={{
+        background: T.card, border: `1px solid ${T.border}`,
+        borderRadius: 14, padding: 16,
+      }}>
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          marginBottom: 14,
+        }}>
+          <div style={{
+            fontFamily: "Bebas Neue", fontSize: 18, letterSpacing: 2, color: T.text,
+          }}>
+            TO BUY ({unchecked.length})
+          </div>
+          {items.length > 0 && (
+            <button
+              onClick={onClear}
+              style={{
+                background: "none", border: `1px solid ${T.danger}44`,
+                borderRadius: 8, padding: "4px 10px",
+                fontFamily: "DM Sans", fontSize: 10, color: T.danger,
+                cursor: "pointer",
+              }}
+            >
+              CLEAR ALL
+            </button>
+          )}
+        </div>
+        {unchecked.length === 0 && (
+          <div style={{
+            textAlign: "center", padding: "30px 0", color: T.muted,
+          }}>
+            <div style={{ fontSize: 36, marginBottom: 10 }}>🛒</div>
+            <div style={{ fontFamily: "DM Sans", fontSize: 13 }}>
+              Your shopping list is empty
+            </div>
+            <div style={{ fontFamily: "DM Sans", fontSize: 11, marginTop: 6, color: T.border }}>
+              Tap 🛒 next to any food in your meal plan to add it here
+            </div>
+          </div>
+        )}
+        {unchecked.map((item, idx) => {
+          const realIdx = items.indexOf(item);
+          return (
+            <div
+              key={`${item.name}-${realIdx}`}
+              style={{
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "10px 12px", background: T.surface,
+                borderRadius: 10, marginBottom: 6,
+                transition: "all 0.15s",
+              }}
+            >
+              <button
+                onClick={() => onToggle(realIdx)}
+                style={{
+                  width: 22, height: 22, borderRadius: 6, flexShrink: 0,
+                  border: `2px solid ${T.border}`, background: "none",
+                  cursor: "pointer", display: "flex", alignItems: "center",
+                  justifyContent: "center", fontSize: 12, color: "transparent",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = T.coachGreen; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; }}
+              >
+                ✓
+              </button>
+              <span style={{ flex: 1, fontFamily: "DM Sans", fontSize: 13, color: T.text }}>
+                {item.name}
+              </span>
+              <button
+                onClick={() => onRemove(realIdx)}
+                style={{
+                  background: "none", border: "none", color: T.muted,
+                  cursor: "pointer", fontSize: 16, padding: "0 4px",
+                }}
+                onMouseEnter={e => (e.target.style.color = T.danger)}
+                onMouseLeave={e => (e.target.style.color = T.muted)}
+              >
+                ×
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Checked off items */}
+      {checked.length > 0 && (
+        <div style={{
+          background: T.card, border: `1px solid ${T.border}`,
+          borderRadius: 14, padding: 16, opacity: 0.7,
+        }}>
+          <div style={{
+            fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 2,
+            color: T.muted, marginBottom: 10,
+          }}>
+            DONE ({checked.length})
+          </div>
+          {checked.map((item) => {
+            const realIdx = items.indexOf(item);
+            return (
+              <div
+                key={`${item.name}-${realIdx}`}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "8px 12px", marginBottom: 4,
+                }}
+              >
+                <button
+                  onClick={() => onToggle(realIdx)}
+                  style={{
+                    width: 22, height: 22, borderRadius: 6, flexShrink: 0,
+                    border: `2px solid ${T.coachGreen}`, background: `${T.coachGreen}33`,
+                    cursor: "pointer", display: "flex", alignItems: "center",
+                    justifyContent: "center", fontSize: 12, color: T.coachGreen,
+                  }}
+                >
+                  ✓
+                </button>
+                <span style={{
+                  flex: 1, fontFamily: "DM Sans", fontSize: 13, color: T.muted,
+                  textDecoration: "line-through",
+                }}>
+                  {item.name}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Macro Tracker ─────────────────────────────────────────────────────────────
 function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
   const tot = dayTotals(plan[selectedDay] || {});
@@ -8853,6 +9150,53 @@ export default function App() {
 
   const mfpUsername = profile?.mfpUsername || null;
 
+  // ── Shopping List State ──
+  const [shoppingItems, setShoppingItems] = useState([]);
+  const shoppingTimerRef = useRef(null);
+
+  // Load shopping list from backend
+  useEffect(() => {
+    if (!profile?.id) return;
+    (async () => {
+      try {
+        const data = await apiFetch(`/shopping-list/${profile.id}`);
+        if (Array.isArray(data.items)) setShoppingItems(data.items);
+      } catch {}
+    })();
+  }, [profile?.id]);
+
+  // Auto-save shopping list (debounced)
+  useEffect(() => {
+    if (!profile?.id) return;
+    if (shoppingTimerRef.current) clearTimeout(shoppingTimerRef.current);
+    shoppingTimerRef.current = setTimeout(() => {
+      apiFetch(`/shopping-list/${profile.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ items: shoppingItems }),
+      }).catch(e => console.warn('Shopping list save:', e.message));
+    }, 800);
+    return () => { if (shoppingTimerRef.current) clearTimeout(shoppingTimerRef.current); };
+  }, [shoppingItems, profile?.id]);
+
+  // Add a food item to shopping list
+  const addToShoppingList = (foodName) => {
+    setShoppingItems(prev => {
+      // Don't add duplicates
+      if (prev.some(item => item.name === foodName && !item.checked)) return prev;
+      return [...prev, { name: foodName, checked: false, addedAt: new Date().toISOString() }];
+    });
+  };
+
+  // Remove a food item from shopping list
+  const removeFromShoppingList = (idx) => {
+    setShoppingItems(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  // Toggle checked state
+  const toggleShoppingItem = (idx) => {
+    setShoppingItems(prev => prev.map((item, i) => i === idx ? { ...item, checked: !item.checked } : item));
+  };
+
   // ✅ Load macro plan from backend so coach updates show in the client
   // Polls every 30s so coach changes appear live
   const profileIdRef = useRef(null);
@@ -9217,7 +9561,24 @@ export default function App() {
     if (!profile?.id) return;
     try {
       const rows = await apiFetch(`/calendar-events/${profile.id}`);
-      if (Array.isArray(rows)) setEvents(rows);
+      if (Array.isArray(rows)) {
+        // Parse [type:xxx] from notes to reconstruct event type
+        const parsed = rows.map(ev => {
+          const notes = ev.notes || "";
+          const typeMatch = notes.match(/^\[type:(\w+)\]/);
+          return {
+            ...ev,
+            type: typeMatch ? typeMatch[1] : (
+              (ev.title || "").toLowerCase().includes("check") ? "checkin" :
+              (ev.title || "").toLowerCase().includes("train") ? "training" :
+              (ev.title || "").toLowerCase().includes("comp") ? "competition" :
+              "reminder"
+            ),
+            notes: typeMatch ? notes.replace(/^\[type:\w+\]/, "") : notes,
+          };
+        });
+        setEvents(parsed);
+      }
     } catch (e) { /* keep current */ }
   };
   useEffect(() => {
@@ -9298,9 +9659,8 @@ export default function App() {
   const tabs = [
     { id: "dashboard", label: "DASHBOARD" },
     { id: "meals", label: "MEAL PLAN" },
-    { id: "tracker", label: "MACRO TRACKER" },
+    { id: "shopping", label: "🛒 SHOPPING" },
     { id: "inbox", label: "📥 INBOX", highlight: true },
-    { id: "mfp", label: "MFP SYNC", mfp: true },
   ];
 
   return (
@@ -9521,14 +9881,18 @@ export default function App() {
             onSyncNow={() =>
               mfpUsername && fetchMFP(mfpUsername, plan[selectedDay])
             }
+            shoppingItems={shoppingItems}
+            addToShoppingList={addToShoppingList}
           />
         )}
-        {tab === "tracker" && (
-          <MacroTracker
+        {tab === "shopping" && (
+          <ShoppingList
+            items={shoppingItems}
+            onToggle={toggleShoppingItem}
+            onRemove={removeFromShoppingList}
+            onClear={() => setShoppingItems([])}
             plan={plan}
-            selectedDay={selectedDay}
-            mfpData={mfpData}
-            mfpConnected={mfpConnected}
+            addToShoppingList={addToShoppingList}
           />
         )}
         {tab === "inbox" && (
@@ -9545,66 +9909,6 @@ export default function App() {
               profile={profile}
               threads={threads}
               setThreads={setThreads}
-            />
-          </div>
-        )}
-        {tab === "mfp" && (
-          <div style={{ minHeight: 400 }}>
-            <div style={{ marginBottom: 20 }}>
-              <div
-                style={{
-                  fontFamily: "Bebas Neue",
-                  fontSize: 28,
-                  letterSpacing: 2,
-                  color: T.text,
-                }}
-              >
-                MYFITNESSPAL INTEGRATION
-              </div>
-              <div
-                style={{
-                  fontFamily: "DM Sans",
-                  fontSize: 13,
-                  color: T.muted,
-                  marginTop: 4,
-                }}
-              >
-                Sync your food diary · Coach sees your adherence in real time · Link your MFP username below
-              </div>
-            </div>
-            <MFPPanel
-              plan={plan}
-              selectedDay={selectedDay}
-              account={profile}
-              mfpData={mfpData}
-              mfpConnected={mfpConnected}
-              mfpSyncing={mfpSyncing}
-              mfpLastSync={mfpLastSync}
-              mfpError={mfpError}
-              mfpNextSyncIn={mfpNextSyncIn}
-              mfpSyncCount={mfpSyncCount}
-              mfpManualMode={mfpManualMode}
-              onSubmitManual={submitManualMFP}
-              onConnect={() =>
-                mfpUsername && fetchMFP(mfpUsername, plan[selectedDay])
-              }
-              onSync={() =>
-                mfpUsername && fetchMFP(mfpUsername, plan[selectedDay])
-              }
-              onDisconnect={() => {
-                setMfpConnected(false);
-                setMfpData(null);
-                setMfpError(null);
-                setMfpManualMode(false);
-                setProfile((prev) => ({ ...prev, mfpUsername: null }));
-              }}
-              onImport={() => importMFPDay(selectedDay)}
-              onSetMfpUsername={handleSetMfpUsername}
-              onEnterManual={() => {
-                setMfpManualMode(true);
-                setMfpConnected(true);
-                setMfpError(null);
-              }}
             />
           </div>
         )}
