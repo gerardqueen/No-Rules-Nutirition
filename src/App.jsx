@@ -4252,7 +4252,6 @@ function MoodTracker({ moodLog, setMoodLog, onMoodSaved }) {
 
   const trendLabel =
     avgScore >= 4 ? "Great week 🔥" : avgScore >= 3 ? "Solid week 💪" : avgScore ? "Tough stretch 💙" : null;
-      : null;
 
   return (
     <div
