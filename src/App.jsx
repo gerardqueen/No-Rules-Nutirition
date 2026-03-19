@@ -6215,7 +6215,6 @@ function WeeklyPlanner({
   const [barcodeError, setBarcodeError] = useState("");
   const [scanning, setScanning] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
-  const [scanProgress, setScanProgress] = useState(0); // 0-3, shows read confirmation dots
   const [offSearching, setOffSearching] = useState(false);
   const [offResults, setOffResults] = useState([]);
 
@@ -6254,29 +6253,43 @@ function WeeklyPlanner({
     setScanning(false);
   };
 
-  // ── Camera barcode scanning (QuaggaJS live mode — Safari/iOS compatible) ──
-  const scannerContainerRef = useRef(null);
-  const quaggaLoadedRef = useRef(false);
-  const quaggaRunningRef = useRef(false);
+  // ── Camera barcode scanning (html5-qrcode — reliable on Chrome + Safari/iOS) ──
+  const scannerRef = useRef(null); // Html5Qrcode instance
+  const scannerLibLoaded = useRef(false);
+  const SCANNER_ELEMENT_ID = "nrn-barcode-scanner";
 
-  // Load QuaggaJS from CDN (only once, on demand)
-  const loadQuagga = () => new Promise((resolve) => {
-    if (window.Quagga) { quaggaLoadedRef.current = true; return resolve(true); }
-    if (quaggaLoadedRef.current) return resolve(!!window.Quagga);
+  // Load html5-qrcode from CDN once on demand
+  const loadScannerLib = () => new Promise((resolve) => {
+    if (window.Html5Qrcode) { scannerLibLoaded.current = true; return resolve(true); }
+    if (document.querySelector('script[data-nrn-scanner]')) {
+      // Script tag exists but hasn't loaded yet — wait
+      const check = setInterval(() => {
+        if (window.Html5Qrcode) { clearInterval(check); scannerLibLoaded.current = true; resolve(true); }
+      }, 100);
+      setTimeout(() => { clearInterval(check); resolve(false); }, 8000);
+      return;
+    }
     const script = document.createElement("script");
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js";
-    script.onload = () => { quaggaLoadedRef.current = true; resolve(true); };
-    script.onerror = () => { quaggaLoadedRef.current = true; resolve(false); };
+    script.src = "https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js";
+    script.setAttribute("data-nrn-scanner", "1");
+    script.onload = () => { scannerLibLoaded.current = true; resolve(true); };
+    script.onerror = () => resolve(false);
     document.head.appendChild(script);
   });
 
-  const stopCamera = () => {
-    if (quaggaRunningRef.current && window.Quagga) {
-      try { window.Quagga.offDetected(); window.Quagga.stop(); } catch {}
-      quaggaRunningRef.current = false;
-    }
+  const stopCamera = async () => {
+    try {
+      if (scannerRef.current) {
+        const state = scannerRef.current.getState?.();
+        // State 2 = scanning, state 3 = paused
+        if (state === 2 || state === 3) {
+          await scannerRef.current.stop();
+        }
+        scannerRef.current.clear?.();
+        scannerRef.current = null;
+      }
+    } catch (e) { console.warn("Scanner stop:", e); }
     setCameraActive(false);
-    setScanProgress(0);
   };
 
   const startCamera = async () => {
@@ -6285,129 +6298,92 @@ function WeeklyPlanner({
     setCameraActive(true);
   };
 
-  // Once cameraActive + container rendered + Quagga loaded → init live scanner
-  const detectionBufferRef = useRef([]); // stores last N detected codes for validation
-
+  // Init scanner once cameraActive + DOM element exists + lib loaded
   useEffect(() => {
     if (!cameraActive) return;
     let cancelled = false;
-    detectionBufferRef.current = [];
 
     const initScanner = async () => {
-      const loaded = await loadQuagga();
+      const loaded = await loadScannerLib();
       if (cancelled) return;
-      if (!loaded || !window.Quagga) {
-        setBarcodeError("Barcode scanner failed to load. Type the number manually.");
+      if (!loaded || !window.Html5Qrcode) {
+        setBarcodeError("Scanner library failed to load. Type the barcode manually.");
         setCameraActive(false);
         return;
       }
 
-      // Wait for the container div to be in the DOM
-      await new Promise(r => setTimeout(r, 150));
-      if (cancelled || !scannerContainerRef.current) return;
+      // Wait for DOM element
+      await new Promise(r => setTimeout(r, 200));
+      if (cancelled) return;
+      const el = document.getElementById(SCANNER_ELEMENT_ID);
+      if (!el) { setBarcodeError("Scanner container missing."); setCameraActive(false); return; }
 
-      window.Quagga.init({
-        inputStream: {
-          name: "Live",
-          type: "LiveStream",
-          target: scannerContainerRef.current,
-          constraints: {
-            facingMode: "environment",
-            width: { min: 320, ideal: 640 },
-            height: { min: 240, ideal: 480 },
+      try {
+        const scanner = new window.Html5Qrcode(SCANNER_ELEMENT_ID, { verbose: false });
+        scannerRef.current = scanner;
+
+        await scanner.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 120 },
+            aspectRatio: 1.5,
+            disableFlip: false,
+            formatsToSupport: [
+              window.Html5QrcodeSupportedFormats?.EAN_13,
+              window.Html5QrcodeSupportedFormats?.EAN_8,
+              window.Html5QrcodeSupportedFormats?.UPC_A,
+              window.Html5QrcodeSupportedFormats?.UPC_E,
+            ].filter(Boolean),
           },
-          area: { top: "20%", right: "10%", left: "10%", bottom: "20%" },
-        },
-        locator: {
-          patchSize: "medium",
-          halfSample: true,
-        },
-        decoder: {
-          readers: ["ean_reader", "ean_8_reader", "upc_reader", "upc_e_reader"],
-          multiple: false,
-        },
-        locate: true,
-        frequency: 10,
-      }, (err) => {
-        if (cancelled) return;
-        if (err) {
-          console.warn("Quagga init error:", err);
+          // Success callback
+          (decodedText) => {
+            if (cancelled) return;
+            if (!decodedText || !/^\d{8,14}$/.test(decodedText)) return;
+            // Got a valid barcode — stop and lookup immediately
+            stopCamera();
+            setBarcodeInput(decodedText);
+            lookupBarcode(decodedText);
+          },
+          // Error callback (fires constantly when no barcode visible — ignore)
+          () => {}
+        );
+
+        // Style overrides — html5-qrcode adds its own elements
+        try {
+          const vid = el.querySelector("video");
+          if (vid) { vid.style.borderRadius = "12px"; }
+          // Hide the shaded region borders that html5-qrcode draws
+          const qrShaded = el.querySelector("#qr-shaded-region");
+          if (qrShaded) qrShaded.style.display = "none";
+        } catch {}
+
+      } catch (e) {
+        if (!cancelled) {
+          console.warn("Scanner start error:", e);
           setBarcodeError("Camera access denied or not available. Enter barcode manually.");
           setCameraActive(false);
-          return;
         }
-        quaggaRunningRef.current = true;
-        window.Quagga.start();
-
-        // Style the auto-created video element for Safari compatibility
-        try {
-          const vEl = scannerContainerRef.current?.querySelector("video");
-          if (vEl) {
-            vEl.setAttribute("playsinline", "true");
-            vEl.setAttribute("muted", "true");
-            vEl.style.width = "100%";
-            vEl.style.height = "100%";
-            vEl.style.objectFit = "cover";
-            vEl.style.position = "absolute";
-            vEl.style.top = "0";
-            vEl.style.left = "0";
-          }
-          // Hide the debug canvas overlay Quagga adds
-          const canvases = scannerContainerRef.current?.querySelectorAll("canvas");
-          if (canvases) canvases.forEach(c => { c.style.display = "none"; });
-        } catch {}
-      });
-
-      // Confidence check: average error must be below threshold
-      const isHighConfidence = (result) => {
-        const errors = result?.codeResult?.decodedCodes
-          ?.filter(d => d.error != null)
-          ?.map(d => d.error) || [];
-        if (errors.length === 0) return false;
-        const avgError = errors.reduce((s, e) => s + e, 0) / errors.length;
-        return avgError < 0.08; // lower = more confident
-      };
-
-      // Listen for barcode detection — require same code 3 times for validation
-      const REQUIRED_READS = 3;
-
-      window.Quagga.onDetected((result) => {
-        if (cancelled) return;
-        const code = result?.codeResult?.code;
-        if (!code || !/^\d{8,14}$/.test(code)) return;
-        if (!isHighConfidence(result)) return;
-
-        // Push to buffer, keep last 8 reads
-        detectionBufferRef.current.push(code);
-        if (detectionBufferRef.current.length > 8) detectionBufferRef.current.shift();
-
-        // Count how many of the last reads match this code
-        const matches = detectionBufferRef.current.filter(c => c === code).length;
-        setScanProgress(Math.min(matches, REQUIRED_READS));
-
-        if (matches >= REQUIRED_READS) {
-          detectionBufferRef.current = [];
-          setScanProgress(0);
-          stopCamera();
-          setBarcodeInput(code);
-          lookupBarcode(code);
-        }
-      });
+      }
     };
 
     initScanner();
 
     return () => {
       cancelled = true;
-      if (quaggaRunningRef.current && window.Quagga) {
-        try { window.Quagga.offDetected(); window.Quagga.stop(); } catch {}
-        quaggaRunningRef.current = false;
+      if (scannerRef.current) {
+        try {
+          const state = scannerRef.current.getState?.();
+          if (state === 2 || state === 3) scannerRef.current.stop().catch(() => {});
+          scannerRef.current.clear?.();
+        } catch {}
+        scannerRef.current = null;
       }
     };
   }, [cameraActive]);
 
   // Cleanup camera on unmount or tab change
-  useEffect(() => { return () => stopCamera(); }, []);
+  useEffect(() => { return () => { stopCamera(); }; }, []);
   useEffect(() => { if (pickerTab !== "barcode") stopCamera(); }, [pickerTab]);
 
   const selectFromBarcode = () => {
@@ -7559,68 +7535,17 @@ function WeeklyPlanner({
                       overflow: "hidden",
                     }}
                   >
-                    {/* QuaggaJS live scanner container */}
-                    {cameraActive && (
+                    {/* html5-qrcode scanner container */}
+                    {cameraActive ? (
                       <div
-                        ref={scannerContainerRef}
+                        id={SCANNER_ELEMENT_ID}
                         style={{
-                          position: "absolute",
-                          top: 0, left: 0, width: "100%", height: "100%",
-                          overflow: "hidden",
+                          width: "100%",
+                          height: "100%",
                         }}
                       />
-                    )}
-                    {/* Scan progress indicator overlay */}
-                    {cameraActive && (
-                      <div style={{
-                        position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)",
-                        zIndex: 5, display: "flex", gap: 8, alignItems: "center",
-                        background: "rgba(0,0,0,0.7)", borderRadius: 20, padding: "6px 14px",
-                      }}>
-                        {[1, 2, 3].map(i => (
-                          <div key={i} style={{
-                            width: 10, height: 10, borderRadius: "50%",
-                            background: scanProgress >= i ? T.coachGreen : T.border,
-                            transition: "background 0.15s",
-                          }} />
-                        ))}
-                        <span style={{ fontFamily: "DM Sans", fontSize: 10, color: scanProgress > 0 ? T.coachGreen : T.muted, marginLeft: 4 }}>
-                          {scanProgress === 0 ? "Scanning…" : `Reading (${scanProgress}/3)`}
-                        </span>
-                      </div>
-                    )}
-                    {/* Corner brackets */}
-                    {[
-                      ["0%", "0%", "right", "bottom"],
-                      ["100%", "0%", "left", "bottom"],
-                      ["0%", "100%", "right", "top"],
-                      ["100%", "100%", "left", "top"],
-                    ].map(([l, t, bR, bB], i) => (
-                      <div
-                        key={i}
-                        style={{
-                          position: "absolute",
-                          left: l,
-                          top: t,
-                          width: 24,
-                          height: 24,
-                          zIndex: 2,
-                          transform: `translate(${i % 2 === 0 ? 16 : -16}px, ${
-                            i < 2 ? 16 : -16
-                          }px)`,
-                          borderLeft:
-                            bR === "right" ? `3px solid ${T.accent}` : "none",
-                          borderRight:
-                            bR === "left" ? `3px solid ${T.accent}` : "none",
-                          borderTop:
-                            bB === "bottom" ? `3px solid ${T.accent}` : "none",
-                          borderBottom:
-                            bB === "top" ? `3px solid ${T.accent}` : "none",
-                        }}
-                      />
-                    ))}
-                    {/* Status text overlay */}
-                    {!cameraActive && (
+                    ) : (
+                      /* Idle state — barcode icon */
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, zIndex: 2 }}>
                         <div style={{ display: "flex", gap: 2, alignItems: "flex-end", opacity: scanning ? 0.4 : 0.6 }}>
                           {[3, 6, 4, 7, 3, 5, 4, 8, 3, 6, 4, 5, 3].map((h, i) => (
@@ -7635,19 +7560,10 @@ function WeeklyPlanner({
                           </div>
                         ) : (
                           <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted }}>
-                            {barcodeResult ? "✓ Product found!" : "Tap camera or enter barcode below"}
+                            {barcodeResult ? "✓ Product found!" : "Tap SCAN or enter barcode below"}
                           </div>
                         )}
                       </div>
-                    )}
-                    {/* Scan animation line */}
-                    {(scanning || cameraActive) && (
-                      <div style={{
-                        position: "absolute", left: 20, right: 20, height: 2, zIndex: 3,
-                        background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)`,
-                        animation: "scanLine 0.9s ease-in-out infinite alternate",
-                        top: "50%",
-                      }} />
                     )}
                   </div>
                 </div>
@@ -7967,7 +7883,7 @@ function WeeklyPlanner({
                       <strong style={{ color: T.text }}>Powered by Open Food Facts</strong> — 3M+ products including UK supermarket brands (Tesco, Sainsbury's, Aldi, Lidl, M&S, etc).
                     </div>
                     <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.border, marginTop: 8 }}>
-                      <strong style={{ color: T.muted }}>Scanning tips:</strong> Hold the barcode flat and centred in the viewfinder. Keep about 15cm distance. Good lighting helps — avoid shadows across the barcode. The scanner needs 3 consistent reads to confirm.
+                      Tap SCAN to open camera. Centre the barcode in the highlighted box. Works on Chrome, Safari, and all modern mobile browsers.
                     </div>
                   </div>
                 )}
