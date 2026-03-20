@@ -992,12 +992,13 @@ function CoachPanel({ plan, selectedDay, profile }) {
 
   const tot = dayTotals(plan[selectedDay] || {});
   const selectedDayLabel = dateStrToDayKey(selectedDay);
-  const calPct = Math.round((tot.calories / macroGoals.calories) * 100);
-  const protPct = Math.round((tot.protein / macroGoals.protein) * 100);
-  const carbsPct = Math.round((tot.carbs / macroGoals.carbs) * 100);
-  const fatPct = Math.round((tot.fat / macroGoals.fat) * 100);
+  const dayGoals = getGoalsForDate(selectedDay);
+  const calPct = dayGoals.calories > 0 ? Math.round((tot.calories / dayGoals.calories) * 100) : 0;
+  const protPct = dayGoals.protein > 0 ? Math.round((tot.protein / dayGoals.protein) * 100) : 0;
+  const carbsPct = dayGoals.carbs > 0 ? Math.round((tot.carbs / dayGoals.carbs) * 100) : 0;
+  const fatPct = dayGoals.fat > 0 ? Math.round((tot.fat / dayGoals.fat) * 100) : 0;
 
-  const systemPrompt = `You are ${profile.coachName || "a nutrition coach"}, a professional nutrition coach. You are in a 1-on-1 chat with ${profile.name}, a ${profile.sport} athlete (goal: ${profile.goal}). Live macro data for ${selectedDayLabel}: Calories ${tot.calories}/${macroGoals.calories} (${calPct}%), Protein ${tot.protein}/${macroGoals.protein}g (${protPct}%), Carbs ${tot.carbs}/${macroGoals.carbs}g (${carbsPct}%), Fat ${tot.fat}/${macroGoals.fat}g (${fatPct}%). Be warm, concise, and data-driven — like a real coach text. Reference their numbers when relevant.`;
+  const systemPrompt = `You are ${profile.coachName || "a nutrition coach"}, a professional nutrition coach. You are in a 1-on-1 chat with ${profile.name}, a ${profile.sport} athlete (goal: ${profile.goal}). Live macro data for ${selectedDayLabel}: Calories ${tot.calories}/${dayGoals.calories} (${calPct}%), Protein ${tot.protein}/${dayGoals.protein}g (${protPct}%), Carbs ${tot.carbs}/${dayGoals.carbs}g (${carbsPct}%), Fat ${tot.fat}/${dayGoals.fat}g (${fatPct}%). Be warm, concise, and data-driven — like a real coach text. Reference their numbers when relevant.`;
 
   useEffect(() => {
     if (messages.length === 0) {
@@ -1206,28 +1207,28 @@ function CoachPanel({ plan, selectedDay, profile }) {
           {
             label: "Calories",
             val: tot.calories,
-            goal: macroGoals.calories,
+            goal: dayGoals.calories,
             unit: "kcal",
             color: T.accent,
           },
           {
             label: "Protein",
             val: tot.protein,
-            goal: macroGoals.protein,
+            goal: dayGoals.protein,
             unit: "g",
             color: T.protein,
           },
           {
             label: "Carbs",
             val: tot.carbs,
-            goal: macroGoals.carbs,
+            goal: dayGoals.carbs,
             unit: "g",
             color: T.carbs,
           },
           {
             label: "Fat",
             val: tot.fat,
-            goal: macroGoals.fat,
+            goal: dayGoals.fat,
             unit: "g",
             color: T.fat,
           },
@@ -2668,28 +2669,28 @@ function MFPPanel({
             {
               label: "Calories",
               mfp: mfpData.calories,
-              goal: macroGoals.calories,
+              goal: getGoalsForDate(selectedDay).calories,
               unit: "kcal",
               color: T.accent,
             },
             {
               label: "Protein",
               mfp: mfpData.protein,
-              goal: macroGoals.protein,
+              goal: getGoalsForDate(selectedDay).protein,
               unit: "g",
               color: T.protein,
             },
             {
               label: "Carbs",
               mfp: mfpData.carbs,
-              goal: macroGoals.carbs,
+              goal: getGoalsForDate(selectedDay).carbs,
               unit: "g",
               color: T.carbs,
             },
             {
               label: "Fat",
               mfp: mfpData.fat,
-              goal: macroGoals.fat,
+              goal: getGoalsForDate(selectedDay).fat,
               unit: "g",
               color: T.fat,
             },
@@ -4510,12 +4511,17 @@ function Dashboard({
 
   const todayDate = getTodayISO();
   const todayData = dayTotals(plan[todayDate] || {});
-  const weekGoal = {
-    calories: macroGoals.calories * 7,
-    protein: macroGoals.protein * 7,
-    carbs: macroGoals.carbs * 7,
-    fat: macroGoals.fat * 7,
-  };
+  const todayGoals = getGoalsForDate(todayDate);
+  // Sum per-day goals for the week (not average * 7)
+  const weekGoal = wd.reduce((acc, { date }) => {
+    const dg = getGoalsForDate(date);
+    return {
+      calories: acc.calories + (dg.calories || 0),
+      protein: acc.protein + (dg.protein || 0),
+      carbs: acc.carbs + (dg.carbs || 0),
+      fat: acc.fat + (dg.fat || 0),
+    };
+  }, { calories: 0, protein: 0, carbs: 0, fat: 0 });
 
   const firstName = profile.name.split(" ")[0];
   const hour = new Date().getHours();
@@ -4526,7 +4532,7 @@ function Dashboard({
     {
       label: "CALORIES",
       today: todayData.calories,
-      goal: macroGoals.calories,
+      goal: todayGoals.calories,
       week: weekTotals.calories,
       weekGoal: weekGoal.calories,
       unit: "kcal",
@@ -4535,7 +4541,7 @@ function Dashboard({
     {
       label: "PROTEIN",
       today: todayData.protein,
-      goal: macroGoals.protein,
+      goal: todayGoals.protein,
       week: weekTotals.protein,
       weekGoal: weekGoal.protein,
       unit: "g",
@@ -4544,7 +4550,7 @@ function Dashboard({
     {
       label: "CARBS",
       today: todayData.carbs,
-      goal: macroGoals.carbs,
+      goal: todayGoals.carbs,
       week: weekTotals.carbs,
       weekGoal: weekGoal.carbs,
       unit: "g",
@@ -4553,7 +4559,7 @@ function Dashboard({
     {
       label: "FAT",
       today: todayData.fat,
-      goal: macroGoals.fat,
+      goal: todayGoals.fat,
       week: weekTotals.fat,
       weekGoal: weekGoal.fat,
       unit: "g",
@@ -5026,104 +5032,114 @@ function Dashboard({
             >
               WEEKLY CALORIE OVERVIEW
             </div>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "flex-end",
-                gap: 8,
-                height: 90,
-              }}
-            >
-              {wd.map(({ dayKey, date, isToday }) => {
+            {/* SVG Bar Chart with dotted target lines */}
+            {(() => {
+              const chartW = 500, chartH = 160;
+              const pad = { top: 16, right: 8, bottom: 40, left: 40 };
+              const innerW = chartW - pad.left - pad.right;
+              const innerH = chartH - pad.top - pad.bottom;
+              const barW = innerW / 7;
+              const barPad = barW * 0.2;
+
+              // Compute per-day data
+              const dayData = wd.map(({ dayKey, date, isToday }) => {
                 const cal = dayTotals(plan[date] || {}).calories;
-                const dayGoal = getGoalsForDate(date).calories || macroGoals.calories || 2000;
-                const pct = dayGoal > 0 ? cal / dayGoal : 0;
-                const h = Math.max(Math.min(pct * 100, 120), cal > 0 ? 8 : 4);
-                // Adherence color: green = within 10%, amber = within 20%, red = over 20% off, grey = no data
-                const adherenceColor = cal === 0 ? T.border
+                const goal = getGoalsForDate(date).calories || macroGoals.calories || 2000;
+                const pct = goal > 0 ? cal / goal : 0;
+                const color = cal === 0 ? T.border
                   : Math.abs(pct - 1) <= 0.10 ? T.coachGreen
                   : Math.abs(pct - 1) <= 0.20 ? T.accent
                   : T.danger;
-                return (
-                  <div
-                    key={date}
-                    style={{
-                      flex: 1,
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      gap: 5,
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontFamily: "JetBrains Mono",
-                        fontSize: 9,
-                        color: isToday ? T.text : T.muted,
-                        fontWeight: isToday ? 700 : 400,
-                      }}
-                    >
-                      {cal || ""}
-                    </div>
-                    <div style={{ width: "100%", position: "relative", height: "100%" }}>
-                      {/* Goal line */}
-                      <div style={{
-                        position: "absolute", bottom: "100%", left: 0, right: 0,
-                        height: 1, background: `${T.muted}33`,
-                      }} />
-                      {/* Bar */}
-                      <div
-                        style={{
-                          position: "absolute",
-                          bottom: 0,
-                          left: "10%",
-                          right: "10%",
-                          height: `${h}%`,
-                          background: isToday ? adherenceColor : adherenceColor + "bb",
-                          borderRadius: "4px 4px 0 0",
-                          transition: "height 0.5s, background 0.3s",
-                          minHeight: 4,
-                          border: isToday ? `1px solid ${adherenceColor}` : "none",
-                        }}
-                      />
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
-                      <div
-                        style={{
-                          fontFamily: "Bebas Neue",
-                          fontSize: 11,
-                          color: isToday ? T.text : T.muted,
-                          letterSpacing: 1,
-                        }}
-                      >
-                        {dayKey}
-                      </div>
-                      <div style={{ fontFamily: "JetBrains Mono", fontSize: 7, color: T.border }}>
-                        {dayGoal}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div
-              style={{
-                display: "flex",
-                gap: 12,
-                marginTop: 8,
-                justifyContent: "center",
-              }}
-            >
+                return { dayKey, date, isToday, cal, goal, pct, color };
+              });
+
+              // Y-axis scale: max of all cals and goals + 15% headroom
+              const maxVal = Math.max(...dayData.map(d => Math.max(d.cal, d.goal)), 1) * 1.15;
+              const toY = (v) => pad.top + innerH - (v / maxVal) * innerH;
+
+              // Y-axis ticks
+              const yStep = Math.ceil(maxVal / 4 / 100) * 100;
+              const yTicks = [];
+              for (let v = 0; v <= maxVal; v += yStep) yTicks.push(v);
+
+              return (
+                <svg viewBox={`0 0 ${chartW} ${chartH}`} style={{ width: "100%", height: "auto", overflow: "visible", marginBottom: 8 }}>
+                  {/* Y-axis grid + labels */}
+                  {yTicks.map((v, i) => (
+                    <g key={i}>
+                      <line x1={pad.left} x2={chartW - pad.right} y1={toY(v)} y2={toY(v)} stroke={T.border} strokeWidth="0.4" strokeDasharray="2 4" />
+                      <text x={pad.left - 4} y={toY(v) + 3} fill={T.muted} fontSize="8" fontFamily="JetBrains Mono" textAnchor="end">{v}</text>
+                    </g>
+                  ))}
+
+                  {/* Bars + target lines */}
+                  {dayData.map((d, i) => {
+                    const x = pad.left + i * barW;
+                    const barX = x + barPad;
+                    const bw = barW - barPad * 2;
+                    const barH = Math.max((d.cal / maxVal) * innerH, d.cal > 0 ? 3 : 1);
+                    const barY = pad.top + innerH - barH;
+                    const goalY = toY(d.goal);
+
+                    return (
+                      <g key={d.date}>
+                        {/* Bar */}
+                        <rect x={barX} y={barY} width={bw} height={barH}
+                          rx="3" fill={d.isToday ? d.color : d.color + "cc"}
+                          stroke={d.isToday ? d.color : "none"} strokeWidth={d.isToday ? 1.5 : 0} />
+
+                        {/* Dotted target line */}
+                        <line x1={x + 2} x2={x + barW - 2} y1={goalY} y2={goalY}
+                          stroke={T.text} strokeWidth="1.2" strokeDasharray="3 2" opacity="0.5" />
+
+                        {/* Calorie value above bar */}
+                        {d.cal > 0 && (
+                          <text x={barX + bw / 2} y={barY - 4} fill={d.isToday ? T.text : T.muted}
+                            fontSize="8" fontFamily="JetBrains Mono" textAnchor="middle" fontWeight={d.isToday ? 700 : 400}>
+                            {d.cal}
+                          </text>
+                        )}
+
+                        {/* Day label */}
+                        <text x={x + barW / 2} y={chartH - pad.bottom + 14} fill={d.isToday ? T.text : T.muted}
+                          fontSize="10" fontFamily="Bebas Neue" textAnchor="middle" letterSpacing="1">
+                          {d.dayKey}
+                        </text>
+
+                        {/* Target value below day */}
+                        <text x={x + barW / 2} y={chartH - pad.bottom + 24} fill={T.border}
+                          fontSize="7" fontFamily="JetBrains Mono" textAnchor="middle">
+                          {d.goal}
+                        </text>
+
+                        {/* Today indicator dot */}
+                        {d.isToday && (
+                          <circle cx={x + barW / 2} cy={chartH - pad.bottom + 32} r="2" fill={T.accent} />
+                        )}
+                      </g>
+                    );
+                  })}
+                </svg>
+              );
+            })()}
+            {/* Legend */}
+            <div style={{ display: "flex", gap: 14, justifyContent: "center", marginBottom: 4 }}>
               {[
-                { color: T.coachGreen, label: "On target" },
-                { color: T.accent, label: "Close" },
+                { color: T.coachGreen, label: "On target (±10%)" },
+                { color: T.accent, label: "Close (±20%)" },
                 { color: T.danger, label: "Off target" },
+                { color: T.text, label: "- - Target", dashed: true },
               ].map(l => (
                 <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: 2, background: l.color }} />
-                  <span style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted }}>{l.label}</span>
+                  {l.dashed ? (
+                    <svg width="14" height="8"><line x1="0" x2="14" y1="4" y2="4" stroke={l.color} strokeWidth="1.2" strokeDasharray="3 2" opacity="0.5" /></svg>
+                  ) : (
+                    <div style={{ width: 8, height: 8, borderRadius: 2, background: l.color }} />
+                  )}
+                  <span style={{ fontFamily: "DM Sans", fontSize: 8, color: T.muted }}>{l.label}</span>
                 </div>
               ))}
+            </div>
             </div>
             <div
               style={{
@@ -5702,7 +5718,7 @@ function WeeklyPlanner({
       <div style={{ display: "flex", gap: 8 }}>
         {getCurrentWeekDates().map(({ dayKey, date }) => {
           const tot = dayTotals(plan[date] || {});
-          const pct = Math.min(tot.calories / macroGoals.calories, 1);
+          const pct = Math.min(tot.calories / (getGoalsForDate(date).calories || 1), 1);
           return (
             <button
               key={date}
@@ -7246,12 +7262,13 @@ function ShoppingList({ items, onToggle, onRemove, onClear, plan, addToShoppingL
 function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
   const tot = dayTotals(plan[selectedDay] || {});
   const hasMfp = mfpConnected && mfpData;
+  const dg = getGoalsForDate(selectedDay);
 
   const macros = [
     {
       key: "calories",
       label: "Calories",
-      goal: macroGoals.calories,
+      goal: dg.calories,
       plan: tot.calories,
       mfp: hasMfp ? mfpData.calories : null,
       color: T.accent,
@@ -7260,7 +7277,7 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
     {
       key: "protein",
       label: "Protein",
-      goal: macroGoals.protein,
+      goal: dg.protein,
       plan: tot.protein,
       mfp: hasMfp ? mfpData.protein : null,
       color: T.protein,
@@ -7269,7 +7286,7 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
     {
       key: "carbs",
       label: "Carbs",
-      goal: macroGoals.carbs,
+      goal: dg.carbs,
       plan: tot.carbs,
       mfp: hasMfp ? mfpData.carbs : null,
       color: T.carbs,
@@ -7278,7 +7295,7 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
     {
       key: "fat",
       label: "Fat",
-      goal: macroGoals.fat,
+      goal: dg.fat,
       plan: tot.fat,
       mfp: hasMfp ? mfpData.fat : null,
       color: T.fat,
@@ -7769,10 +7786,10 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
             const planCal = dayTotals(plan[date] || {}).calories;
             const mfpCal =
               hasMfp && date === selectedDay ? mfpData.calories : null;
-            const maxCal = Math.max(planCal, mfpCal || 0, 1);
-            const hPlan = Math.max((planCal / macroGoals.calories) * 100, 4);
+            const dayCalGoal = getGoalsForDate(date).calories || 1;
+            const hPlan = Math.max((planCal / dayCalGoal) * 100, 4);
             const hMfp = mfpCal
-              ? Math.max((mfpCal / macroGoals.calories) * 100, 4)
+              ? Math.max((mfpCal / dayCalGoal) * 100, 4)
               : 0;
             const isActive = date === selectedDay;
             return (
@@ -8103,7 +8120,8 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
       const firstName = profile.name.split(" ")[0];
       let greeting = "";
       if (id === "coach-sarah") {
-        const calPct = macroGoals.calories > 0 ? Math.round((tot.calories / macroGoals.calories) * 100) : 0;
+        const dGoal = getGoalsForDate(selectedDay);
+        const calPct = dGoal.calories > 0 ? Math.round((tot.calories / dGoal.calories) * 100) : 0;
         greeting = `Hey ${firstName}! I can see your macros for ${selectedDayLabel} — you're at ${calPct}% of your calorie goal. How are you feeling today?`;
       } else if (id === "coach-james") {
         greeting = `Hey ${firstName}! Ready to talk training? What's on the programme today?`;
@@ -9304,21 +9322,23 @@ export default function App() {
             paddingLeft: 16,
           }}
         >
-          {[
+          {(() => {
+            const hdrGoals = getGoalsForDate(selectedDay);
+            return [
             {
               label: "CAL",
-              val: macroGoals.calories,
+              val: hdrGoals.calories,
               unit: "kcal",
               color: T.accent,
             },
             {
               label: "PRO",
-              val: macroGoals.protein,
+              val: hdrGoals.protein,
               unit: "g",
               color: T.protein,
             },
-            { label: "CARB", val: macroGoals.carbs, unit: "g", color: T.carbs },
-            { label: "FAT", val: macroGoals.fat, unit: "g", color: T.fat },
+            { label: "CARB", val: hdrGoals.carbs, unit: "g", color: T.carbs },
+            { label: "FAT", val: hdrGoals.fat, unit: "g", color: T.fat },
           ].map((g) => (
             <div key={g.label} style={{ textAlign: "center" }}>
               <div
@@ -9343,7 +9363,8 @@ export default function App() {
                 {g.label}
               </div>
             </div>
-          ))}
+          ));
+          })()}
         </div>
       </div>
 
