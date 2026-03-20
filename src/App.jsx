@@ -5140,7 +5140,6 @@ function Dashboard({
                 </div>
               ))}
             </div>
-            </div>
             <div
               style={{
                 display: "flex",
