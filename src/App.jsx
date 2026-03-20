@@ -7786,6 +7786,86 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
   );
 }
 
+// ── Check-In Notes (athlete view — read only) ────────────────────────────────
+function CheckInNotesView({ profileId }) {
+  const [notes, setNotes] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!profileId) return;
+    (async () => {
+      setLoading(true);
+      try {
+        const rows = await apiFetch(`/checkins/${profileId}`);
+        if (Array.isArray(rows)) setNotes(rows);
+      } catch {}
+      setLoading(false);
+    })();
+  }, [profileId]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div>
+        <div style={{ fontFamily: "Bebas Neue", fontSize: 28, letterSpacing: 2, color: T.text }}>CHECK-IN NOTES</div>
+        <div style={{ fontFamily: "DM Sans", fontSize: 13, color: T.muted, marginTop: 4 }}>
+          Notes from your coaching check-ins · Updated by your coach after each review
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: "center", padding: 40, color: T.muted, fontFamily: "DM Sans", fontSize: 12 }}>Loading…</div>
+      ) : notes.length === 0 ? (
+        <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 30, textAlign: "center" }}>
+          <div style={{ fontSize: 36, marginBottom: 10 }}>📋</div>
+          <div style={{ fontFamily: "DM Sans", fontSize: 14, color: T.text, fontWeight: 600 }}>No check-in notes yet</div>
+          <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, marginTop: 6 }}>
+            Your coach will add notes after each check-in session
+          </div>
+        </div>
+      ) : (
+        notes.map(note => (
+          <div key={note.id} style={{
+            background: T.card, border: `1px solid ${T.border}`,
+            borderRadius: 16, padding: 20, transition: "all 0.15s",
+          }}>
+            {/* Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{
+                  background: `${T.coachGreen}22`, border: `1px solid ${T.coachGreen}44`,
+                  borderRadius: 8, padding: "5px 12px",
+                  fontFamily: "JetBrains Mono", fontSize: 12, color: T.coachGreen, fontWeight: 600,
+                }}>
+                  {note.date ? new Date(note.date + "T00:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" }) : "—"}
+                </div>
+                <span style={{ fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 1, color: T.text }}>{note.title}</span>
+              </div>
+            </div>
+
+            {/* Notes content */}
+            <div style={{
+              fontFamily: "DM Sans", fontSize: 13, color: T.text, lineHeight: 1.7,
+              whiteSpace: "pre-wrap", padding: "12px 16px",
+              background: T.surface, borderRadius: 10, border: `1px solid ${T.border}`,
+            }}>
+              {note.notes}
+            </div>
+
+            {/* Meta */}
+            <div style={{ display: "flex", gap: 12, marginTop: 10, fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>
+              {note.createdByName && <span>Coach: {note.createdByName}</span>}
+              {note.created_at && <span>· {new Date(note.created_at).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>}
+              {note.updatedByName && note.updated_at && (
+                <span style={{ color: T.accent }}>· Edited by {note.updatedByName} on {new Date(note.updated_at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+              )}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
 // ── Inbox Page (full-page inbox with multi-coach + company threads) ───────────
 /* ─────────────────────────────────────────────────────────────────────────────
    Real Coach Messages — loads from backend, polls every 10s
@@ -8773,6 +8853,7 @@ export default function App() {
     { id: "dashboard", label: "DASHBOARD" },
     { id: "meals", label: "MEAL PLAN" },
     { id: "shopping", label: "🛒 SHOPPING" },
+    { id: "checkin-notes", label: "📋 CHECK-INS" },
     { id: "inbox", label: "📥 INBOX", highlight: true },
   ];
 
@@ -9021,6 +9102,9 @@ export default function App() {
             plan={plan}
             addToShoppingList={addToShoppingList}
           />
+        )}
+        {tab === "checkin-notes" && (
+          <CheckInNotesView profileId={profile?.id} />
         )}
         {tab === "inbox" && (
           <div>
