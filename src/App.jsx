@@ -412,13 +412,8 @@ function LoginScreen({ onLoggedIn }) {
 }
 
 // ── Profile Dropdown ──────────────────────────────────────────────────────────
-function ProfileMenu({ profile, onLogout, onNavigate }) {
+function ProfileMenu({ profile, onLogout, onNavigate, onChangePassword }) {
   const [open, setOpen] = useState(false);
-  const [showChangePw, setShowChangePw] = useState(false);
-  const [pwForm, setPwForm] = useState({ current: "", newPw: "", confirm: "" });
-  const [pwError, setPwError] = useState("");
-  const [pwSaving, setPwSaving] = useState(false);
-  const [pwSuccess, setPwSuccess] = useState(false);
   const ref = useRef(null);
 
   useEffect(() => {
@@ -428,25 +423,6 @@ function ProfileMenu({ profile, onLogout, onNavigate }) {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
-
-  const handleChangePw = async () => {
-    setPwError("");
-    if (!pwForm.current) { setPwError("Enter your current password"); return; }
-    if (pwForm.newPw.length < 6) { setPwError("New password must be at least 6 characters"); return; }
-    if (pwForm.newPw !== pwForm.confirm) { setPwError("Passwords do not match"); return; }
-    setPwSaving(true);
-    try {
-      await apiFetch("/auth/change-password", {
-        method: "PUT",
-        body: JSON.stringify({ currentPassword: pwForm.current, newPassword: pwForm.newPw }),
-      });
-      setPwSuccess(true);
-      setTimeout(() => { setShowChangePw(false); setPwSuccess(false); setPwForm({ current: "", newPw: "", confirm: "" }); }, 1500);
-    } catch (e) {
-      setPwError(e.message || "Failed to change password");
-    }
-    setPwSaving(false);
-  };
 
   const items = [
     {
@@ -466,7 +442,7 @@ function ProfileMenu({ profile, onLogout, onNavigate }) {
       },
     },
     { icon: "🔔", label: "Notifications", action: () => setOpen(false) },
-    { icon: "🔒", label: "Change Password", action: () => { setShowChangePw(true); setOpen(false); setPwForm({ current: "", newPw: "", confirm: "" }); setPwError(""); setPwSuccess(false); } },
+    { icon: "🔒", label: "Change Password", action: () => { onChangePassword(); setOpen(false); } },
   ];
 
   return (
@@ -707,60 +683,6 @@ function ProfileMenu({ profile, onLogout, onNavigate }) {
                 Sign Out
               </span>
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* Change Password Modal */}
-      {showChangePw && (
-        <div style={{ position: "fixed", inset: 0, background: "#000000dd", zIndex: 600, display: "flex", alignItems: "center", justifyContent: "center" }}
-          onClick={(e) => { if (e.target === e.currentTarget) setShowChangePw(false); }}>
-          <div style={{ background: T.card, border: `1px solid ${T.accent}55`, borderRadius: 20, padding: 28, width: "100%", maxWidth: 400 }}>
-            <div style={{ fontFamily: "Bebas Neue", fontSize: 20, letterSpacing: 2, color: T.text, marginBottom: 20 }}>
-              CHANGE PASSWORD
-            </div>
-
-            {pwSuccess ? (
-              <div style={{ textAlign: "center", padding: "20px 0" }}>
-                <div style={{ fontSize: 36, marginBottom: 10 }}>✅</div>
-                <div style={{ fontFamily: "DM Sans", fontSize: 14, color: T.coachGreen, fontWeight: 600 }}>Password changed successfully</div>
-              </div>
-            ) : (
-              <>
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ fontSize: 10, color: T.muted, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 5 }}>Current Password</label>
-                  <input type="password" value={pwForm.current} onChange={e => setPwForm(p => ({...p, current: e.target.value}))}
-                    style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 13, outline: "none" }} />
-                </div>
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ fontSize: 10, color: T.muted, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 5 }}>New Password</label>
-                  <input type="password" value={pwForm.newPw} onChange={e => setPwForm(p => ({...p, newPw: e.target.value}))} placeholder="At least 6 characters"
-                    style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 13, outline: "none" }} />
-                </div>
-                <div style={{ marginBottom: 20 }}>
-                  <label style={{ fontSize: 10, color: T.muted, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 5 }}>Confirm New Password</label>
-                  <input type="password" value={pwForm.confirm} onChange={e => setPwForm(p => ({...p, confirm: e.target.value}))}
-                    onKeyDown={e => e.key === "Enter" && handleChangePw()}
-                    style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 13, outline: "none" }} />
-                </div>
-                {pwForm.newPw && pwForm.confirm && pwForm.newPw !== pwForm.confirm && (
-                  <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.danger, marginBottom: 12 }}>Passwords do not match</div>
-                )}
-                {pwError && (
-                  <div style={{ background: `${T.danger}18`, border: `1px solid ${T.danger}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontFamily: "DM Sans", fontSize: 12, color: T.danger }}>{pwError}</div>
-                )}
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => setShowChangePw(false)} style={{ flex: 1, background: "none", border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px", fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1, color: T.muted, cursor: "pointer" }}>CANCEL</button>
-                  <button onClick={handleChangePw} disabled={pwSaving || pwForm.newPw.length < 6 || pwForm.newPw !== pwForm.confirm || !pwForm.current}
-                    style={{
-                      flex: 2, background: pwForm.current && pwForm.newPw.length >= 6 && pwForm.newPw === pwForm.confirm ? T.accent : T.border,
-                      color: pwForm.current && pwForm.newPw.length >= 6 && pwForm.newPw === pwForm.confirm ? T.bg : T.muted,
-                      border: "none", borderRadius: 10, padding: "10px", fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1.5,
-                      cursor: pwForm.current && pwForm.newPw.length >= 6 && pwForm.newPw === pwForm.confirm && !pwSaving ? "pointer" : "default",
-                    }}>{pwSaving ? "SAVING..." : "UPDATE PASSWORD"}</button>
-                </div>
-              </>
-            )}
           </div>
         </div>
       )}
@@ -8575,6 +8497,39 @@ export default function App() {
   const [shoppingItems, setShoppingItems] = useState([]);
   const shoppingTimerRef = useRef(null);
 
+  // ── Change Password State ──
+  const [showChangePw, setShowChangePw] = useState(false);
+  const [pwForm, setPwForm] = useState({ current: "", newPw: "", confirm: "" });
+  const [pwError, setPwError] = useState("");
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwSuccess, setPwSuccess] = useState(false);
+
+  const openChangePassword = () => {
+    setPwForm({ current: "", newPw: "", confirm: "" });
+    setPwError("");
+    setPwSuccess(false);
+    setShowChangePw(true);
+  };
+
+  const handleChangePw = async () => {
+    setPwError("");
+    if (!pwForm.current) { setPwError("Enter your current password"); return; }
+    if (pwForm.newPw.length < 6) { setPwError("New password must be at least 6 characters"); return; }
+    if (pwForm.newPw !== pwForm.confirm) { setPwError("Passwords do not match"); return; }
+    setPwSaving(true);
+    try {
+      await apiFetch("/auth/change-password", {
+        method: "PUT",
+        body: JSON.stringify({ currentPassword: pwForm.current, newPassword: pwForm.newPw }),
+      });
+      setPwSuccess(true);
+      setTimeout(() => { setShowChangePw(false); }, 1500);
+    } catch (e) {
+      setPwError(e.message || "Failed to change password");
+    }
+    setPwSaving(false);
+  };
+
   // Load shopping list from backend
   useEffect(() => {
     if (!profile?.id) return;
@@ -9178,6 +9133,7 @@ export default function App() {
               setMoodLog({});
             }}
             onNavigate={setTab}
+            onChangePassword={openChangePassword}
           />
         </div>
       </div>
@@ -9357,6 +9313,91 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {/* ── Change Password Modal (rendered at App root for clean z-index) ── */}
+      {showChangePw && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "#000000dd", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowChangePw(false); }}
+        >
+          <div style={{ background: T.card, border: `1px solid ${T.accent}55`, borderRadius: 20, padding: 28, width: "90%", maxWidth: 400 }}
+            onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontFamily: "Bebas Neue", fontSize: 20, letterSpacing: 2, color: T.text, marginBottom: 20 }}>
+              CHANGE PASSWORD
+            </div>
+
+            {pwSuccess ? (
+              <div style={{ textAlign: "center", padding: "20px 0" }}>
+                <div style={{ fontSize: 36, marginBottom: 10 }}>✅</div>
+                <div style={{ fontFamily: "DM Sans", fontSize: 14, color: T.coachGreen, fontWeight: 600 }}>Password updated successfully</div>
+              </div>
+            ) : (
+              <>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 5 }}>Current Password</label>
+                  <input
+                    type="password"
+                    autoFocus
+                    value={pwForm.current}
+                    onChange={(e) => setPwForm(p => ({ ...p, current: e.target.value }))}
+                    style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 13, outline: "none", boxSizing: "border-box" }}
+                  />
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 5 }}>New Password</label>
+                  <input
+                    type="password"
+                    value={pwForm.newPw}
+                    onChange={(e) => setPwForm(p => ({ ...p, newPw: e.target.value }))}
+                    placeholder="At least 6 characters"
+                    style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 13, outline: "none", boxSizing: "border-box" }}
+                  />
+                </div>
+                <div style={{ marginBottom: 20 }}>
+                  <label style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 5 }}>Confirm New Password</label>
+                  <input
+                    type="password"
+                    value={pwForm.confirm}
+                    onChange={(e) => setPwForm(p => ({ ...p, confirm: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === "Enter") handleChangePw(); }}
+                    style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 13, outline: "none", boxSizing: "border-box" }}
+                  />
+                </div>
+
+                {pwForm.newPw.length > 0 && pwForm.confirm.length > 0 && pwForm.newPw !== pwForm.confirm && (
+                  <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.danger, marginBottom: 12 }}>✕ Passwords do not match</div>
+                )}
+                {pwForm.newPw.length > 0 && pwForm.confirm.length > 0 && pwForm.newPw === pwForm.confirm && (
+                  <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.coachGreen, marginBottom: 12 }}>✓ Passwords match</div>
+                )}
+
+                {pwError && (
+                  <div style={{ background: `${T.danger}18`, border: `1px solid ${T.danger}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontFamily: "DM Sans", fontSize: 12, color: T.danger }}>{pwError}</div>
+                )}
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={() => setShowChangePw(false)}
+                    style={{ flex: 1, background: "none", border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px", fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1, color: T.muted, cursor: "pointer" }}
+                  >CANCEL</button>
+                  <button
+                    onClick={handleChangePw}
+                    disabled={pwSaving || !pwForm.current || pwForm.newPw.length < 6 || pwForm.newPw !== pwForm.confirm}
+                    style={{
+                      flex: 2,
+                      background: pwForm.current && pwForm.newPw.length >= 6 && pwForm.newPw === pwForm.confirm ? T.accent : T.border,
+                      color: pwForm.current && pwForm.newPw.length >= 6 && pwForm.newPw === pwForm.confirm ? T.bg : T.muted,
+                      border: "none", borderRadius: 10, padding: "12px",
+                      fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1.5,
+                      cursor: pwForm.current && pwForm.newPw.length >= 6 && pwForm.newPw === pwForm.confirm && !pwSaving ? "pointer" : "default",
+                    }}
+                  >{pwSaving ? "SAVING..." : "UPDATE PASSWORD"}</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
