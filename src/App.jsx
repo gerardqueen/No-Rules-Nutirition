@@ -67,6 +67,11 @@ const ACCOUNTS = [];
 const DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
 const MEALS = ["Breakfast", "Lunch", "Dinner", "Snack"];
 let macroGoals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
+let macroGoalsByDay = {}; // { MON: {calories, protein, carbs, fat}, ... }
+function getGoalsForDate(dateStr) {
+  const dk = dateStrToDayKey(dateStr);
+  return macroGoalsByDay[dk] || macroGoals;
+}
 
 // Convert day key (MON/TUE/…) to YYYY-MM-DD for the current week
 function dayKeyToDate(dayKey) {
@@ -4316,25 +4321,22 @@ function WeightTracker({ onWeightSaved, profileId }) {
     setTimeout(() => setSaved(false), 2000);
   };
 
-  // Build last 7 calendar days
-  const last7 = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(); d.setDate(d.getDate() - i);
-    const ds = dateToISO(d);
-    const dow = d.getDay();
-    last7.push({ date: ds, dayLabel: DAYS[dow === 0 ? 6 : dow - 1], entry: weightLog[ds] || null, isToday: ds === todayDate });
-  }
-  const hasData = last7.some(e => e.entry);
-  const weights = last7.filter(e => e.entry).map(e => e.entry.weight);
-  const minW = hasData ? Math.min(...weights) - 0.5 : 0;
-  const maxW = hasData ? Math.max(...weights) + 0.5 : 1;
-  const rangeW = maxW - minW || 1;
-  const toY = (w) => 100 - ((w - minW) / rangeW) * 100;
-
   const todayEntry = weightLog[todayDate];
-  const allEntries = Object.values(weightLog).filter(Boolean);
+  const allEntries = Object.entries(weightLog)
+    .filter(([_, v]) => v)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([d, v]) => ({ date: d, weight: v.weight }));
   const avgWeight = allEntries.length > 0 ? (allEntries.reduce((s, e) => s + e.weight, 0) / allEntries.length).toFixed(1) : null;
-  const trend = weights.length >= 2 ? (weights[weights.length - 1] - weights[0]).toFixed(1) : null;
+  // Trend: compare last entry to 7 days ago (or earliest if less data)
+  const trend = (() => {
+    if (allEntries.length < 2) return null;
+    const latest = allEntries[allEntries.length - 1].weight;
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 7);
+    const cutoffStr = dateToISO(cutoff);
+    const weekAgo = allEntries.filter(e => e.date <= cutoffStr);
+    const compare = weekAgo.length > 0 ? weekAgo[weekAgo.length - 1].weight : allEntries[0].weight;
+    return (latest - compare).toFixed(1);
+  })();
 
   return (
     <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 20, padding: 22 }}>
@@ -4354,41 +4356,89 @@ function WeightTracker({ onWeightSaved, profileId }) {
         </div>
       </div>
 
-      {/* Chart */}
-      {hasData && (
-        <div style={{ position: "relative", height: 120, marginBottom: 16 }}>
-          <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" style={{ overflow: "visible" }}>
-            {/* Grid lines */}
-            {[0, 25, 50, 75, 100].map((y) => (
-              <line key={y} x1="0" x2="100" y1={y} y2={y} stroke={T.border} strokeWidth="0.3" />
-            ))}
-            {/* Line */}
-            {(() => {
-              const pts = last7.filter(e => e.entry).map((e, i, arr) => {
-                const idx = last7.indexOf(e);
-                const x = (idx / (last7.length - 1)) * 100;
-                return `${x},${toY(e.entry.weight)}`;
-              });
-              return pts.length >= 2 ? <polyline points={pts.join(" ")} fill="none" stroke={T.accent} strokeWidth="1.5" strokeLinejoin="round" /> : null;
-            })()}
-            {/* Dots */}
-            {last7.map((e, idx) => {
-              if (!e.entry) return null;
-              const x = (idx / (last7.length - 1)) * 100;
-              const y = toY(e.entry.weight);
-              return <circle key={idx} cx={x} cy={y} r="2" fill={T.accent} stroke={T.card} strokeWidth="1" />;
-            })}
-          </svg>
-          {/* X labels */}
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-            {last7.map((e) => (
-              <span key={e.date} style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: e.isToday ? T.accent : T.muted, flex: 1, textAlign: "center" }}>
-                {e.dayLabel}
-              </span>
-            ))}
+      {/* Chart — 30 day line graph */}
+      {(() => {
+        // Build last 30 days
+        const days30 = [];
+        for (let i = 29; i >= 0; i--) {
+          const d = new Date(); d.setDate(d.getDate() - i);
+          const ds = dateToISO(d);
+          days30.push({ date: ds, entry: weightLog[ds] || null });
+        }
+        const dataPoints = days30.filter(e => e.entry).map(e => ({ date: e.date, w: e.entry.weight }));
+        if (dataPoints.length < 2) return null;
+
+        const wMin = Math.min(...dataPoints.map(p => p.w)) - 0.5;
+        const wMax = Math.max(...dataPoints.map(p => p.w)) + 0.5;
+        const wRange = wMax - wMin || 1;
+        const chartW = 600;
+        const chartH = 160;
+        const pad = { top: 20, right: 10, bottom: 30, left: 40 };
+        const innerW = chartW - pad.left - pad.right;
+        const innerH = chartH - pad.top - pad.bottom;
+
+        const toX = (i) => pad.left + (i / (dataPoints.length - 1)) * innerW;
+        const toY = (w) => pad.top + (1 - (w - wMin) / wRange) * innerH;
+
+        const pathD = dataPoints.map((p, i) => `${i === 0 ? "M" : "L"}${toX(i).toFixed(1)},${toY(p.w).toFixed(1)}`).join(" ");
+        // Gradient fill
+        const areaD = pathD + ` L${toX(dataPoints.length - 1).toFixed(1)},${chartH - pad.bottom} L${pad.left},${chartH - pad.bottom} Z`;
+
+        // Y-axis labels (4 ticks)
+        const yTicks = [0, 0.25, 0.5, 0.75, 1].map(f => wMin + f * wRange);
+
+        // X-axis labels (show ~5 dates)
+        const step = Math.max(1, Math.floor(dataPoints.length / 5));
+        const xLabels = dataPoints.filter((_, i) => i % step === 0 || i === dataPoints.length - 1);
+
+        return (
+          <div style={{ marginBottom: 16 }}>
+            <svg width="100%" viewBox={`0 0 ${chartW} ${chartH}`} style={{ overflow: "visible" }}>
+              <defs>
+                <linearGradient id="wg" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stopColor={T.accent} stopOpacity="0.3" />
+                  <stop offset="100%" stopColor={T.accent} stopOpacity="0.02" />
+                </linearGradient>
+              </defs>
+              {/* Grid lines */}
+              {yTicks.map((v, i) => (
+                <g key={i}>
+                  <line x1={pad.left} x2={chartW - pad.right} y1={toY(v)} y2={toY(v)} stroke={T.border} strokeWidth="0.5" strokeDasharray="4 3" />
+                  <text x={pad.left - 4} y={toY(v) + 3} fill={T.muted} fontSize="9" fontFamily="JetBrains Mono" textAnchor="end">
+                    {toDisplay(Number(v.toFixed(1)))}
+                  </text>
+                </g>
+              ))}
+              {/* Fill area */}
+              <path d={areaD} fill="url(#wg)" />
+              {/* Line */}
+              <path d={pathD} fill="none" stroke={T.accent} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+              {/* Data points */}
+              {dataPoints.map((p, i) => (
+                <g key={i}>
+                  <circle cx={toX(i)} cy={toY(p.w)} r="4" fill={T.card} stroke={T.accent} strokeWidth="2" />
+                  {/* Show weight label on first, last, and every 5th point */}
+                  {(i === 0 || i === dataPoints.length - 1 || i % 5 === 0) && (
+                    <text x={toX(i)} y={toY(p.w) - 8} fill={T.text} fontSize="8" fontFamily="JetBrains Mono" textAnchor="middle">
+                      {toDisplay(p.w)}
+                    </text>
+                  )}
+                </g>
+              ))}
+              {/* X labels */}
+              {xLabels.map((p) => {
+                const i = dataPoints.indexOf(p);
+                const d = new Date(p.date + "T00:00:00");
+                return (
+                  <text key={p.date} x={toX(i)} y={chartH - 6} fill={T.muted} fontSize="8" fontFamily="DM Sans" textAnchor="middle">
+                    {d.getDate()}/{d.getMonth() + 1}
+                  </text>
+                );
+              })}
+            </svg>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Input */}
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
@@ -4986,7 +5036,14 @@ function Dashboard({
             >
               {wd.map(({ dayKey, date, isToday }) => {
                 const cal = dayTotals(plan[date] || {}).calories;
-                const h = Math.max((cal / macroGoals.calories) * 100, 4);
+                const dayGoal = getGoalsForDate(date).calories || macroGoals.calories || 2000;
+                const pct = dayGoal > 0 ? cal / dayGoal : 0;
+                const h = Math.max(Math.min(pct * 100, 120), cal > 0 ? 8 : 4);
+                // Adherence color: green = within 10%, amber = within 20%, red = over 20% off, grey = no data
+                const adherenceColor = cal === 0 ? T.border
+                  : Math.abs(pct - 1) <= 0.10 ? T.coachGreen
+                  : Math.abs(pct - 1) <= 0.20 ? T.accent
+                  : T.danger;
                 return (
                   <div
                     key={date}
@@ -5002,34 +5059,71 @@ function Dashboard({
                       style={{
                         fontFamily: "JetBrains Mono",
                         fontSize: 9,
-                        color: isToday ? T.accent : T.muted,
+                        color: isToday ? T.text : T.muted,
+                        fontWeight: isToday ? 700 : 400,
                       }}
                     >
                       {cal || ""}
                     </div>
-                    <div
-                      style={{
-                        width: "100%",
-                        height: `${h}%`,
-                        background: isToday ? T.accent : `${T.accent}33`,
-                        borderRadius: "4px 4px 0 0",
-                        transition: "height 0.5s",
-                        minHeight: 4,
-                      }}
-                    />
-                    <div
-                      style={{
-                        fontFamily: "Bebas Neue",
-                        fontSize: 11,
-                        color: isToday ? T.accent : T.muted,
-                        letterSpacing: 1,
-                      }}
-                    >
-                      {dayKey}
+                    <div style={{ width: "100%", position: "relative", height: "100%" }}>
+                      {/* Goal line */}
+                      <div style={{
+                        position: "absolute", bottom: "100%", left: 0, right: 0,
+                        height: 1, background: `${T.muted}33`,
+                      }} />
+                      {/* Bar */}
+                      <div
+                        style={{
+                          position: "absolute",
+                          bottom: 0,
+                          left: "10%",
+                          right: "10%",
+                          height: `${h}%`,
+                          background: isToday ? adherenceColor : adherenceColor + "bb",
+                          borderRadius: "4px 4px 0 0",
+                          transition: "height 0.5s, background 0.3s",
+                          minHeight: 4,
+                          border: isToday ? `1px solid ${adherenceColor}` : "none",
+                        }}
+                      />
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
+                      <div
+                        style={{
+                          fontFamily: "Bebas Neue",
+                          fontSize: 11,
+                          color: isToday ? T.text : T.muted,
+                          letterSpacing: 1,
+                        }}
+                      >
+                        {dayKey}
+                      </div>
+                      <div style={{ fontFamily: "JetBrains Mono", fontSize: 7, color: T.border }}>
+                        {dayGoal}
+                      </div>
                     </div>
                   </div>
                 );
               })}
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 12,
+                marginTop: 8,
+                justifyContent: "center",
+              }}
+            >
+              {[
+                { color: T.coachGreen, label: "On target" },
+                { color: T.accent, label: "Close" },
+                { color: T.danger, label: "Off target" },
+              ].map(l => (
+                <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: 2, background: l.color }} />
+                  <span style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted }}>{l.label}</span>
+                </div>
+              ))}
             </div>
             <div
               style={{
@@ -5043,7 +5137,7 @@ function Dashboard({
               {[
                 {
                   label: "Weekly calories",
-                  val: `${weekTotals.calories.toLocaleString()} / ${weekGoal.calories.toLocaleString()} kcal`,
+                  val: `${weekTotals.calories.toLocaleString()} kcal`,
                   color: T.accent,
                 },
                 {
@@ -8442,6 +8536,7 @@ export default function App() {
   const [selectedDay, setSelectedDay] = useState(() => getTodayISO());
   const weekDates = getCurrentWeekDates(); // [{dayKey, date, isToday}, ...]
   const [macroGoalsState, setMacroGoalsState] = useState(() => macroGoals);
+  const [macroGoalsByDayState, setMacroGoalsByDayState] = useState({});
   const [threads, setThreads] = useState([]);
 
   // ✅ Restore session using /auth/me (keeps login after refresh)
@@ -8587,6 +8682,22 @@ export default function App() {
         const rows = await apiFetch(`/macro-plans/${pid}`);
         const vals = (rows || []).filter(Boolean);
         if (!vals.length) return;
+
+        // Store per-day goals
+        const byDay = {};
+        vals.forEach(r => {
+          const dk = r.day_of_week;
+          if (!dk) return;
+          byDay[dk] = {
+            calories: Number(r.calories || 0),
+            protein: Number(r.protein_g || 0),
+            carbs: Number(r.carbs_g || 0),
+            fat: Number(r.fat_g || 0),
+          };
+        });
+        macroGoalsByDay = byDay;
+
+        // Compute average for general display (macro rings, coach panel, etc.)
         const sum = vals.reduce((a, r) => ({
           calories: a.calories + Number(r.calories || 0),
           protein: a.protein + Number(r.protein_g || 0),
@@ -8602,6 +8713,7 @@ export default function App() {
         };
         macroGoals = avg;
         setMacroGoalsState(avg);
+        setMacroGoalsByDayState({ ...byDay });
       } catch {
         // keep current values
       }
