@@ -8284,6 +8284,156 @@ const mfpMealToPlan = (name) => {
   return "Snack";
 };
 
+// ── Force Password Change (shown on first login for batch-imported athletes) ──
+function ForcePasswordChange({ profile, onComplete }) {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async () => {
+    setError("");
+    if (newPassword.length < 6) { setError("Password must be at least 6 characters"); return; }
+    if (newPassword !== confirmPassword) { setError("Passwords do not match"); return; }
+    setSaving(true);
+    try {
+      await apiFetch("/auth/change-password", {
+        method: "PUT",
+        body: JSON.stringify({ newPassword }),
+      });
+      onComplete({ ...profile, mustChangePassword: false });
+    } catch (e) {
+      setError(e.message || "Failed to change password");
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: T.bg, display: "flex",
+      alignItems: "center", justifyContent: "center", fontFamily: "DM Sans",
+    }}>
+      <div style={{
+        background: T.card, border: `1px solid ${T.border}`,
+        borderRadius: 24, padding: 36, width: "100%", maxWidth: 420,
+      }}>
+        {/* Logo */}
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{ fontFamily: "Bebas Neue", fontSize: 28, letterSpacing: 3 }}>
+            <span style={{ color: T.accent }}>NO RULES</span>{" "}
+            <span style={{ color: T.text }}>NUTRITION</span>
+          </div>
+        </div>
+
+        {/* Lock icon */}
+        <div style={{ textAlign: "center", marginBottom: 20 }}>
+          <div style={{
+            width: 64, height: 64, borderRadius: "50%",
+            background: `${T.accent}15`, border: `2px solid ${T.accent}44`,
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            fontSize: 28,
+          }}>
+            🔒
+          </div>
+        </div>
+
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <div style={{ fontFamily: "Bebas Neue", fontSize: 20, letterSpacing: 2, color: T.text, marginBottom: 6 }}>
+            SET YOUR PASSWORD
+          </div>
+          <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.5 }}>
+            Welcome, {profile.name}! Your coach has created your account.
+            Please set your own password to continue.
+          </div>
+        </div>
+
+        {/* New password */}
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ fontSize: 10, color: T.muted, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 5 }}>
+            New Password
+          </label>
+          <input
+            type="password"
+            value={newPassword}
+            onChange={e => setNewPassword(e.target.value)}
+            placeholder="At least 6 characters"
+            style={{
+              width: "100%", background: T.surface, border: `1px solid ${T.border}`,
+              borderRadius: 10, padding: "12px 14px", color: T.text,
+              fontFamily: "DM Sans", fontSize: 13, outline: "none",
+            }}
+          />
+        </div>
+
+        {/* Confirm password */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ fontSize: 10, color: T.muted, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 5 }}>
+            Confirm Password
+          </label>
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={e => setConfirmPassword(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleSubmit()}
+            placeholder="Type your new password again"
+            style={{
+              width: "100%", background: T.surface, border: `1px solid ${T.border}`,
+              borderRadius: 10, padding: "12px 14px", color: T.text,
+              fontFamily: "DM Sans", fontSize: 13, outline: "none",
+            }}
+          />
+        </div>
+
+        {/* Password strength indicator */}
+        {newPassword.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
+              {[1,2,3,4].map(i => (
+                <div key={i} style={{
+                  flex: 1, height: 3, borderRadius: 2,
+                  background: newPassword.length >= i * 3 ? (newPassword.length >= 10 ? T.coachGreen : newPassword.length >= 6 ? T.accent : T.danger) : T.border,
+                  transition: "background 0.2s",
+                }} />
+              ))}
+            </div>
+            <div style={{ fontFamily: "DM Sans", fontSize: 10, color: newPassword.length >= 10 ? T.coachGreen : newPassword.length >= 6 ? T.accent : T.danger }}>
+              {newPassword.length < 6 ? "Too short" : newPassword.length < 10 ? "Good" : "Strong"}
+            </div>
+          </div>
+        )}
+
+        {/* Match indicator */}
+        {confirmPassword.length > 0 && (
+          <div style={{ marginBottom: 16, fontFamily: "DM Sans", fontSize: 11, color: newPassword === confirmPassword ? T.coachGreen : T.danger }}>
+            {newPassword === confirmPassword ? "✓ Passwords match" : "✕ Passwords do not match"}
+          </div>
+        )}
+
+        {error && (
+          <div style={{ background: `${T.danger}18`, border: `1px solid ${T.danger}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 12, color: T.danger }}>
+            {error}
+          </div>
+        )}
+
+        <button
+          onClick={handleSubmit}
+          disabled={saving || newPassword.length < 6 || newPassword !== confirmPassword}
+          style={{
+            width: "100%", padding: "14px",
+            background: newPassword.length >= 6 && newPassword === confirmPassword ? T.accent : T.border,
+            color: newPassword.length >= 6 && newPassword === confirmPassword ? T.bg : T.muted,
+            border: "none", borderRadius: 12,
+            fontFamily: "Bebas Neue", fontSize: 18, letterSpacing: 2,
+            cursor: newPassword.length >= 6 && newPassword === confirmPassword && !saving ? "pointer" : "default",
+          }}
+        >
+          {saving ? "SAVING..." : "SET PASSWORD & CONTINUE"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tokenState, setTokenState] = useState(() => getToken());
   const [profile, setProfile] = useState(null);
@@ -8848,6 +8998,11 @@ export default function App() {
         }}
       />
     );
+
+  // Force password change for batch-imported athletes
+  if (profile.mustChangePassword) {
+    return <ForcePasswordChange profile={profile} onComplete={(updatedProfile) => setProfile(updatedProfile)} />;
+  }
 
   const tabs = [
     { id: "dashboard", label: "DASHBOARD" },
