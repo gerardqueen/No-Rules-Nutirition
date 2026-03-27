@@ -209,7 +209,7 @@ function MealsTab({ plan, setPlan, selectedDay, setSelectedDay, shoppingItems, s
   const timerRef=useRef(null), scannerRef=useRef(null), libLoaded=useRef(false);
   const tot=mTot(plan[selectedDay]), dg=gFor(selectedDay);
 
-  useEffect(()=>{if(!search.trim()){setResults([]);return;}clearTimeout(timerRef.current);timerRef.current=setTimeout(async()=>{setSearching(true);try{const r=await api(`/off/search?q=${encodeURIComponent(search.trim())}`);setResults(Array.isArray(r)?r.slice(0,12):[]);}catch{setResults([]);}setSearching(false);},500);},[search]);
+  useEffect(()=>{if(!search.trim()){setResults([]);return;}clearTimeout(timerRef.current);timerRef.current=setTimeout(async()=>{setSearching(true);try{const r=await api(`/off/search?q=${encodeURIComponent(search.trim())}`);const arr=Array.isArray(r?.products)?r.products:Array.isArray(r)?r:[];setResults(arr.slice(0,12));}catch{setResults([]);}setSearching(false);},500);},[search]);
 
   const addFood=(food,meal)=>{setPlan(prev=>{const n={...prev};if(!n[selectedDay]){n[selectedDay]={};MEALS.forEach(m=>n[selectedDay][m]=[]);}n[selectedDay]={...n[selectedDay],[meal]:[...(n[selectedDay][meal]||[]),food]};return n;});setAddingTo(null);setSearch("");setResults([]);};
   const removeFood=(meal,idx)=>{setPlan(prev=>{const n={...prev};const a=[...(n[selectedDay]?.[meal]||[])];a.splice(idx,1);n[selectedDay]={...n[selectedDay],[meal]:a};return n;});};
@@ -219,8 +219,10 @@ function MealsTab({ plan, setPlan, selectedDay, setSelectedDay, shoppingItems, s
   const startScan=()=>{setScanning(true);setScanResult(null);setScanErr("");};
   useEffect(()=>{if(!scanning)return;
     (async()=>{if(!libLoaded.current){await new Promise((res,rej)=>{const s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js";s.onload=res;s.onerror=rej;document.head.appendChild(s);});libLoaded.current=true;}
+    await new Promise(r=>setTimeout(r,300));
+    const el=document.getElementById("m-scanner"); if(!el){setScanErr("Scanner element not found");setScanning(false);return;}
     const sc=new window.Html5Qrcode("m-scanner");scannerRef.current=sc;
-    try{await sc.start({facingMode:"environment"},{fps:10,qrbox:{width:250,height:120}},async(code)=>{stopScan();try{const r=await api(`/off/barcode/${code}`);if(r&&r.name)setScanResult(r);else setScanErr("Not found");}catch{setScanErr("Lookup failed");}},()=>{});}catch{setScanErr("Camera denied");setScanning(false);}})();
+    try{await sc.start({facingMode:"environment"},{fps:10,qrbox:{width:250,height:120}},async(code)=>{stopScan();try{const r=await api(`/off/barcode/${code}`);if(r&&r.found&&r.name)setScanResult(r);else setScanErr("Product not found for barcode: "+code);}catch{setScanErr("Barcode lookup failed");}},()=>{});}catch{setScanErr("Camera access denied");setScanning(false);}})();
     return()=>stopScan();
   },[scanning]);
 
