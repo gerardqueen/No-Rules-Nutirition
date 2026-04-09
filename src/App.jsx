@@ -5327,20 +5327,76 @@ function WeeklyPlanner({
   const [offSearching, setOffSearching] = useState(false);
   const [offResults, setOffResults] = useState([]);
 
-  // ── Open Food Facts barcode lookup (real API via server proxy) ──
+  // ── Saved meals (per-athlete, MFP-style quick-add) ──
+  const [savedMeals, setSavedMeals] = useState([]);
+  const [mealSearchResults, setMealSearchResults] = useState([]);
+  const [showSaveMeal, setShowSaveMeal] = useState(false);
+  const [saveMealName, setSaveMealName] = useState("");
+  const [savingMeal, setSavingMeal] = useState(false);
+  const [saveMealForMeal, setSaveMealForMeal] = useState(null); // which meal slot the user is saving from
+
+  // ── Community food database (shared across athletes) ──
+  const [customFoodResults, setCustomFoodResults] = useState([]);
+  const [showAddFood, setShowAddFood] = useState(false);
+  const [addFoodForm, setAddFoodForm] = useState({
+    barcode: "", name: "", brand: "",
+    calories: "", protein_g: "", carbs_g: "", fat_g: "", fibre_g: "",
+    serving_size: 100,
+  });
+  const [savingFood, setSavingFood] = useState(false);
+  const [addFoodErr, setAddFoodErr] = useState("");
+
+  // Load this athlete's saved meals from backend
+  useEffect(() => {
+    if (!profile?.id) return;
+    (async () => {
+      try {
+        const rows = await apiFetch(`/meals/${profile.id}`);
+        setSavedMeals(Array.isArray(rows) ? rows : []);
+      } catch { /* no meals yet — ignore */ }
+    })();
+  }, [profile?.id]);
+
+  // ── Barcode lookup — tiered: community DB → OpenFoodFacts → add form ──
   const lookupBarcode = async (code) => {
     const clean = code.replace(/\D/g, "");
     setBarcodeError("");
     setBarcodeResult(null);
+    setShowAddFood(false);
     if (clean.length < 8) {
       setBarcodeError("Barcode must be at least 8 digits");
       return;
     }
     setScanning(true);
+
+    // Tier 1: Community food database (fastest — previously scanned by an athlete)
+    try {
+      const row = await apiFetch(`/foods/barcode/${encodeURIComponent(clean)}`);
+      if (row && row.name) {
+        const servings = [[`${row.serving_size || 100}${row.serving_unit || "g"}`, Number(row.serving_size) || 100]];
+        setBarcodeResult({
+          n: row.brand ? `${row.name} (${row.brand})` : row.name,
+          cal: Number(row.calories) || 0,
+          p: Number(row.protein_g) || 0,
+          c: Number(row.carbs_g) || 0,
+          f: Number(row.fat_g) || 0,
+          s: servings,
+          barcode: clean,
+          foodId: row.id,
+          source: "community",
+        });
+        setServingGrams(servings[0][1]);
+        setServingLabel(servings[0][0]);
+        setScanning(false);
+        return;
+      }
+    } catch { /* 404 — fall through to OFF */ }
+
+    // Tier 2: OpenFoodFacts via server proxy
     try {
       const data = await apiFetch(`/off/barcode/${clean}`);
       if (data.found) {
-        const servings = (data.servings || []).map(([label, grams]) => [label, grams]);
+        const servings = (data.servings || [["100g", 100]]).map(([label, grams]) => [label, grams]);
         setBarcodeResult({
           n: data.brand ? `${data.name} (${data.brand})` : data.name,
           cal: data.calories,
@@ -5350,16 +5406,173 @@ function WeeklyPlanner({
           s: servings,
           barcode: data.barcode || clean,
           image: data.image || null,
+          source: "openfoodfacts",
         });
         setServingGrams(servings[0]?.[1] || 100);
         setServingLabel(servings[0]?.[0] || "100g");
-      } else {
-        setBarcodeError(`No product found for barcode ${clean}. Check the number or try searching by name.`);
+
+        // Auto-cache into community DB so next scan is instant (and works offline)
+        try {
+          const saved = await apiFetch(`/foods`, {
+            method: "POST",
+            body: JSON.stringify({
+              barcode: clean,
+              name: data.name,
+              brand: data.brand || null,
+              calories: Math.round(Number(data.calories) || 0),
+              protein_g: Math.round(Number(data.protein) || 0),
+              carbs_g: Math.round(Number(data.carbs) || 0),
+              fat_g: Math.round(Number(data.fat) || 0),
+              fibre_g: Math.round(Number(data.fibre) || 0),
+              serving_size: Number(servings[0]?.[1]) || 100,
+              serving_unit: "g",
+            }),
+          });
+          if (saved?.id) {
+            setBarcodeResult((prev) => prev ? { ...prev, foodId: saved.id, source: "community" } : prev);
+          }
+        } catch { /* already cached (409) or failed — non-fatal */ }
+
+        setScanning(false);
+        return;
       }
-    } catch (e) {
-      setBarcodeError(`Lookup failed: ${e.message}`);
-    }
+    } catch { /* OFF proxy down — fall through */ }
+
+    // Tier 3: not found anywhere — invite the athlete to contribute it
     setScanning(false);
+    setBarcodeError(`Barcode ${clean} not found. Add it below to help the community.`);
+    setAddFoodForm({
+      barcode: clean, name: "", brand: "",
+      calories: "", protein_g: "", carbs_g: "", fat_g: "", fibre_g: "",
+      serving_size: 100,
+    });
+    setAddFoodErr("");
+    setShowAddFood(true);
+  };
+
+  // ── Save a new food to the shared community database ──
+  const saveCustomFood = async () => {
+    setAddFoodErr("");
+    const f = addFoodForm;
+    if (!f.name.trim()) { setAddFoodErr("Name is required"); return; }
+    if (f.calories === "" || Number(f.calories) < 0) { setAddFoodErr("Calories required"); return; }
+    setSavingFood(true);
+    try {
+      const created = await apiFetch(`/foods`, {
+        method: "POST",
+        body: JSON.stringify({
+          barcode: f.barcode || null,
+          name: f.name.trim(),
+          brand: f.brand.trim() || null,
+          calories: Math.round(Number(f.calories)),
+          protein_g: Math.round(Number(f.protein_g) || 0),
+          carbs_g: Math.round(Number(f.carbs_g) || 0),
+          fat_g: Math.round(Number(f.fat_g) || 0),
+          fibre_g: Math.round(Number(f.fibre_g) || 0),
+          serving_size: Number(f.serving_size) || 100,
+          serving_unit: "g",
+        }),
+      });
+      const servings = [[`${created.serving_size || 100}g`, Number(created.serving_size) || 100]];
+      setBarcodeResult({
+        n: created.brand ? `${created.name} (${created.brand})` : created.name,
+        cal: Number(created.calories) || 0,
+        p: Number(created.protein_g) || 0,
+        c: Number(created.carbs_g) || 0,
+        f: Number(created.fat_g) || 0,
+        s: servings,
+        barcode: created.barcode || null,
+        foodId: created.id,
+        source: "community",
+      });
+      setServingGrams(servings[0][1]);
+      setServingLabel(servings[0][0]);
+      setShowAddFood(false);
+      setBarcodeError("");
+    } catch (e) {
+      setAddFoodErr(e.message || "Could not save food");
+    }
+    setSavingFood(false);
+  };
+
+  // ── Report a community food as incorrect ──
+  const reportCustomFood = async (foodId) => {
+    if (!foodId) return;
+    if (!confirm("Report this food as incorrect? A coach will review it.")) return;
+    try {
+      await apiFetch(`/foods/${foodId}/report`, {
+        method: "POST",
+        body: JSON.stringify({ reason: "Reported from athlete app" }),
+      });
+      alert("Thanks — flagged for review.");
+    } catch (e) { alert(e.message || "Could not report food"); }
+  };
+
+  // ── Saved meals: save the current meal card as a reusable template ──
+  const saveCurrentMealAsTemplate = async () => {
+    if (!profile?.id) return;
+    if (!saveMealName.trim()) { alert("Give the meal a name first."); return; }
+    const mealSlot = saveMealForMeal || selectedMeal;
+    if (!mealSlot) return;
+    const currentFoods = plan[selectedDay]?.[mealSlot] || [];
+    if (currentFoods.length === 0) { alert("Add at least one food first."); return; }
+    setSavingMeal(true);
+    try {
+      const ingredients = currentFoods.map((food) => ({
+        id: food.foodId || null,
+        name: food.name || food.n || "Food",
+        grams: Number(food.grams || food.s?.[0]?.[1] || 100),
+        calories: Number(food.calories || food.cal || 0),
+        protein_g: Number(food.protein || food.p || 0),
+        carbs_g: Number(food.carbs || food.b || food.c || 0),
+        fat_g: Number(food.fat || food.f || 0),
+        fibre_g: Number(food.fibre || food.fi || 0),
+      }));
+      const created = await apiFetch(`/meals/${profile.id}`, {
+        method: "POST",
+        body: JSON.stringify({ name: saveMealName.trim(), ingredients }),
+      });
+      setSavedMeals((prev) => [created, ...prev.filter(m => m.id !== created.id)]);
+      setShowSaveMeal(false);
+      setSaveMealName("");
+      setSaveMealForMeal(null);
+      alert(`Meal "${created.name}" saved!`);
+    } catch (e) {
+      alert(e.message || "Could not save meal");
+    }
+    setSavingMeal(false);
+  };
+
+  // ── Add a saved meal (all its ingredients) to the current day+meal slot ──
+  const addSavedMealToPlan = (meal) => {
+    if (!meal || !selectedMeal || !Array.isArray(meal.ingredients)) return;
+    setPlan((prev) => {
+      const next = { ...prev };
+      if (!next[selectedDay]) { next[selectedDay] = {}; MEALS.forEach(m => next[selectedDay][m] = []); }
+      next[selectedDay] = { ...next[selectedDay] };
+      const newItems = meal.ingredients.map((ing) => ({
+        name: ing.name,
+        calories: Number(ing.calories) || 0,
+        protein: Number(ing.protein_g) || 0,
+        carbs: Number(ing.carbs_g) || 0,
+        fat: Number(ing.fat_g) || 0,
+        grams: Number(ing.grams) || 100,
+        foodId: ing.id || null,
+      }));
+      next[selectedDay][selectedMeal] = [...(next[selectedDay][selectedMeal] || []), ...newItems];
+      return next;
+    });
+    resetPicker();
+  };
+
+  // ── Delete a saved meal template ──
+  const deleteSavedMeal = async (mealId) => {
+    if (!profile?.id || !mealId) return;
+    if (!confirm("Delete this saved meal?")) return;
+    try {
+      await apiFetch(`/meals/${profile.id}/${mealId}`, { method: "DELETE" });
+      setSavedMeals((prev) => prev.filter(m => m.id !== mealId));
+    } catch (e) { alert(e.message || "Could not delete"); }
   };
 
   // ── Camera barcode scanning (html5-qrcode — reliable on Chrome + Safari/iOS) ──
@@ -5522,10 +5735,17 @@ function WeeklyPlanner({
     setBarcodeError("");
     setOffResults([]);
     setOffSearching(false);
+    setCustomFoodResults([]);
+    setMealSearchResults([]);
+    setShowAddFood(false);
+    setAddFoodErr("");
+    setShowSaveMeal(false);
+    setSaveMealName("");
+    setSaveMealForMeal(null);
     stopCamera();
   };
 
-  // Search USDA food DB locally + Open Food Facts via server (debounced)
+  // Search USDA food DB locally + Open Food Facts + community DB + saved meals
   const offTimerRef = useRef(null);
   const handleFoodSearch = (query) => {
     setFoodSearch(query);
@@ -5533,22 +5753,36 @@ function WeeklyPlanner({
     if (query.trim().length < 2) {
       setFoodSearchResults([]);
       setOffResults([]);
+      setCustomFoodResults([]);
+      setMealSearchResults([]);
       return;
     }
     const q = query.toLowerCase();
+
     // Instant local USDA results
     const results = FOOD_DB.filter((f) => f.n.toLowerCase().includes(q)).slice(0, 30);
     setFoodSearchResults(results);
 
-    // Debounced Open Food Facts search (500ms)
+    // Saved meals (already loaded)
+    const mealMatches = (savedMeals || []).filter(m => (m.name || "").toLowerCase().includes(q)).slice(0, 10);
+    setMealSearchResults(mealMatches);
+
+    // Debounced backend searches (500ms)
     if (offTimerRef.current) clearTimeout(offTimerRef.current);
     offTimerRef.current = setTimeout(async () => {
       if (query.trim().length < 3) return;
+
+      // Community food DB (shared across all athletes)
+      try {
+        const rows = await apiFetch(`/foods/search?q=${encodeURIComponent(query.trim())}`);
+        setCustomFoodResults(Array.isArray(rows) ? rows.slice(0, 20) : []);
+      } catch { setCustomFoodResults([]); }
+
+      // Open Food Facts (same UK source as barcode lookup)
       setOffSearching(true);
       try {
         const data = await apiFetch(`/off/search?q=${encodeURIComponent(query.trim())}`);
         if (data.products) {
-          // Convert OFF results to FOOD_DB-compatible format
           const offItems = data.products.map(p => ({
             n: p.brand ? `${p.name} (${p.brand})` : p.name,
             c: p.calories,
@@ -5556,12 +5790,15 @@ function WeeklyPlanner({
             b: p.carbs,
             f: p.fat,
             s: (p.servings || []).map(([label, grams]) => [label, grams]),
-            _off: true, // flag to show OFF badge
+            _off: true,
             _img: p.image || null,
+            _barcode: p.barcode || null,
+            _rawName: p.name,
+            _rawBrand: p.brand || null,
           }));
           setOffResults(offItems);
         }
-      } catch (e) { /* OFF search failed silently — USDA results still shown */ }
+      } catch (e) { /* OFF search failed silently */ }
       setOffSearching(false);
     }, 500);
   };
@@ -5954,10 +6191,83 @@ function WeeklyPlanner({
               >
                 + Add Food
               </button>
+              {(plan[selectedDay]?.[meal]?.length || 0) > 0 && (
+                <button
+                  onClick={() => {
+                    setSaveMealForMeal(meal);
+                    setSelectedMeal(meal);
+                    setSaveMealName("");
+                    setShowSaveMeal(true);
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "8px",
+                    background: "none",
+                    border: `1px dashed ${T.coachGreen || "#22c55e"}55`,
+                    borderRadius: 8,
+                    color: T.coachGreen || "#22c55e",
+                    fontFamily: "DM Sans",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    marginTop: 4,
+                  }}
+                  type="button"
+                >
+                  💾 Save as Meal Template
+                </button>
+              )}
             </div>
           );
         })}
       </div>
+
+      {/* Save as Meal modal */}
+      {showSaveMeal && (
+        <div
+          style={{
+            position: "fixed", inset: 0, background: "#000000d0", zIndex: 1001,
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+          }}
+          onClick={(e) => e.target === e.currentTarget && !savingMeal && setShowSaveMeal(false)}
+        >
+          <div style={{
+            width: "100%", maxWidth: 440, background: T.card,
+            border: `1px solid ${T.coachGreen || "#22c55e"}55`, borderRadius: 18, padding: 22,
+          }}>
+            <div style={{ fontFamily: "Bebas Neue", fontSize: 20, letterSpacing: 2, color: T.text, marginBottom: 6 }}>
+              SAVE AS MEAL
+            </div>
+            <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, marginBottom: 14 }}>
+              Save these {(plan[selectedDay]?.[saveMealForMeal || selectedMeal]?.length || 0)} items as a reusable meal. Quick-add it later by typing the name.
+            </div>
+            <input
+              autoFocus
+              value={saveMealName}
+              onChange={(e) => setSaveMealName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && saveCurrentMealAsTemplate()}
+              placeholder="e.g. My Usual Breakfast"
+              style={{
+                width: "100%", background: T.surface, border: `1px solid ${T.border}`,
+                borderRadius: 10, padding: "11px 14px", color: T.text,
+                fontFamily: "DM Sans", fontSize: 13, outline: "none", marginBottom: 14,
+              }}
+            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { setShowSaveMeal(false); setSaveMealName(""); setSaveMealForMeal(null); }} style={{
+                flex: 1, background: "none", border: `1px solid ${T.border}`, borderRadius: 10,
+                padding: 11, color: T.muted, fontFamily: "DM Sans", fontSize: 12, cursor: "pointer",
+              }} type="button">Cancel</button>
+              <button onClick={saveCurrentMealAsTemplate} disabled={!saveMealName.trim() || savingMeal} style={{
+                flex: 2, background: saveMealName.trim() ? (T.coachGreen || "#22c55e") : T.border,
+                color: saveMealName.trim() ? T.bg : T.muted,
+                border: "none", borderRadius: 10, padding: 11,
+                fontFamily: "Bebas Neue", fontSize: 15, letterSpacing: 1.5,
+                cursor: saveMealName.trim() && !savingMeal ? "pointer" : "default",
+              }} type="button">{savingMeal ? "SAVING…" : "SAVE MEAL"}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showFoodPicker && (
         <div
@@ -6456,6 +6766,81 @@ function WeeklyPlanner({
                         </div>
                       </div>
                     )}
+                  {/* Saved meals (type-ahead quick add) */}
+                  {mealSearchResults.length > 0 && (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.coachGreen || "#22c55e", marginBottom: 8, letterSpacing: 1 }}>
+                        🍽 YOUR SAVED MEALS
+                      </div>
+                      {mealSearchResults.map((m) => (
+                        <button key={`meal-${m.id}`} onClick={() => addSavedMealToPlan(m)}
+                          style={{
+                            width: "100%", textAlign: "left", padding: "10px 12px",
+                            background: T.card,
+                            border: `1px solid ${T.coachGreen || "#22c55e"}55`,
+                            borderRadius: 10, marginBottom: 6, cursor: "pointer",
+                          }} type="button">
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                            <span style={{ fontFamily: "DM Sans", fontSize: 12, color: T.text, fontWeight: 600 }}>
+                              {m.name} <span style={{ color: T.muted, fontSize: 10, fontWeight: 400 }}>({(m.ingredients || []).length} items)</span>
+                            </span>
+                            <span style={{ fontFamily: "JetBrains Mono", fontSize: 11, color: T.coachGreen || "#22c55e" }}>
+                              {m.total_calories} kcal
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Community foods (shared across athletes) */}
+                  {customFoodResults.length > 0 && (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, marginBottom: 8, letterSpacing: 1 }}>
+                        🌐 COMMUNITY FOODS
+                      </div>
+                      {customFoodResults.map((row) => {
+                        const item = {
+                          n: row.brand ? `${row.name} (${row.brand})` : row.name,
+                          c: Number(row.calories) || 0,
+                          p: Number(row.protein_g) || 0,
+                          b: Number(row.carbs_g) || 0,
+                          f: Number(row.fat_g) || 0,
+                          s: [[`${row.serving_size || 100}g`, Number(row.serving_size) || 100]],
+                          foodId: row.id,
+                          _community: true,
+                        };
+                        const flagged = (row.report_count || 0) > 0;
+                        return (
+                          <div key={`custom-${row.id}`} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                            <button onClick={() => selectFoodItem(item)}
+                              style={{
+                                flex: 1, textAlign: "left", padding: "10px 12px",
+                                background: selectedFoodItem?.foodId === row.id ? T.accent + "15" : T.card,
+                                border: `1px solid ${selectedFoodItem?.foodId === row.id ? T.accent : T.border}`,
+                                borderRadius: 10, cursor: "pointer",
+                              }} type="button">
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                                <span style={{ fontFamily: "DM Sans", fontSize: 12, color: T.text, fontWeight: 500, flex: 1 }}>
+                                  {item.n}
+                                  {flagged && <span style={{ color: "#f59e0b", marginLeft: 6, fontSize: 10 }}>⚠ flagged</span>}
+                                </span>
+                                <span style={{ fontFamily: "JetBrains Mono", fontSize: 11, color: T.accent, whiteSpace: "nowrap" }}>
+                                  {item.c} kcal
+                                </span>
+                              </div>
+                            </button>
+                            <button onClick={() => reportCustomFood(row.id)} title="Report as incorrect"
+                              style={{
+                                background: "none", border: `1px solid ${T.border}`, borderRadius: 8,
+                                padding: "0 10px", color: T.muted, cursor: "pointer", fontSize: 12,
+                              }} type="button">⚠</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {/* USDA Search results */}
                   {foodSearchResults.length > 0 && (
                     <div>
@@ -6775,6 +7160,53 @@ function WeeklyPlanner({
                     }}
                   >
                     {barcodeError}
+                  </div>
+                )}
+
+                {/* Add Food form (when barcode not found) */}
+                {showAddFood && (
+                  <div style={{
+                    background: T.card, border: `1px solid ${T.accent}55`, borderRadius: 12,
+                    padding: 16, marginBottom: 14,
+                  }}>
+                    <div style={{ fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 2, color: T.accent, marginBottom: 4 }}>
+                      ADD THIS FOOD
+                    </div>
+                    <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, marginBottom: 12 }}>
+                      Help build the community database. All values per 100g.
+                    </div>
+                    {addFoodErr && (
+                      <div style={{ background: `${T.danger}18`, border: `1px solid ${T.danger}44`, borderRadius: 8, padding: "8px 12px", marginBottom: 10, fontSize: 11, color: T.danger }}>{addFoodErr}</div>
+                    )}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <input placeholder="Name *" value={addFoodForm.name} onChange={(e) => setAddFoodForm(p => ({ ...p, name: e.target.value }))}
+                        style={{ gridColumn: "1 / -1", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: "9px 12px", color: T.text, fontSize: 12, fontFamily: "DM Sans", outline: "none" }} />
+                      <input placeholder="Brand (optional)" value={addFoodForm.brand} onChange={(e) => setAddFoodForm(p => ({ ...p, brand: e.target.value }))}
+                        style={{ gridColumn: "1 / -1", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: "9px 12px", color: T.text, fontSize: 12, fontFamily: "DM Sans", outline: "none" }} />
+                      <input type="number" placeholder="Calories *" value={addFoodForm.calories} onChange={(e) => setAddFoodForm(p => ({ ...p, calories: e.target.value }))}
+                        style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: "9px 12px", color: T.text, fontSize: 12, fontFamily: "JetBrains Mono", outline: "none" }} />
+                      <input type="number" placeholder="Protein (g)" value={addFoodForm.protein_g} onChange={(e) => setAddFoodForm(p => ({ ...p, protein_g: e.target.value }))}
+                        style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: "9px 12px", color: T.text, fontSize: 12, fontFamily: "JetBrains Mono", outline: "none" }} />
+                      <input type="number" placeholder="Carbs (g)" value={addFoodForm.carbs_g} onChange={(e) => setAddFoodForm(p => ({ ...p, carbs_g: e.target.value }))}
+                        style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: "9px 12px", color: T.text, fontSize: 12, fontFamily: "JetBrains Mono", outline: "none" }} />
+                      <input type="number" placeholder="Fat (g)" value={addFoodForm.fat_g} onChange={(e) => setAddFoodForm(p => ({ ...p, fat_g: e.target.value }))}
+                        style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: "9px 12px", color: T.text, fontSize: 12, fontFamily: "JetBrains Mono", outline: "none" }} />
+                      <input type="number" placeholder="Fibre (g) optional" value={addFoodForm.fibre_g} onChange={(e) => setAddFoodForm(p => ({ ...p, fibre_g: e.target.value }))}
+                        style={{ gridColumn: "1 / -1", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: "9px 12px", color: T.text, fontSize: 12, fontFamily: "JetBrains Mono", outline: "none" }} />
+                    </div>
+                    <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                      <button onClick={() => { setShowAddFood(false); setAddFoodErr(""); }} style={{
+                        flex: 1, background: "none", border: `1px solid ${T.border}`, borderRadius: 8,
+                        padding: 10, color: T.muted, fontFamily: "DM Sans", fontSize: 12, cursor: "pointer",
+                      }} type="button">Cancel</button>
+                      <button onClick={saveCustomFood} disabled={savingFood || !addFoodForm.name.trim() || addFoodForm.calories === ""} style={{
+                        flex: 2, background: (addFoodForm.name.trim() && addFoodForm.calories !== "") ? T.accent : T.border,
+                        color: (addFoodForm.name.trim() && addFoodForm.calories !== "") ? T.bg : T.muted,
+                        border: "none", borderRadius: 8, padding: 10,
+                        fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1.5,
+                        cursor: savingFood ? "default" : "pointer",
+                      }} type="button">{savingFood ? "SAVING…" : "SAVE FOOD"}</button>
+                    </div>
                   </div>
                 )}
 
@@ -8747,6 +9179,10 @@ export default function App() {
 
   // ── Live fetch via Anthropic API with web_fetch tool ──────────────────────
   const fetchMFP = async (username, dayPlan, isAutoRefresh = false) => {
+    // MFP sync disabled — was causing data duplication.
+    // Function kept as no-op so existing button handlers don't crash.
+    return;
+    // eslint-disable-next-line no-unreachable
     if (!username) return;
     setMfpSyncing(true);
     if (!isAutoRefresh) setMfpError(null);
@@ -8894,6 +9330,9 @@ export default function App() {
 
   // Convert MFP diary data into plan food entries for a given day
   const importMFPDay = (day, data) => {
+    // MFP sync disabled — no-op
+    return;
+    // eslint-disable-next-line no-unreachable
     const source = data || mfpData;
     if (!source || !source.calories) return;
     setPlan((prev) => {
@@ -8934,28 +9373,19 @@ export default function App() {
     });
   };
 
-  // Auto-fetch on login if account has mfpUsername
-  useEffect(() => {
-    if (mfpUsername && !mfpData && !mfpSyncing) {
-      fetchMFP(mfpUsername, plan[selectedDay]);
-    }
-  }, [mfpUsername]);
-
-  // ── Live sync interval — re-fetch every 15 min (Senpro cadence) ───────────
-  useEffect(() => {
-    if (!mfpConnected || !mfpUsername || mfpManualMode) return;
-    let countdown = SYNC_INTERVAL_MS / 1000;
-    setMfpNextSyncIn(countdown);
-    const ticker = setInterval(() => {
-      countdown -= 1;
-      setMfpNextSyncIn(countdown);
-      if (countdown <= 0) {
-        countdown = SYNC_INTERVAL_MS / 1000;
-        fetchMFP(mfpUsername, plan[selectedDay], true); // isAutoRefresh=true
-      }
-    }, 1000);
-    return () => clearInterval(ticker);
-  }, [mfpConnected, mfpUsername, mfpManualMode]);
+  // ── MFP SYNC DISABLED ──────────────────────────────────────────────────────
+  // Auto-fetch and 15min interval sync removed to prevent data duplication.
+  // Athletes now log food manually via the food picker / barcode scanner.
+  // useEffect(() => {
+  //   if (mfpUsername && !mfpData && !mfpSyncing) {
+  //     fetchMFP(mfpUsername, plan[selectedDay]);
+  //   }
+  // }, [mfpUsername]);
+  //
+  // useEffect(() => {
+  //   if (!mfpConnected || !mfpUsername || mfpManualMode) return;
+  //   ...interval sync removed...
+  // }, [mfpConnected, mfpUsername, mfpManualMode]);
 
   const [moodLog, setMoodLog] = useState({});
 
