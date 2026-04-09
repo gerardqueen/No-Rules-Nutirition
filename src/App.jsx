@@ -6646,6 +6646,86 @@ function WeeklyPlanner({
   const [savingMeal, setSavingMeal] = useState(false);
   const [customFoodResults, setCustomFoodResults] = useState([]);
 
+  // Live camera barcode scanning (native BarcodeDetector API)
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const scanLoopRef = useRef(null);
+  const [cameraActive, setCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+
+  const stopCamera = () => {
+    if (scanLoopRef.current) { cancelAnimationFrame(scanLoopRef.current); scanLoopRef.current = null; }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) { try { videoRef.current.srcObject = null; } catch {} }
+    setCameraActive(false);
+  };
+
+  const startCamera = async () => {
+    setCameraError("");
+    if (!("BarcodeDetector" in window)) {
+      setCameraError("Your browser doesn't support live scanning. Enter the barcode manually below, or try Chrome/Edge on mobile.");
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError("Camera not available on this device.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      setCameraActive(true);
+      // Wait for video element to mount
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => {});
+        }
+      }, 50);
+
+      const detector = new window.BarcodeDetector({
+        formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "qr_code"],
+      });
+      let lastCode = null;
+      let scanning = true;
+      const loop = async () => {
+        if (!scanning || !videoRef.current) return;
+        if (videoRef.current.readyState === 4) {
+          try {
+            const codes = await detector.detect(videoRef.current);
+            if (codes.length > 0) {
+              const code = codes[0].rawValue;
+              if (code && code !== lastCode) {
+                lastCode = code;
+                scanning = false;
+                // Haptic feedback if supported
+                if (navigator.vibrate) navigator.vibrate(100);
+                setBarcodeInput(code);
+                stopCamera();
+                lookupBarcode(code);
+                return;
+              }
+            }
+          } catch (e) { /* detection failed this frame, keep going */ }
+        }
+        scanLoopRef.current = requestAnimationFrame(loop);
+      };
+      scanLoopRef.current = requestAnimationFrame(loop);
+    } catch (e) {
+      setCameraError(e.name === "NotAllowedError" ? "Camera permission denied. Allow camera access in browser settings." : `Camera error: ${e.message}`);
+      setCameraActive(false);
+    }
+  };
+
+  // Stop camera when picker closes or tab switches
+  useEffect(() => { if (!showFoodPicker || pickerTab !== "barcode") stopCamera(); }, [showFoodPicker, pickerTab]);
+  useEffect(() => () => stopCamera(), []); // cleanup on unmount
+
   // Mock barcode database (EAN-13 / UPC-A style)
   const BARCODE_DB = {
     5000112637939: {
@@ -8203,6 +8283,43 @@ function WeeklyPlanner({
             {/* ── BARCODE TAB ── */}
             {pickerTab === "barcode" && (
               <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+                {/* Camera scanner */}
+                {cameraActive ? (
+                  <div style={{
+                    position: "relative", marginBottom: 16, borderRadius: 16, overflow: "hidden",
+                    border: `2px solid ${T.accent}`, background: "#000",
+                  }}>
+                    <video ref={videoRef} autoPlay muted playsInline
+                      style={{ width: "100%", maxHeight: 320, display: "block", objectFit: "cover" }} />
+                    <div style={{
+                      position: "absolute", top: "50%", left: "10%", right: "10%", height: 2,
+                      background: T.accent, boxShadow: `0 0 12px ${T.accent}`,
+                      animation: "scanLine 1.2s ease-in-out infinite alternate",
+                    }} />
+                    <button onClick={stopCamera} style={{
+                      position: "absolute", top: 10, right: 10,
+                      background: "#000000cc", border: `1px solid ${T.border}`, borderRadius: 8,
+                      padding: "6px 12px", color: T.text, fontFamily: "DM Sans", fontSize: 11, cursor: "pointer",
+                    }} type="button">✕ STOP</button>
+                    <div style={{
+                      position: "absolute", bottom: 10, left: 0, right: 0, textAlign: "center",
+                      fontFamily: "DM Sans", fontSize: 11, color: "#fff", textShadow: "0 1px 2px #000",
+                    }}>Point camera at a barcode</div>
+                  </div>
+                ) : (
+                  <button onClick={startCamera} style={{
+                    width: "100%", padding: "14px", marginBottom: 12,
+                    background: T.accent, color: T.bg, border: "none", borderRadius: 12,
+                    fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 2, cursor: "pointer",
+                  }} type="button">📷 START CAMERA SCANNER</button>
+                )}
+                {cameraError && (
+                  <div style={{
+                    background: `${T.danger}18`, border: `1px solid ${T.danger}44`, borderRadius: 10,
+                    padding: "10px 14px", marginBottom: 14, fontFamily: "DM Sans", fontSize: 12, color: T.danger,
+                  }}>{cameraError}</div>
+                )}
+
                 {/* Scanner viewfinder */}
                 <div
                   style={{
