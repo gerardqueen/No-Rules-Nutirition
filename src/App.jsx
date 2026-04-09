@@ -6656,6 +6656,7 @@ function WeeklyPlanner({
   const stopCamera = () => {
     if (scanLoopRef.current) { cancelAnimationFrame(scanLoopRef.current); scanLoopRef.current = null; }
     if (streamRef.current) {
+      try { streamRef.current._zxingReader?.reset(); } catch {}
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
@@ -6665,10 +6666,6 @@ function WeeklyPlanner({
 
   const startCamera = async () => {
     setCameraError("");
-    if (!("BarcodeDetector" in window)) {
-      setCameraError("Your browser doesn't support live scanning. Enter the barcode manually below, or try Chrome/Edge on mobile.");
-      return;
-    }
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraError("Camera not available on this device.");
       return;
@@ -6680,7 +6677,6 @@ function WeeklyPlanner({
       });
       streamRef.current = stream;
       setCameraActive(true);
-      // Wait for video element to mount
       setTimeout(() => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -6688,34 +6684,58 @@ function WeeklyPlanner({
         }
       }, 50);
 
-      const detector = new window.BarcodeDetector({
-        formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "qr_code"],
-      });
-      let lastCode = null;
-      let scanning = true;
-      const loop = async () => {
-        if (!scanning || !videoRef.current) return;
-        if (videoRef.current.readyState === 4) {
-          try {
-            const codes = await detector.detect(videoRef.current);
-            if (codes.length > 0) {
-              const code = codes[0].rawValue;
-              if (code && code !== lastCode) {
-                lastCode = code;
-                scanning = false;
-                // Haptic feedback if supported
-                if (navigator.vibrate) navigator.vibrate(100);
-                setBarcodeInput(code);
-                stopCamera();
-                lookupBarcode(code);
-                return;
-              }
-            }
-          } catch (e) { /* detection failed this frame, keep going */ }
-        }
-        scanLoopRef.current = requestAnimationFrame(loop);
+      const handleDetectedCode = (code) => {
+        if (!code) return;
+        if (navigator.vibrate) navigator.vibrate(100);
+        setBarcodeInput(code);
+        stopCamera();
+        lookupBarcode(code);
       };
-      scanLoopRef.current = requestAnimationFrame(loop);
+
+      // Path 1: Native BarcodeDetector (Chrome, Edge, Android, iOS Safari 17+)
+      if ("BarcodeDetector" in window) {
+        const detector = new window.BarcodeDetector({
+          formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "qr_code"],
+        });
+        let lastCode = null;
+        let scanning = true;
+        const loop = async () => {
+          if (!scanning || !videoRef.current) return;
+          if (videoRef.current.readyState === 4) {
+            try {
+              const codes = await detector.detect(videoRef.current);
+              if (codes.length > 0) {
+                const code = codes[0].rawValue;
+                if (code && code !== lastCode) {
+                  lastCode = code;
+                  scanning = false;
+                  handleDetectedCode(code);
+                  return;
+                }
+              }
+            } catch {}
+          }
+          scanLoopRef.current = requestAnimationFrame(loop);
+        };
+        scanLoopRef.current = requestAnimationFrame(loop);
+        return;
+      }
+
+      // Path 2: Fallback — dynamically load ZXing from CDN (works on Safari desktop, Firefox)
+      try {
+        const zxing = await import(/* @vite-ignore */ "https://esm.sh/@zxing/browser@0.1.5");
+        const reader = new zxing.BrowserMultiFormatReader();
+        streamRef.current._zxingReader = reader; // keep ref so we can stop
+        reader.decodeFromVideoElementContinuously(videoRef.current, (result, err) => {
+          if (result) {
+            try { reader.reset(); } catch {}
+            handleDetectedCode(result.getText());
+          }
+        });
+      } catch (e) {
+        setCameraError("Live scanning isn't available in this browser. Enter the barcode manually below, or use Chrome/Edge/mobile Safari.");
+        stopCamera();
+      }
     } catch (e) {
       setCameraError(e.name === "NotAllowedError" ? "Camera permission denied. Allow camera access in browser settings." : `Camera error: ${e.message}`);
       setCameraActive(false);
@@ -7157,6 +7177,50 @@ function WeeklyPlanner({
       const rows = await apiFetch(`/foods/search?q=${encodeURIComponent(query)}`);
       setCustomFoodResults(Array.isArray(rows) ? rows.slice(0, 20) : []);
     } catch { setCustomFoodResults([]); }
+
+    // 4. OpenFoodFacts text search (brands like Tesco, Sainsbury's, etc.)
+    if (query.trim().length >= 3) {
+      try {
+        const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=15&fields=code,product_name,brands,nutriments`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const json = await res.json();
+          const products = Array.isArray(json.products) ? json.products : [];
+          const offMapped = products
+            .map((p) => {
+              const n = p.nutriments || {};
+              const cal = Math.round(Number(n["energy-kcal_100g"] || n["energy-kcal"] || (n.energy_100g ? n.energy_100g / 4.184 : 0)) || 0);
+              const prot = Math.round(Number(n.proteins_100g || 0));
+              const carb = Math.round(Number(n.carbohydrates_100g || 0));
+              const fat = Math.round(Number(n.fat_100g || 0));
+              const name = p.product_name || p.product_name_en || "";
+              if (!name || cal === 0) return null;
+              return {
+                id: `off-${p.code}`,
+                barcode: p.code,
+                name,
+                brand: (p.brands || "").split(",")[0].trim() || null,
+                calories: cal,
+                protein_g: prot,
+                carbs_g: carb,
+                fat_g: fat,
+                fibre_g: 0,
+                serving_size: 100,
+                serving_unit: "g",
+                report_count: 0,
+                source: "openfoodfacts",
+              };
+            })
+            .filter(Boolean);
+          // Merge: backend results first, OFF results after (deduped by barcode)
+          setCustomFoodResults((prev) => {
+            const existingBarcodes = new Set(prev.map((r) => r.barcode).filter(Boolean));
+            const newOff = offMapped.filter((r) => !existingBarcodes.has(r.barcode));
+            return [...prev, ...newOff].slice(0, 40);
+          });
+        }
+      } catch { /* network/CORS — silent fail */ }
+    }
   };
 
   const selectFoodItem = (item) => {
@@ -8135,6 +8199,7 @@ function WeeklyPlanner({
                         🌐 COMMUNITY FOODS
                       </div>
                       {customFoodResults.map((row) => {
+                        const isOff = row.source === "openfoodfacts";
                         const item = {
                           n: row.name + (row.brand ? ` (${row.brand})` : ""),
                           cal: Number(row.calories) || 0,
@@ -8143,14 +8208,40 @@ function WeeklyPlanner({
                           f: Number(row.fat_g) || 0,
                           s: [[`${row.serving_size || 100}g`, Number(row.serving_size) || 100]],
                           foodId: row.id,
-                          source: "shared",
+                          source: isOff ? "openfoodfacts" : "shared",
                         };
                         const flagged = (row.report_count || 0) > 0;
+                        const handleSelect = async () => {
+                          selectFoodItem(item);
+                          // Auto-cache OFF items into our shared DB in the background
+                          if (isOff) {
+                            try {
+                              const saved = await apiFetch(`/foods`, {
+                                method: "POST",
+                                body: JSON.stringify({
+                                  barcode: row.barcode || null,
+                                  name: row.name,
+                                  brand: row.brand,
+                                  calories: row.calories,
+                                  protein_g: row.protein_g,
+                                  carbs_g: row.carbs_g,
+                                  fat_g: row.fat_g,
+                                  fibre_g: row.fibre_g || 0,
+                                  serving_size: row.serving_size || 100,
+                                  serving_unit: "g",
+                                }),
+                              });
+                              if (saved?.id) {
+                                setSelectedFoodItem((prev) => prev ? { ...prev, foodId: saved.id, source: "shared" } : prev);
+                              }
+                            } catch { /* already exists or failed — non-fatal */ }
+                          }
+                        };
                         return (
                           <div key={`custom-${row.id}`} style={{
                             display: "flex", gap: 6, marginBottom: 6, alignItems: "stretch",
                           }}>
-                            <button onClick={() => selectFoodItem(item)}
+                            <button onClick={handleSelect}
                               style={{
                                 flex: 1, textAlign: "left", padding: "10px 12px",
                                 background: selectedFoodItem?.foodId === row.id ? T.accent + "15" : T.card,
@@ -8160,6 +8251,7 @@ function WeeklyPlanner({
                               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                                 <span style={{ fontFamily: "DM Sans", fontSize: 12, color: T.text, fontWeight: 500, flex: 1 }}>
                                   {item.n}
+                                  {isOff && <span style={{ color: "#3b82f6", marginLeft: 6, fontSize: 9, fontWeight: 700 }}>🌐 ONLINE</span>}
                                   {flagged && <span style={{ color: "#f59e0b", marginLeft: 6, fontSize: 10 }}>⚠ flagged</span>}
                                 </span>
                                 <span style={{ fontFamily: "JetBrains Mono", fontSize: 11, color: T.accent, whiteSpace: "nowrap" }}>
@@ -8167,11 +8259,13 @@ function WeeklyPlanner({
                                 </span>
                               </div>
                             </button>
-                            <button onClick={() => reportCustomFood(row.id)} title="Report as incorrect"
-                              style={{
-                                background: "none", border: `1px solid ${T.border}`, borderRadius: 8,
-                                padding: "0 10px", color: T.muted, cursor: "pointer", fontSize: 12,
-                              }} type="button">⚠</button>
+                            {!isOff && (
+                              <button onClick={() => reportCustomFood(row.id)} title="Report as incorrect"
+                                style={{
+                                  background: "none", border: `1px solid ${T.border}`, borderRadius: 8,
+                                  padding: "0 10px", color: T.muted, cursor: "pointer", fontSize: 12,
+                                }} type="button">⚠</button>
+                            )}
                           </div>
                         );
                       })}
