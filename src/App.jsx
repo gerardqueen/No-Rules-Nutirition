@@ -8130,7 +8130,7 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
               {threadMessages.length === 0 ? (
                 <div style={{ textAlign: "center", color: T.muted, fontFamily: "DM Sans", fontSize: 12, padding: 30 }}>No messages yet</div>
               ) : threadMessages.map((m, i) => {
-                const isUser = m.fromId === profile?.id;
+                const isUser = Number(m.fromId) === Number(profile?.id);
                 const showDate = i === 0 || new Date(m.created_at).toDateString() !== new Date(threadMessages[i-1]?.created_at).toDateString();
                 return (
                   <div key={m.id || i}>
