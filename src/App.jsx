@@ -3961,6 +3961,15 @@ function Dashboard({
   setEvents,
   onWeightSaved,
 }) {
+  // Responsive: switch to single column on narrow screens so the calendar
+  // (in the right column) stacks below the main content instead of disappearing.
+  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth < 900);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 900);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   // Aggregate totals across the whole week for the overview
   const wd = getCurrentWeekDates();
   const weekTotals = wd.reduce(
@@ -4287,11 +4296,11 @@ function Dashboard({
         </button>
       </div>
 
-      {/* ── Main 2-column layout ── */}
+      {/* ── Main 2-column layout (stacks on mobile so calendar stays visible) ── */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 300px",
+          gridTemplateColumns: isMobile ? "1fr" : "1fr 300px",
           gap: 20,
           alignItems: "start",
         }}
@@ -5181,11 +5190,12 @@ function WeeklyPlanner({
     if (!barcodeResult) return;
     const item = {
       n: barcodeResult.n,
-      cal: barcodeResult.cal,
+      c: barcodeResult.cal, // scaleMacros uses .c for calories
       p: barcodeResult.p,
-      c: barcodeResult.c,
+      b: barcodeResult.c,   // scaleMacros uses .b for carbs (barcode result stores carbs as .c)
       f: barcodeResult.f,
       s: barcodeResult.s,
+      foodId: barcodeResult.foodId || null,
     };
     setSelectedFoodItem(item);
     setPickerTab("search");
@@ -6768,6 +6778,7 @@ function WeeklyPlanner({
                                 display: "flex",
                                 flexWrap: "wrap",
                                 gap: 6,
+                                marginBottom: 8,
                               }}
                             >
                               {barcodeResult.s.map(([label, grams], i) => (
@@ -6802,6 +6813,34 @@ function WeeklyPlanner({
                                   {label} ({grams}g)
                                 </button>
                               ))}
+                            </div>
+                            {/* Custom gram input — same as search tab */}
+                            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                              <span style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, minWidth: 60 }}>CUSTOM:</span>
+                              <input
+                                type="number"
+                                min="1"
+                                max="2000"
+                                value={servingGrams}
+                                onChange={(e) => {
+                                  const v = Math.max(1, parseInt(e.target.value) || 1);
+                                  setServingGrams(v);
+                                  setServingLabel(`${v}g`);
+                                }}
+                                style={{
+                                  width: 80,
+                                  padding: "5px 8px",
+                                  background: T.surface,
+                                  border: `1px solid ${T.border}`,
+                                  borderRadius: 8,
+                                  color: T.text,
+                                  fontFamily: "JetBrains Mono",
+                                  fontSize: 13,
+                                  outline: "none",
+                                  textAlign: "center",
+                                }}
+                              />
+                              <span style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted }}>grams</span>
                             </div>
                           </div>
                         )}
@@ -6880,7 +6919,21 @@ function WeeklyPlanner({
                           100g
                         </div>
                         <button
-                          onClick={selectFromBarcode}
+                          onClick={() => {
+                            // Build the food entry directly from barcode result + current servingGrams
+                            const r = servingGrams / 100;
+                            const food = {
+                              name: barcodeResult.n + (servingGrams !== 100 ? ` (${servingGrams}g)` : " (100g)"),
+                              calories: Math.round(barcodeResult.cal * r),
+                              protein: Math.round(barcodeResult.p * r),
+                              carbs: Math.round(barcodeResult.c * r),
+                              fat: Math.round(barcodeResult.f * r),
+                              grams: servingGrams,
+                              source: barcodeResult.source || "barcode",
+                              foodId: barcodeResult.foodId || null,
+                            };
+                            addFood(food);
+                          }}
                           style={{
                             width: "100%",
                             padding: "11px",
