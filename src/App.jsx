@@ -6189,7 +6189,7 @@ function Dashboard({
         </button>
       </div>
 
-      {/* ── Main 2-column layout (stacks on mobile so calendar stays visible) ── */}
+      {/* ── Main 2-column layout ── */}
       <div
         style={{
           display: "grid",
@@ -6631,8 +6631,6 @@ function WeeklyPlanner({
   const [showFoodPicker, setShowFoodPicker] = useState(false);
   const [foodSearch, setFoodSearch] = useState("");
   const [foodSearchResults, setFoodSearchResults] = useState([]);
-  const [offResults, setOffResults] = useState([]);
-  const [offSearching, setOffSearching] = useState(false);
   const [selectedFoodItem, setSelectedFoodItem] = useState(null);
   const [servingGrams, setServingGrams] = useState(100);
   const [servingLabel, setServingLabel] = useState("100g");
@@ -6640,7 +6638,6 @@ function WeeklyPlanner({
   const [barcodeInput, setBarcodeInput] = useState("");
   const [barcodeResult, setBarcodeResult] = useState(null);
   const [barcodeError, setBarcodeError] = useState("");
-  const [manualFood, setManualFood] = useState({ name: "", grams: "100", calories: "", protein: "", carbs: "", fat: "" });
   const [scanning, setScanning] = useState(false);
 
   // Mock barcode database (EAN-13 / UPC-A style)
@@ -6800,7 +6797,7 @@ function WeeklyPlanner({
     },
   };
 
-  const lookupBarcode = async (code) => {
+  const lookupBarcode = (code) => {
     const clean = code.replace(/\D/g, "");
     setBarcodeError("");
     setBarcodeResult(null);
@@ -6809,62 +6806,28 @@ function WeeklyPlanner({
       return;
     }
     setScanning(true);
-
-    // 1) Check local hardcoded DB first (fastest)
-    const localFound = BARCODE_DB[clean];
-    if (localFound) {
-      setBarcodeResult({ ...localFound, barcode: clean });
-      setServingGrams(localFound.s?.[0]?.[1] || 100);
-      setServingLabel(localFound.s?.[0]?.[0] || "100g");
+    setTimeout(() => {
       setScanning(false);
-      return;
-    }
-
-    // 2) Hit OpenFoodFacts via backend proxy
-    try {
-      const res = await apiFetch(`/off/barcode/${clean}`);
-      if (res && res.status === "found" && res.product) {
-        const p = res.product;
-        const item = {
-          n: p.name || "Unknown product",
-          cal: Math.round(Number(p.calories_per_100g) || 0),
-          p: Math.round((Number(p.protein_per_100g) || 0) * 10) / 10,
-          c: Math.round((Number(p.carbs_per_100g) || 0) * 10) / 10,
-          f: Math.round((Number(p.fat_per_100g) || 0) * 10) / 10,
-          s: [["100g", 100]],
-          source: "openfoodfacts",
-          barcode: clean,
-        };
-        // Add a serving size if OFF provided one
-        if (p.serving_size_g && Number(p.serving_size_g) > 0) {
-          item.s = [[`1 serving (${Math.round(Number(p.serving_size_g))}g)`, Math.round(Number(p.serving_size_g))], ["100g", 100]];
-        }
-        setBarcodeResult(item);
-        setServingGrams(item.s[0][1]);
-        setServingLabel(item.s[0][0]);
-        setScanning(false);
-        return;
+      const found = BARCODE_DB[clean];
+      if (found) {
+        setBarcodeResult({ ...found, barcode: clean });
+        setServingGrams(found.s?.[0]?.[1] || 100);
+        setServingLabel(found.s?.[0]?.[0] || "100g");
+      } else {
+        setBarcodeError(
+          `No product found for barcode ${clean}. Try one of the demo barcodes below.`
+        );
       }
-      // Not found in OFF either
-      setBarcodeError(
-        `No product found for barcode ${clean}. You can add it manually below.`
-      );
-    } catch (e) {
-      console.warn("Barcode lookup failed:", e);
-      setBarcodeError(
-        `Lookup failed: ${e.message || "Network error"}. You can add it manually below.`
-      );
-    }
-    setScanning(false);
+    }, 900);
   };
 
   const selectFromBarcode = () => {
     if (!barcodeResult) return;
     const item = {
       n: barcodeResult.n,
-      c: barcodeResult.cal, // scaleMacros uses .c for calories
+      cal: barcodeResult.cal,
       p: barcodeResult.p,
-      b: barcodeResult.c,   // scaleMacros uses .b for carbs (barcode result stores carbs as .c)
+      c: barcodeResult.c,
       f: barcodeResult.f,
       s: barcodeResult.s,
     };
@@ -6878,8 +6841,6 @@ function WeeklyPlanner({
     setShowFoodPicker(false);
     setFoodSearch("");
     setFoodSearchResults([]);
-    setOffResults([]);
-    setOffSearching(false);
     setSelectedFoodItem(null);
     setPickerTab("search");
     setBarcodeResult(null);
@@ -6891,7 +6852,6 @@ function WeeklyPlanner({
   const handleFoodSearch = (query) => {
     setFoodSearch(query);
     setSelectedFoodItem(null);
-    setOffResults([]);
     if (query.trim().length < 2) {
       setFoodSearchResults([]);
       return;
@@ -6904,43 +6864,10 @@ function WeeklyPlanner({
     setFoodSearchResults(results);
   };
 
-  // Search OpenFoodFacts via backend proxy
-  const searchOpenFoodFacts = async () => {
-    if (!foodSearch.trim() || offSearching) return;
-    setOffSearching(true);
-    setOffResults([]);
-    try {
-      const res = await apiFetch(`/off/search?q=${encodeURIComponent(foodSearch.trim())}`);
-      if (res && Array.isArray(res.products)) {
-        const items = res.products.map(p => ({
-          n: p.name || "Unknown",
-          c: Math.round(Number(p.calories_per_100g) || 0),
-          p: Math.round((Number(p.protein_per_100g) || 0) * 10) / 10,
-          b: Math.round((Number(p.carbs_per_100g) || 0) * 10) / 10,
-          f: Math.round((Number(p.fat_per_100g) || 0) * 10) / 10,
-          s: p.serving_size_g && Number(p.serving_size_g) > 0
-            ? [[`1 serving (${Math.round(Number(p.serving_size_g))}g)`, Math.round(Number(p.serving_size_g))], ["100g", 100]]
-            : [["100g", 100]],
-          source: "openfoodfacts",
-          brand: p.brand || null,
-          barcode: p.barcode || null,
-        }));
-        setOffResults(items);
-      }
-    } catch (e) { console.warn("OFF search failed:", e); }
-    setOffSearching(false);
-  };
-
   const selectFoodItem = (item) => {
     setSelectedFoodItem(item);
-    // If the item has a serving size, use it; otherwise default to 100g
-    if (item.s && item.s[0] && item.s[0][1]) {
-      setServingGrams(item.s[0][1]);
-      setServingLabel(item.s[0][0]);
-    } else {
-      setServingGrams(100);
-      setServingLabel("100g");
-    }
+    setServingGrams(100);
+    setServingLabel("100g");
   };
 
   const addFood = (food) => {
@@ -7787,95 +7714,25 @@ function WeeklyPlanner({
                       <div
                         style={{
                           textAlign: "center",
-                          padding: "30px 0 14px",
+                          padding: "30px 0",
                           color: T.muted,
                         }}
                       >
                         <div style={{ fontSize: 32, marginBottom: 10 }}>😕</div>
                         <div style={{ fontFamily: "DM Sans", fontSize: 13 }}>
-                          No foods in our database for "{foodSearch}"
+                          No foods found for "{foodSearch}"
                         </div>
                         <div
                           style={{
                             fontFamily: "DM Sans",
                             fontSize: 11,
                             marginTop: 6,
-                            marginBottom: 14,
                           }}
                         >
-                          Search OpenFoodFacts (3M+ products) for branded items
+                          Try a different spelling or shorter search
                         </div>
-                        <button
-                          onClick={searchOpenFoodFacts}
-                          disabled={offSearching}
-                          style={{
-                            background: T.coachGreen,
-                            color: "#fff",
-                            border: "none",
-                            borderRadius: 10,
-                            padding: "10px 22px",
-                            fontFamily: "Bebas Neue",
-                            fontSize: 13,
-                            letterSpacing: 1.5,
-                            cursor: offSearching ? "default" : "pointer",
-                          }}
-                          type="button"
-                        >
-                          {offSearching ? "SEARCHING…" : "🔎 SEARCH OPENFOODFACTS"}
-                        </button>
                       </div>
                     )}
-
-                  {/* OpenFoodFacts results */}
-                  {offResults.length > 0 && (
-                    <div style={{ marginBottom: 14 }}>
-                      <div
-                        style={{
-                          fontFamily: "DM Sans",
-                          fontSize: 11,
-                          color: T.coachGreen,
-                          marginBottom: 8,
-                          letterSpacing: 1,
-                          textTransform: "uppercase",
-                        }}
-                      >
-                        OpenFoodFacts · {offResults.length} results
-                      </div>
-                      {offResults.map((item, i) => (
-                        <button
-                          key={`off-${i}`}
-                          onClick={() => selectFoodItem(item)}
-                          style={{
-                            width: "100%",
-                            textAlign: "left",
-                            padding: "10px 12px",
-                            background: selectedFoodItem === item ? T.coachGreen + "15" : T.card,
-                            border: `1px solid ${selectedFoodItem === item ? T.coachGreen : T.border}`,
-                            borderRadius: 10,
-                            cursor: "pointer",
-                            marginBottom: 6,
-                          }}
-                          type="button"
-                        >
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.text, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {item.n}
-                              </div>
-                              {item.brand && (
-                                <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, marginTop: 2 }}>
-                                  {item.brand}
-                                </div>
-                              )}
-                            </div>
-                            <span style={{ fontFamily: "JetBrains Mono", fontSize: 11, color: T.coachGreen, whiteSpace: "nowrap" }}>
-                              {item.c} kcal/100g
-                            </span>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
                   {/* Search results */}
                   {foodSearchResults.length > 0 && (
                     <div>
@@ -8163,165 +8020,20 @@ function WeeklyPlanner({
 
                 {/* Error */}
                 {barcodeError && (
-                  <>
-                    <div
-                      style={{
-                        background: `${T.danger}18`,
-                        border: `1px solid ${T.danger}44`,
-                        borderRadius: 10,
-                        padding: "10px 14px",
-                        marginBottom: 14,
-                        fontFamily: "DM Sans",
-                        fontSize: 12,
-                        color: T.danger,
-                      }}
-                    >
-                      {barcodeError}
-                    </div>
-
-                    {/* Manual entry option */}
-                    <div
-                      style={{
-                        background: T.card,
-                        border: `2px solid ${T.accent}55`,
-                        borderRadius: 14,
-                        padding: 16,
-                        marginBottom: 16,
-                      }}
-                    >
-                      <div style={{ fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 2, color: T.accent, marginBottom: 4 }}>
-                        ADD FOOD MANUALLY
-                      </div>
-                      <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, marginBottom: 12 }}>
-                        Product not in our database — enter the details from the packaging.
-                      </div>
-                      <div style={{ display: "grid", gap: 8, marginBottom: 8 }}>
-                        <input
-                          placeholder="Product name (e.g. Greek Yogurt 500g)"
-                          value={manualFood.name}
-                          onChange={(e) => setManualFood(p => ({ ...p, name: e.target.value }))}
-                          style={{
-                            padding: "9px 12px", background: T.surface, border: `1px solid ${T.border}`,
-                            borderRadius: 8, color: T.text, fontFamily: "DM Sans", fontSize: 12, outline: "none",
-                          }}
-                        />
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                          <div>
-                            <label style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, letterSpacing: 1, textTransform: "uppercase" }}>Grams</label>
-                            <input
-                              type="number"
-                              min="1"
-                              max="2000"
-                              value={manualFood.grams}
-                              onChange={(e) => setManualFood(p => ({ ...p, grams: e.target.value }))}
-                              placeholder="100"
-                              style={{
-                                width: "100%", padding: "8px 10px", background: T.surface, border: `1px solid ${T.border}`,
-                                borderRadius: 8, color: T.text, fontFamily: "JetBrains Mono", fontSize: 12, outline: "none",
-                              }}
-                            />
-                          </div>
-                          <div>
-                            <label style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, letterSpacing: 1, textTransform: "uppercase" }}>Calories</label>
-                            <input
-                              type="number"
-                              min="0"
-                              value={manualFood.calories}
-                              onChange={(e) => setManualFood(p => ({ ...p, calories: e.target.value }))}
-                              placeholder="kcal"
-                              style={{
-                                width: "100%", padding: "8px 10px", background: T.surface, border: `1px solid ${T.border}`,
-                                borderRadius: 8, color: T.text, fontFamily: "JetBrains Mono", fontSize: 12, outline: "none",
-                              }}
-                            />
-                          </div>
-                        </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-                          <div>
-                            <label style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, letterSpacing: 1, textTransform: "uppercase" }}>Protein</label>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.1"
-                              value={manualFood.protein}
-                              onChange={(e) => setManualFood(p => ({ ...p, protein: e.target.value }))}
-                              placeholder="g"
-                              style={{
-                                width: "100%", padding: "8px 10px", background: T.surface, border: `1px solid ${T.border}`,
-                                borderRadius: 8, color: T.text, fontFamily: "JetBrains Mono", fontSize: 12, outline: "none",
-                              }}
-                            />
-                          </div>
-                          <div>
-                            <label style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, letterSpacing: 1, textTransform: "uppercase" }}>Carbs</label>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.1"
-                              value={manualFood.carbs}
-                              onChange={(e) => setManualFood(p => ({ ...p, carbs: e.target.value }))}
-                              placeholder="g"
-                              style={{
-                                width: "100%", padding: "8px 10px", background: T.surface, border: `1px solid ${T.border}`,
-                                borderRadius: 8, color: T.text, fontFamily: "JetBrains Mono", fontSize: 12, outline: "none",
-                              }}
-                            />
-                          </div>
-                          <div>
-                            <label style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, letterSpacing: 1, textTransform: "uppercase" }}>Fat</label>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.1"
-                              value={manualFood.fat}
-                              onChange={(e) => setManualFood(p => ({ ...p, fat: e.target.value }))}
-                              placeholder="g"
-                              style={{
-                                width: "100%", padding: "8px 10px", background: T.surface, border: `1px solid ${T.border}`,
-                                borderRadius: 8, color: T.text, fontFamily: "JetBrains Mono", fontSize: 12, outline: "none",
-                              }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          if (!manualFood.name.trim()) { alert("Enter a product name"); return; }
-                          const cals = parseFloat(manualFood.calories) || 0;
-                          if (cals <= 0) { alert("Enter calories"); return; }
-                          const grams = parseFloat(manualFood.grams) || 100;
-                          const food = {
-                            name: manualFood.name.trim() + ` (${grams}g)`,
-                            calories: Math.round(cals),
-                            protein: Math.round((parseFloat(manualFood.protein) || 0) * 10) / 10,
-                            carbs: Math.round((parseFloat(manualFood.carbs) || 0) * 10) / 10,
-                            fat: Math.round((parseFloat(manualFood.fat) || 0) * 10) / 10,
-                            grams: grams,
-                            source: "manual",
-                          };
-                          addFood(food);
-                          setManualFood({ name: "", grams: "100", calories: "", protein: "", carbs: "", fat: "" });
-                          setBarcodeError("");
-                          setBarcodeInput("");
-                        }}
-                        disabled={!manualFood.name.trim() || !manualFood.calories}
-                        style={{
-                          width: "100%",
-                          padding: "11px",
-                          background: manualFood.name.trim() && manualFood.calories ? T.accent : T.border,
-                          color: manualFood.name.trim() && manualFood.calories ? T.bg : T.muted,
-                          border: "none",
-                          borderRadius: 10,
-                          fontFamily: "Bebas Neue",
-                          fontSize: 16,
-                          letterSpacing: 2,
-                          cursor: manualFood.name.trim() && manualFood.calories ? "pointer" : "default",
-                        }}
-                      >
-                        ADD TO {selectedMeal?.toUpperCase()} ➜
-                      </button>
-                    </div>
-                  </>
+                  <div
+                    style={{
+                      background: `${T.danger}18`,
+                      border: `1px solid ${T.danger}44`,
+                      borderRadius: 10,
+                      padding: "10px 14px",
+                      marginBottom: 14,
+                      fontFamily: "DM Sans",
+                      fontSize: 12,
+                      color: T.danger,
+                    }}
+                  >
+                    {barcodeError}
+                  </div>
                 )}
 
                 {/* Result */}
@@ -8450,7 +8162,7 @@ function WeeklyPlanner({
                               ))}
                             </div>
                             {/* Custom gram input */}
-                            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
                               <span style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, minWidth: 60 }}>CUSTOM:</span>
                               <input
                                 type="number"
@@ -8557,11 +8269,11 @@ function WeeklyPlanner({
                           onClick={() => {
                             const r = servingGrams / 100;
                             const food = {
-                              name: barcodeResult.n + (servingGrams !== 100 ? ` (${servingGrams}g)` : " (100g)"),
+                              name: barcodeResult.n + ` (${servingGrams}g)`,
                               calories: Math.round(barcodeResult.cal * r),
-                              protein: Math.round(barcodeResult.p * r),
-                              carbs: Math.round(barcodeResult.c * r),
-                              fat: Math.round(barcodeResult.f * r),
+                              protein: Math.round((barcodeResult.p || 0) * r * 10) / 10,
+                              carbs: Math.round((barcodeResult.c || 0) * r * 10) / 10,
+                              fat: Math.round((barcodeResult.f || 0) * r * 10) / 10,
                               grams: servingGrams,
                               source: "barcode",
                             };
