@@ -410,10 +410,10 @@ function ProfileMenu({ profile, onLogout, onNavigate }) {
       },
     },
     {
-      icon: "🔗",
-      label: "MFP Integration",
+      icon: "📅",
+      label: "Calendar",
       action: () => {
-        onNavigate("mfp");
+        onNavigate("calendar");
         setOpen(false);
       },
     },
@@ -8107,7 +8107,7 @@ function WeeklyPlanner({
                         >
                           {barcodeResult.n}
                         </div>
-                        {/* Serving selector */}
+                        {/* Serving selector — preset buttons (only when API provides them) */}
                         {barcodeResult.s && barcodeResult.s.length > 0 && (
                           <div style={{ marginBottom: 10 }}>
                             <div
@@ -8125,7 +8125,6 @@ function WeeklyPlanner({
                                 display: "flex",
                                 flexWrap: "wrap",
                                 gap: 6,
-                                marginBottom: 8,
                               }}
                             >
                               {barcodeResult.s.map(([label, grams], i) => (
@@ -8161,36 +8160,63 @@ function WeeklyPlanner({
                                 </button>
                               ))}
                             </div>
-                            {/* Custom gram input */}
-                            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
-                              <span style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, minWidth: 60 }}>CUSTOM:</span>
-                              <input
-                                type="number"
-                                min="1"
-                                max="2000"
-                                value={servingGrams}
-                                onChange={(e) => {
-                                  const v = Math.max(1, parseInt(e.target.value) || 1);
-                                  setServingGrams(v);
-                                  setServingLabel(`${v}g`);
-                                }}
-                                style={{
-                                  width: 80,
-                                  padding: "5px 8px",
-                                  background: T.surface,
-                                  border: `1px solid ${T.border}`,
-                                  borderRadius: 8,
-                                  color: T.text,
-                                  fontFamily: "JetBrains Mono",
-                                  fontSize: 13,
-                                  outline: "none",
-                                  textAlign: "center",
-                                }}
-                              />
-                              <span style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted }}>grams</span>
-                            </div>
                           </div>
                         )}
+                        {/* Custom gram input — ALWAYS visible (mobile + desktop) */}
+                        <div style={{ marginBottom: 12 }}>
+                          <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, marginBottom: 6 }}>
+                            ENTER PORTION SIZE:
+                          </div>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const v = Math.max(1, servingGrams - 10);
+                                setServingGrams(v);
+                                setServingLabel(`${v}g`);
+                              }}
+                              style={{
+                                width: 36, height: 36, borderRadius: 8,
+                                background: T.surface, border: `1px solid ${T.border}`,
+                                color: T.text, fontSize: 18, fontWeight: 700, cursor: "pointer",
+                              }}
+                            >−</button>
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              min="1"
+                              max="2000"
+                              value={servingGrams}
+                              onChange={(e) => {
+                                const v = Math.max(1, parseInt(e.target.value) || 1);
+                                setServingGrams(v);
+                                setServingLabel(`${v}g`);
+                              }}
+                              style={{
+                                flex: 1, padding: "8px 12px",
+                                background: T.surface, border: `1px solid ${T.border}`,
+                                borderRadius: 8, color: T.text,
+                                fontFamily: "JetBrains Mono", fontSize: 16,
+                                outline: "none", textAlign: "center",
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const v = Math.min(2000, servingGrams + 10);
+                                setServingGrams(v);
+                                setServingLabel(`${v}g`);
+                              }}
+                              style={{
+                                width: 36, height: 36, borderRadius: 8,
+                                background: T.surface, border: `1px solid ${T.border}`,
+                                color: T.text, fontSize: 18, fontWeight: 700, cursor: "pointer",
+                              }}
+                            >+</button>
+                            <span style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, minWidth: 36 }}>grams</span>
+                          </div>
+                        </div>
                         {/* Macro preview */}
                         <div
                           style={{
@@ -9988,8 +10014,8 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
     { id: "dashboard", label: "DASHBOARD" },
     { id: "meals", label: "MEAL PLAN" },
     { id: "tracker", label: "MACRO TRACKER" },
+    { id: "calendar", label: "📅 CALENDAR" },
     { id: "inbox", label: "📥 INBOX", highlight: true },
-    { id: "mfp", label: "MFP SYNC", mfp: true },
   ];
 
   return (
@@ -10237,7 +10263,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
             />
           </div>
         )}
-        {tab === "mfp" && (
+        {tab === "calendar" && (
           <div style={{ minHeight: 400 }}>
             <div style={{ marginBottom: 20 }}>
               <div
@@ -10248,7 +10274,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
                   color: T.text,
                 }}
               >
-                MYFITNESSPAL INTEGRATION
+                CALENDAR
               </div>
               <div
                 style={{
@@ -10258,43 +10284,10 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
                   marginTop: 4,
                 }}
               >
-                Sync your food diary · Coach sees your adherence in real time · Link your MFP username below
+                Upcoming sessions, check-ins and competitions
               </div>
             </div>
-            <MFPPanel
-              plan={plan}
-              selectedDay={selectedDay}
-              account={profile}
-              mfpData={mfpData}
-              mfpConnected={mfpConnected}
-              mfpSyncing={mfpSyncing}
-              mfpLastSync={mfpLastSync}
-              mfpError={mfpError}
-              mfpNextSyncIn={mfpNextSyncIn}
-              mfpSyncCount={mfpSyncCount}
-              mfpManualMode={mfpManualMode}
-              onSubmitManual={submitManualMFP}
-              onConnect={() =>
-                mfpUsername && fetchMFP(mfpUsername, plan[selectedDay])
-              }
-              onSync={() =>
-                mfpUsername && fetchMFP(mfpUsername, plan[selectedDay])
-              }
-              onDisconnect={() => {
-                setMfpConnected(false);
-                setMfpData(null);
-                setMfpError(null);
-                setMfpManualMode(false);
-                setProfile((prev) => ({ ...prev, mfpUsername: null }));
-              }}
-              onImport={() => importMFPDay(selectedDay)}
-              onSetMfpUsername={handleSetMfpUsername}
-              onEnterManual={() => {
-                setMfpManualMode(true);
-                setMfpConnected(true);
-                setMfpError(null);
-              }}
-            />
+            <MiniCalendar events={events} setEvents={setEvents} profileId={profile?.id} />
           </div>
         )}
       </div>
