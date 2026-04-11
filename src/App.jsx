@@ -6902,114 +6902,6 @@ function WeeklyPlanner({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      {/* MFP live sync banner */}
-      {mfpConnected && mfpData && (
-        <div
-          style={{
-            background: `linear-gradient(135deg, ${T.mfp}14, ${T.mfp}06)`,
-            border: `1px solid ${T.mfp}55`,
-            borderRadius: 14,
-            padding: "12px 18px",
-            display: "flex",
-            alignItems: "center",
-            gap: 14,
-            flexWrap: "wrap",
-          }}
-        >
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 8,
-              background: `linear-gradient(135deg, ${T.mfp}, #0066cc)`,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontFamily: "Bebas Neue",
-              fontSize: 12,
-              color: "#fff",
-              flexShrink: 0,
-            }}
-          >
-            MFP
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                fontFamily: "DM Sans",
-                fontSize: 12,
-                fontWeight: 600,
-                color: T.text,
-              }}
-            >
-              MyFitnessPal synced
-              {mfpLastSync && (
-                <span
-                  style={{
-                    fontFamily: "JetBrains Mono",
-                    fontSize: 10,
-                    color: T.muted,
-                    marginLeft: 8,
-                  }}
-                >
-                  {mfpLastSync.toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </span>
-              )}
-            </div>
-            <div
-              style={{
-                fontFamily: "JetBrains Mono",
-                fontSize: 10,
-                color: T.muted,
-                marginTop: 1,
-              }}
-            >
-              {mfpData.calories} kcal · {mfpData.protein}g protein ·{" "}
-              {mfpData.carbs}g carbs · {mfpData.fat}g fat logged today
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-            <button
-              onClick={onSyncNow}
-              disabled={mfpSyncing}
-              style={{
-                background: T.surface,
-                border: `1px solid ${T.border}`,
-                color: T.accent,
-                borderRadius: 8,
-                padding: "6px 14px",
-                fontFamily: "Bebas Neue",
-                fontSize: 12,
-                letterSpacing: 1,
-                cursor: "pointer",
-              }}
-            >
-              {mfpSyncing ? "SYNCING…" : "↻ SYNC"}
-            </button>
-            <button
-              onClick={handleImportToday}
-              style={{
-                background: importedDay === selectedDay ? T.coachGreen : T.mfp,
-                color: "#fff",
-                border: "none",
-                borderRadius: 8,
-                padding: "6px 14px",
-                fontFamily: "Bebas Neue",
-                fontSize: 12,
-                letterSpacing: 1,
-                cursor: "pointer",
-                transition: "background 0.3s",
-              }}
-            >
-              {importedDay === selectedDay ? "✓ IMPORTED" : "IMPORT TODAY"}
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Day tabs */}
       <div style={{ display: "flex", gap: 8 }}>
         {DAYS.map((d) => {
@@ -9485,6 +9377,11 @@ export default function App() {
 
   // ── Live fetch via Anthropic API with web_fetch tool ──────────────────────
   const fetchMFP = async (username, dayPlan, isAutoRefresh = false) => {
+    // MFP integration disabled — feature can be re-enabled later if needed
+    return;
+  };
+  // Original fetchMFP body retained below as dead code so other refs still resolve
+  const _unused_fetchMFP = async (username, dayPlan, isAutoRefresh = false) => {
     if (!username) return;
     setMfpSyncing(true);
     if (!isAutoRefresh) setMfpError(null);
