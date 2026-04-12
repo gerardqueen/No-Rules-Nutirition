@@ -6638,6 +6638,12 @@ function WeeklyPlanner({
   const [barcodeInput, setBarcodeInput] = useState("");
   const [barcodeResult, setBarcodeResult] = useState(null);
   const [barcodeError, setBarcodeError] = useState("");
+  const [showManualBarcodeForm, setShowManualBarcodeForm] = useState(false);
+  const [manualBarcode, setManualBarcode] = useState("");
+  const [savingManualBarcode, setSavingManualBarcode] = useState(false);
+  const [manualBarcodeForm, setManualBarcodeForm] = useState({
+    name: "", calories: "", protein: "", carbs: "", fat: "", servingSize: "100"
+  });
   const [scanning, setScanning] = useState(false);
 
   // Mock barcode database (EAN-13 / UPC-A style)
@@ -6797,28 +6803,124 @@ function WeeklyPlanner({
     },
   };
 
-  const lookupBarcode = (code) => {
+  const lookupBarcode = async (code) => {
     const clean = code.replace(/\D/g, "");
     setBarcodeError("");
     setBarcodeResult(null);
+    setShowManualBarcodeForm(false);
     if (clean.length < 8) {
       setBarcodeError("Barcode must be at least 8 digits");
       return;
     }
     setScanning(true);
-    setTimeout(() => {
+
+    // 1) Local hardcoded DB (instant)
+    const localFound = BARCODE_DB[clean];
+    if (localFound) {
+      setBarcodeResult({ ...localFound, barcode: clean });
+      setServingGrams(localFound.s?.[0]?.[1] || 100);
+      setServingLabel(localFound.s?.[0]?.[0] || "100g");
       setScanning(false);
-      const found = BARCODE_DB[clean];
-      if (found) {
-        setBarcodeResult({ ...found, barcode: clean });
-        setServingGrams(found.s?.[0]?.[1] || 100);
-        setServingLabel(found.s?.[0]?.[0] || "100g");
-      } else {
-        setBarcodeError(
-          `No product found for barcode ${clean}. Try one of the demo barcodes below.`
-        );
+      return;
+    }
+
+    // 2) Try the app's own foods database (community foods previously saved)
+    try {
+      const dbRes = await apiFetch(`/foods/barcode/${clean}`);
+      if (dbRes && dbRes.found) {
+        const f = dbRes.food || dbRes;
+        const grams = Number(f.serving_size_g) || 100;
+        const item = {
+          n: f.name || "Product",
+          cal: Number(f.calories_per_100g) || 0,
+          p: Number(f.protein_per_100g) || 0,
+          c: Number(f.carbs_per_100g) || 0,
+          f: Number(f.fat_per_100g) || 0,
+          s: [[`${grams}g`, grams]],
+          source: "community",
+          barcode: clean,
+          foodId: f.id,
+        };
+        setBarcodeResult(item);
+        setServingGrams(grams);
+        setServingLabel(`${grams}g`);
+        setScanning(false);
+        return;
       }
-    }, 900);
+    } catch (_) { /* fall through */ }
+
+    // 3) Try OpenFoodFacts via backend proxy
+    try {
+      const offRes = await apiFetch(`/off/barcode/${clean}`);
+      if (offRes && (offRes.status === "found" || offRes.product)) {
+        const p = offRes.product || offRes;
+        const grams = Number(p.serving_size_g) > 0 ? Math.round(Number(p.serving_size_g)) : 100;
+        const item = {
+          n: p.name || "Unknown product",
+          cal: Math.round(Number(p.calories_per_100g) || 0),
+          p: Math.round((Number(p.protein_per_100g) || 0) * 10) / 10,
+          c: Math.round((Number(p.carbs_per_100g) || 0) * 10) / 10,
+          f: Math.round((Number(p.fat_per_100g) || 0) * 10) / 10,
+          s: grams !== 100 ? [[`1 serving (${grams}g)`, grams], ["100g", 100]] : [["100g", 100]],
+          source: "openfoodfacts",
+          barcode: clean,
+        };
+        setBarcodeResult(item);
+        setServingGrams(item.s[0][1]);
+        setServingLabel(item.s[0][0]);
+        setScanning(false);
+        return;
+      }
+    } catch (_) { /* fall through */ }
+
+    // 4) Not found anywhere — offer manual entry
+    setBarcodeError(`No product found for barcode ${clean}. Add it to the database below.`);
+    setManualBarcode(clean);
+    setShowManualBarcodeForm(true);
+    setScanning(false);
+  };
+
+  // Save a manually entered product to the community foods DB
+  const saveManualBarcodeProduct = async () => {
+    if (!manualBarcodeForm.name.trim()) { alert("Enter a product name"); return; }
+    const cals = parseFloat(manualBarcodeForm.calories);
+    if (!cals || cals <= 0) { alert("Enter calories per 100g"); return; }
+    setSavingManualBarcode(true);
+    try {
+      const res = await apiFetch(`/foods`, {
+        method: "POST",
+        body: JSON.stringify({
+          name: manualBarcodeForm.name.trim(),
+          barcode: manualBarcode,
+          calories_per_100g: cals,
+          protein_per_100g: parseFloat(manualBarcodeForm.protein) || 0,
+          carbs_per_100g: parseFloat(manualBarcodeForm.carbs) || 0,
+          fat_per_100g: parseFloat(manualBarcodeForm.fat) || 0,
+          serving_size_g: parseFloat(manualBarcodeForm.servingSize) || 100,
+        }),
+      });
+      // After successful save, populate barcodeResult so user can adjust grams + add to meal
+      const grams = parseFloat(manualBarcodeForm.servingSize) || 100;
+      setBarcodeResult({
+        n: manualBarcodeForm.name.trim(),
+        cal: cals,
+        p: parseFloat(manualBarcodeForm.protein) || 0,
+        c: parseFloat(manualBarcodeForm.carbs) || 0,
+        f: parseFloat(manualBarcodeForm.fat) || 0,
+        s: [[`${grams}g`, grams]],
+        source: "user-added",
+        barcode: manualBarcode,
+        foodId: res?.id || null,
+      });
+      setServingGrams(grams);
+      setServingLabel(`${grams}g`);
+      setShowManualBarcodeForm(false);
+      setBarcodeError("");
+      setManualBarcodeForm({ name: "", calories: "", protein: "", carbs: "", fat: "", servingSize: "100" });
+    } catch (e) {
+      alert(e.message || "Could not save product");
+    }
+    setSavingManualBarcode(false);
   };
 
   const selectFromBarcode = () => {
@@ -6846,6 +6948,9 @@ function WeeklyPlanner({
     setBarcodeResult(null);
     setBarcodeInput("");
     setBarcodeError("");
+    setShowManualBarcodeForm(false);
+    setManualBarcode("");
+    setManualBarcodeForm({ name: "", calories: "", protein: "", carbs: "", fat: "", servingSize: "100" });
   };
 
   // Search the FOOD_DB on input change
@@ -7150,7 +7255,8 @@ function WeeklyPlanner({
               border: `1px solid ${T.border}`,
               borderRadius: 20,
               width: "min(520px,95vw)",
-              maxHeight: "85vh",
+              maxHeight: "min(85vh, 85dvh)",
+              height: "min(85vh, 85dvh)",
               display: "flex",
               flexDirection: "column",
               overflow: "hidden",
@@ -7925,6 +8031,107 @@ function WeeklyPlanner({
                     }}
                   >
                     {barcodeError}
+                  </div>
+                )}
+
+                {/* Manual barcode entry form — appears when product not found */}
+                {showManualBarcodeForm && (
+                  <div
+                    style={{
+                      background: T.card,
+                      border: `2px solid ${T.accent}55`,
+                      borderRadius: 14,
+                      padding: 16,
+                      marginBottom: 16,
+                    }}
+                  >
+                    <div style={{ fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 2, color: T.accent, marginBottom: 4 }}>
+                      ADD NEW PRODUCT
+                    </div>
+                    <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, marginBottom: 12 }}>
+                      Barcode <span style={{ fontFamily: "JetBrains Mono", color: T.text }}>{manualBarcode}</span> isn't in our database. Add it from the package label and it'll be saved for everyone next time.
+                    </div>
+                    <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
+                      <input
+                        placeholder="Product name (e.g. Cadbury Dairy Milk 110g)"
+                        value={manualBarcodeForm.name}
+                        onChange={(e) => setManualBarcodeForm(p => ({ ...p, name: e.target.value }))}
+                        style={{
+                          padding: "10px 12px", background: T.surface, border: `1px solid ${T.border}`,
+                          borderRadius: 8, color: T.text, fontFamily: "DM Sans", fontSize: 13, outline: "none",
+                        }}
+                      />
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        <div>
+                          <label style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, letterSpacing: 1, textTransform: "uppercase" }}>Serving (g)</label>
+                          <input
+                            type="number" inputMode="numeric" min="1" max="2000"
+                            value={manualBarcodeForm.servingSize}
+                            onChange={(e) => setManualBarcodeForm(p => ({ ...p, servingSize: e.target.value }))}
+                            placeholder="100"
+                            style={{ width: "100%", padding: "9px 12px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontFamily: "JetBrains Mono", fontSize: 14, outline: "none" }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, letterSpacing: 1, textTransform: "uppercase" }}>Cals/100g</label>
+                          <input
+                            type="number" inputMode="numeric" min="0"
+                            value={manualBarcodeForm.calories}
+                            onChange={(e) => setManualBarcodeForm(p => ({ ...p, calories: e.target.value }))}
+                            placeholder="kcal"
+                            style={{ width: "100%", padding: "9px 12px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontFamily: "JetBrains Mono", fontSize: 14, outline: "none" }}
+                          />
+                        </div>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                        <div>
+                          <label style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, letterSpacing: 1, textTransform: "uppercase" }}>Protein/100g</label>
+                          <input
+                            type="number" inputMode="decimal" min="0" step="0.1"
+                            value={manualBarcodeForm.protein}
+                            onChange={(e) => setManualBarcodeForm(p => ({ ...p, protein: e.target.value }))}
+                            placeholder="g"
+                            style={{ width: "100%", padding: "9px 12px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontFamily: "JetBrains Mono", fontSize: 14, outline: "none" }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, letterSpacing: 1, textTransform: "uppercase" }}>Carbs/100g</label>
+                          <input
+                            type="number" inputMode="decimal" min="0" step="0.1"
+                            value={manualBarcodeForm.carbs}
+                            onChange={(e) => setManualBarcodeForm(p => ({ ...p, carbs: e.target.value }))}
+                            placeholder="g"
+                            style={{ width: "100%", padding: "9px 12px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontFamily: "JetBrains Mono", fontSize: 14, outline: "none" }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, letterSpacing: 1, textTransform: "uppercase" }}>Fat/100g</label>
+                          <input
+                            type="number" inputMode="decimal" min="0" step="0.1"
+                            value={manualBarcodeForm.fat}
+                            onChange={(e) => setManualBarcodeForm(p => ({ ...p, fat: e.target.value }))}
+                            placeholder="g"
+                            style={{ width: "100%", padding: "9px 12px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontFamily: "JetBrains Mono", fontSize: 14, outline: "none" }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={saveManualBarcodeProduct}
+                      disabled={savingManualBarcode || !manualBarcodeForm.name.trim() || !manualBarcodeForm.calories}
+                      style={{
+                        width: "100%",
+                        padding: "12px",
+                        background: manualBarcodeForm.name.trim() && manualBarcodeForm.calories ? T.accent : T.border,
+                        color: manualBarcodeForm.name.trim() && manualBarcodeForm.calories ? T.bg : T.muted,
+                        border: "none", borderRadius: 10,
+                        fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 2,
+                        cursor: manualBarcodeForm.name.trim() && manualBarcodeForm.calories ? "pointer" : "default",
+                      }}
+                      type="button"
+                    >
+                      {savingManualBarcode ? "SAVING…" : "💾 SAVE PRODUCT"}
+                    </button>
                   </div>
                 )}
 
@@ -9997,11 +10204,13 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
       <div
         style={{
           borderBottom: `1px solid ${T.border}`,
-          padding: "0 28px",
+          padding: "0 12px",
           display: "flex",
           alignItems: "center",
           gap: 2,
           overflowX: "auto",
+          flexWrap: "wrap",
+          WebkitOverflowScrolling: "touch",
         }}
       >
         {tabs.map((t) => (
