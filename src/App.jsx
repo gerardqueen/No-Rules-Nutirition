@@ -3779,70 +3779,6 @@ function MiniCalendar({ events, setEvents, profileId }) {
   );
 }
 
-// ── Coach Videos ──────────────────────────────────────────────────────────────
-const COACH_VIDEOS = [
-  {
-    id: 1,
-    title: "Hitting Your Protein Target",
-    coach: "Sarah Mitchell",
-    duration: "8:24",
-    category: "Nutrition",
-    thumb: "💪",
-    views: "1.2k",
-    date: "2 days ago",
-  },
-  {
-    id: 2,
-    title: "Pre-Workout Meal Timing Guide",
-    coach: "Sarah Mitchell",
-    duration: "12:05",
-    category: "Nutrition",
-    thumb: "⏱️",
-    views: "892",
-    date: "5 days ago",
-  },
-  {
-    id: 3,
-    title: "Carb Cycling for Performance",
-    coach: "Sarah Mitchell",
-    duration: "15:40",
-    category: "Advanced",
-    thumb: "🔄",
-    views: "2.1k",
-    date: "1 week ago",
-  },
-  {
-    id: 4,
-    title: "Managing Macros on Rest Days",
-    coach: "Sarah Mitchell",
-    duration: "9:18",
-    category: "Recovery",
-    thumb: "😴",
-    views: "674",
-    date: "2 weeks ago",
-  },
-  {
-    id: 5,
-    title: "Hydration & Electrolytes Explained",
-    coach: "Sarah Mitchell",
-    duration: "6:52",
-    category: "Basics",
-    thumb: "💧",
-    views: "1.8k",
-    date: "3 weeks ago",
-  },
-  {
-    id: 6,
-    title: "Supplement Stack Breakdown",
-    coach: "Sarah Mitchell",
-    duration: "18:30",
-    category: "Supplements",
-    thumb: "🧪",
-    views: "3.4k",
-    date: "1 month ago",
-  },
-];
-
 const categoryColors = {
   Nutrition: "#FF9A52",
   Advanced: T.protein,
@@ -3851,8 +3787,33 @@ const categoryColors = {
   Supplements: T.fat,
 };
 
-function CoachVideos() {
+function CoachVideos({ profileId }) {
   const [activeVideo, setActiveVideo] = useState(null);
+  const [videos, setVideos] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!profileId) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    apiFetch(`/coach-videos/${profileId}`)
+      .then((data) => {
+        if (cancelled) return;
+        const list = Array.isArray(data) ? data : (data?.videos || []);
+        setVideos(list);
+        setLoading(false);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e.message || "Could not load videos");
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [profileId]);
+
+  const categoryColor = (cat) => categoryColors[cat] || T.accent;
 
   return (
     <div>
@@ -3883,317 +3844,206 @@ function CoachVideos() {
               marginTop: 2,
             }}
           >
-            Latest content from Sarah Mitchell · Your personal nutrition coach
+            {videos.length > 0
+              ? `${videos.length} video${videos.length === 1 ? "" : "s"} from your coach`
+              : "Videos shared by your coach will appear here"}
           </div>
         </div>
+      </div>
+
+      {loading && (
+        <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, padding: 20, textAlign: "center" }}>
+          Loading videos…
+        </div>
+      )}
+
+      {error && !loading && (
+        <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.danger, padding: 20, textAlign: "center" }}>
+          {error}
+        </div>
+      )}
+
+      {!loading && !error && videos.length === 0 && (
         <div
           style={{
             fontFamily: "DM Sans",
-            fontSize: 11,
-            color: T.accent,
-            cursor: "pointer",
-            letterSpacing: 0.5,
+            fontSize: 13,
+            color: T.muted,
+            padding: 30,
+            textAlign: "center",
+            border: `1px dashed ${T.border}`,
+            borderRadius: 12,
           }}
         >
-          View all →
+          📺 No videos yet — your coach hasn't shared any content
         </div>
-      </div>
+      )}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3,1fr)",
-          gap: 14,
-        }}
-      >
-        {COACH_VIDEOS.map((v) => (
-          <div
-            key={v.id}
-            onClick={() => setActiveVideo(v)}
-            style={{
-              background: T.card,
-              border: `1px solid ${T.border}`,
-              borderRadius: 14,
-              overflow: "hidden",
-              cursor: "pointer",
-              transition: "all 0.2s",
-              position: "relative",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = T.accent;
-              e.currentTarget.style.transform = "translateY(-2px)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = T.border;
-              e.currentTarget.style.transform = "translateY(0)";
-            }}
-          >
-            {/* Thumbnail */}
-            <div
-              style={{
-                height: 110,
-                background: `linear-gradient(135deg, ${T.surface}, ${T.border})`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                position: "relative",
-              }}
-            >
-              <span style={{ fontSize: 38 }}>{v.thumb}</span>
-              {/* Play button overlay */}
+      {!loading && videos.length > 0 && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+            gap: 14,
+          }}
+        >
+          {videos.map((v) => {
+            const ytId = v.youtube_id || v.youtubeId || "";
+            const thumbUrl = ytId ? `https://img.youtube.com/vi/${ytId}/mqdefault.jpg` : null;
+            return (
               <div
+                key={v.id}
+                onClick={() => setActiveVideo(v)}
                 style={{
-                  position: "absolute",
-                  inset: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "#00000044",
+                  background: T.card,
+                  border: `1px solid ${T.border}`,
+                  borderRadius: 14,
+                  overflow: "hidden",
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                  position: "relative",
                 }}
               >
                 <div
                   style={{
-                    width: 38,
-                    height: 38,
-                    borderRadius: "50%",
-                    background: `${T.accent}ee`,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
+                    aspectRatio: "16/9",
+                    background: thumbUrl
+                      ? `#000 url(${thumbUrl}) center/cover no-repeat`
+                      : `linear-gradient(135deg, ${categoryColor(v.category)}33, ${categoryColor(v.category)}11)`,
+                    position: "relative",
                   }}
                 >
-                  <span style={{ fontSize: 14, marginLeft: 3 }}>▶</span>
-                </div>
-              </div>
-              {/* Duration badge */}
-              <div
-                style={{
-                  position: "absolute",
-                  bottom: 8,
-                  right: 8,
-                  background: "#000000cc",
-                  borderRadius: 4,
-                  padding: "2px 6px",
-                  fontFamily: "JetBrains Mono",
-                  fontSize: 10,
-                  color: "#fff",
-                }}
-              >
-                {v.duration}
-              </div>
-              {/* Category badge */}
-              <div
-                style={{
-                  position: "absolute",
-                  top: 8,
-                  left: 8,
-                  background: `${categoryColors[v.category] || T.accent}22`,
-                  border: `1px solid ${
-                    categoryColors[v.category] || T.accent
-                  }55`,
-                  borderRadius: 4,
-                  padding: "2px 8px",
-                  fontFamily: "DM Sans",
-                  fontSize: 9,
-                  color: categoryColors[v.category] || T.accent,
-                  letterSpacing: 0.5,
-                }}
-              >
-                {v.category}
-              </div>
-            </div>
-
-            {/* Info */}
-            <div style={{ padding: "12px 14px" }}>
-              <div
-                style={{
-                  fontFamily: "DM Sans",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: T.text,
-                  lineHeight: 1.4,
-                  marginBottom: 8,
-                }}
-              >
-                {v.title}
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: "DM Sans",
-                    fontSize: 10,
-                    color: T.muted,
-                  }}
-                >
-                  {v.coach}
-                </span>
-                <div style={{ display: "flex", gap: 10 }}>
-                  <span
+                  <div
                     style={{
-                      fontFamily: "JetBrains Mono",
-                      fontSize: 9,
-                      color: T.muted,
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      background: "rgba(0,0,0,0.25)",
                     }}
                   >
-                    {v.views} views
-                  </span>
-                  <span
+                    <div style={{ fontSize: 36, color: "#fff", textShadow: "0 2px 8px rgba(0,0,0,0.6)" }}>▶</div>
+                  </div>
+                  {v.category && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 8,
+                        left: 8,
+                        background: categoryColor(v.category),
+                        color: "#fff",
+                        fontFamily: "Bebas Neue",
+                        fontSize: 10,
+                        letterSpacing: 1,
+                        padding: "3px 8px",
+                        borderRadius: 6,
+                      }}
+                    >
+                      {v.category}
+                    </div>
+                  )}
+                </div>
+                <div style={{ padding: 12 }}>
+                  <div
                     style={{
-                      fontFamily: "JetBrains Mono",
-                      fontSize: 9,
-                      color: T.muted,
+                      fontFamily: "DM Sans",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: T.text,
+                      marginBottom: 4,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
                     }}
                   >
-                    {v.date}
-                  </span>
+                    {v.title || "Untitled"}
+                  </div>
+                  {v.notes && (
+                    <div
+                      style={{
+                        fontFamily: "DM Sans",
+                        fontSize: 11,
+                        color: T.muted,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
+                      }}
+                    >
+                      {v.notes}
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
-          </div>
-        ))}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
-      {/* Video Modal */}
       {activeVideo && (
         <div
+          onClick={() => setActiveVideo(null)}
           style={{
             position: "fixed",
             inset: 0,
-            background: "#000000dd",
-            zIndex: 200,
+            background: "rgba(0,0,0,0.85)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            padding: 24,
+            zIndex: 1000,
+            padding: 20,
           }}
-          onClick={() => setActiveVideo(null)}
         >
           <div
+            onClick={(e) => e.stopPropagation()}
             style={{
-              background: T.card,
-              border: `1px solid ${T.border}`,
-              borderRadius: 20,
-              width: "100%",
-              maxWidth: 640,
+              width: "min(900px, 100%)",
+              background: T.surface,
+              borderRadius: 16,
               overflow: "hidden",
             }}
-            onClick={(e) => e.stopPropagation()}
           >
-            {/* Mock video player */}
-            <div
-              style={{
-                height: 320,
-                background: `linear-gradient(135deg, ${T.surface}, #1a1a1a)`,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 16,
-                position: "relative",
-              }}
-            >
-              <span style={{ fontSize: 56 }}>{activeVideo.thumb}</span>
-              <div
-                style={{
-                  width: 56,
-                  height: 56,
-                  borderRadius: "50%",
-                  background: `${T.accent}cc`,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: "pointer",
-                }}
-              >
-                <span style={{ fontSize: 20, marginLeft: 4 }}>▶</span>
+            <div style={{ aspectRatio: "16/9", background: "#000" }}>
+              {(activeVideo.youtube_id || activeVideo.youtubeId) && (
+                <iframe
+                  src={`https://www.youtube.com/embed/${activeVideo.youtube_id || activeVideo.youtubeId}?autoplay=1`}
+                  title={activeVideo.title}
+                  frameBorder="0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  style={{ width: "100%", height: "100%", border: "none" }}
+                />
+              )}
+            </div>
+            <div style={{ padding: 16 }}>
+              <div style={{ fontFamily: "Bebas Neue", fontSize: 20, letterSpacing: 1, color: T.text, marginBottom: 4 }}>
+                {activeVideo.title}
               </div>
-              <div
-                style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted }}
-              >
-                Click to play · {activeVideo.duration}
-              </div>
+              {activeVideo.notes && (
+                <div style={{ fontFamily: "DM Sans", fontSize: 13, color: T.muted, marginBottom: 12 }}>
+                  {activeVideo.notes}
+                </div>
+              )}
               <button
                 onClick={() => setActiveVideo(null)}
                 style={{
-                  position: "absolute",
-                  top: 12,
-                  right: 12,
-                  background: `${T.border}cc`,
+                  background: T.accent,
+                  color: T.bg,
                   border: "none",
-                  color: T.muted,
                   borderRadius: 8,
-                  width: 32,
-                  height: 32,
-                  cursor: "pointer",
-                  fontSize: 16,
-                }}
-              >
-                ×
-              </button>
-            </div>
-            <div style={{ padding: 20 }}>
-              <div
-                style={{
+                  padding: "8px 18px",
                   fontFamily: "Bebas Neue",
-                  fontSize: 22,
+                  fontSize: 13,
                   letterSpacing: 1,
-                  color: T.text,
-                  marginBottom: 4,
+                  cursor: "pointer",
                 }}
               >
-                {activeVideo.title}
-              </div>
-              <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-                <span
-                  style={{
-                    fontFamily: "DM Sans",
-                    fontSize: 12,
-                    color: T.muted,
-                  }}
-                >
-                  {activeVideo.coach}
-                </span>
-                <span
-                  style={{
-                    fontFamily: "JetBrains Mono",
-                    fontSize: 10,
-                    color: T.muted,
-                  }}
-                >
-                  {activeVideo.views} views
-                </span>
-                <span
-                  style={{
-                    fontFamily: "JetBrains Mono",
-                    fontSize: 10,
-                    color: T.muted,
-                  }}
-                >
-                  {activeVideo.date}
-                </span>
-                <div
-                  style={{
-                    marginLeft: "auto",
-                    background: `${categoryColors[activeVideo.category]}22`,
-                    border: `1px solid ${
-                      categoryColors[activeVideo.category]
-                    }55`,
-                    borderRadius: 6,
-                    padding: "3px 10px",
-                    fontFamily: "DM Sans",
-                    fontSize: 10,
-                    color: categoryColors[activeVideo.category],
-                  }}
-                >
-                  {activeVideo.category}
-                </div>
-              </div>
+                CLOSE
+              </button>
             </div>
           </div>
         </div>
@@ -6607,7 +6457,7 @@ function Dashboard({
           padding: 24,
         }}
       >
-        <CoachVideos />
+        <CoachVideos profileId={profileId} />
       </div>
     </div>
   );
