@@ -3006,6 +3006,209 @@ const _ds = (y, m, d) => `${y}-${_pad(m + 1)}-${_pad(d)}`;
 const SEED_EVENTS = [];
 ;
 
+// ── Barcode Camera Scanner ────────────────────────────────────────────────────
+// Uses html5-qrcode loaded dynamically from CDN. Designed so a Capacitor
+// ML Kit native scanner can later replace just the contents of this component
+// without changing how callers use it.
+//
+// Props:
+//   onDetected(code) — called with the scanned barcode string
+//   onClose()        — called when user dismisses the scanner
+function BarcodeCameraScanner({ onDetected, onClose }) {
+  const containerRef = useRef(null);
+  const scannerRef = useRef(null);
+  const detectedRef = useRef(false);
+  const [status, setStatus] = useState("loading"); // loading | scanning | error
+  const [error, setError] = useState("");
+
+  // Load html5-qrcode from CDN if not already loaded
+  const ensureLib = () => new Promise((resolve, reject) => {
+    if (window.Html5Qrcode) return resolve(window.Html5Qrcode);
+    const existing = document.querySelector('script[data-html5qrcode]');
+    if (existing) {
+      existing.addEventListener("load", () => resolve(window.Html5Qrcode));
+      existing.addEventListener("error", () => reject(new Error("Could not load scanner library")));
+      return;
+    }
+    const s = document.createElement("script");
+    s.src = "https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js";
+    s.async = true;
+    s.dataset.html5qrcode = "1";
+    s.onload = () => resolve(window.Html5Qrcode);
+    s.onerror = () => reject(new Error("Could not load scanner library — check your connection"));
+    document.head.appendChild(s);
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    let instance = null;
+
+    (async () => {
+      try {
+        const Html5Qrcode = await ensureLib();
+        if (cancelled) return;
+
+        // Wait one tick so the container div is mounted
+        await new Promise((r) => setTimeout(r, 50));
+        if (cancelled || !containerRef.current) return;
+
+        instance = new Html5Qrcode(containerRef.current.id);
+        scannerRef.current = instance;
+
+        const config = {
+          fps: 10,
+          qrbox: (vw, vh) => {
+            const minEdge = Math.min(vw, vh);
+            const w = Math.floor(minEdge * 0.85);
+            const h = Math.floor(w * 0.45); // wide rectangle for 1D barcodes
+            return { width: w, height: h };
+          },
+          aspectRatio: 1.7,
+          // Decode 1D supermarket barcodes + QR
+          formatsToSupport: [
+            0,  // QR_CODE
+            8,  // EAN_13
+            9,  // EAN_8
+            14, // UPC_A
+            15, // UPC_E
+            10, // CODE_128
+            11, // CODE_39
+            13, // ITF
+          ],
+          experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+          rememberLastUsedCamera: true,
+        };
+
+        await instance.start(
+          { facingMode: { exact: "environment" } },
+          config,
+          (decodedText) => {
+            if (detectedRef.current) return;
+            const clean = String(decodedText || "").replace(/\D/g, "");
+            if (clean.length < 8) return;
+            detectedRef.current = true;
+            // Stop in the background — don't make caller wait
+            try { instance.stop().then(() => instance.clear()).catch(() => {}); } catch {}
+            onDetected(clean);
+          },
+          () => { /* per-frame failures are normal — ignore */ }
+        ).catch(async (err) => {
+          // Some devices reject "exact: environment" — try without
+          try {
+            await instance.start(
+              { facingMode: "environment" },
+              config,
+              (decodedText) => {
+                if (detectedRef.current) return;
+                const clean = String(decodedText || "").replace(/\D/g, "");
+                if (clean.length < 8) return;
+                detectedRef.current = true;
+                try { instance.stop().then(() => instance.clear()).catch(() => {}); } catch {}
+                onDetected(clean);
+              },
+              () => {}
+            );
+          } catch (innerErr) {
+            throw innerErr;
+          }
+        });
+
+        if (!cancelled) setStatus("scanning");
+      } catch (e) {
+        if (cancelled) return;
+        const msg = (e && e.message) || String(e);
+        let friendly = msg;
+        if (/Permission|NotAllowed|denied/i.test(msg)) {
+          friendly = "Camera permission was denied. Allow camera access in your browser settings and try again.";
+        } else if (/NotFound|no camera|not available/i.test(msg)) {
+          friendly = "No camera available on this device.";
+        } else if (/secure|https/i.test(msg)) {
+          friendly = "Camera requires a secure HTTPS connection.";
+        }
+        setError(friendly);
+        setStatus("error");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      const inst = scannerRef.current;
+      if (inst) {
+        try {
+          inst.stop().then(() => { try { inst.clear(); } catch {} }).catch(() => {});
+        } catch {}
+      }
+    };
+  }, []);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: 2000, padding: 20,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(560px, 100%)", background: T.surface,
+          border: `1px solid ${T.border}`, borderRadius: 16, overflow: "hidden",
+          display: "flex", flexDirection: "column",
+        }}
+      >
+        <div style={{ padding: "14px 18px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 2, color: T.text }}>
+            📷 SCAN BARCODE
+          </div>
+          <button
+            onClick={onClose}
+            style={{ background: "none", border: "none", color: T.muted, fontSize: 22, cursor: "pointer", lineHeight: 1 }}
+            aria-label="Close scanner"
+          >×</button>
+        </div>
+        <div style={{ position: "relative", background: "#000", aspectRatio: "4/3" }}>
+          <div
+            id="nrn-barcode-reader"
+            ref={containerRef}
+            style={{ width: "100%", height: "100%", overflow: "hidden" }}
+          />
+          {status === "loading" && (
+            <div style={{
+              position: "absolute", inset: 0, display: "flex", alignItems: "center",
+              justifyContent: "center", color: T.muted, fontFamily: "DM Sans", fontSize: 13,
+            }}>Starting camera…</div>
+          )}
+          {status === "error" && (
+            <div style={{
+              position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center", padding: 20,
+              color: T.danger, fontFamily: "DM Sans", fontSize: 13, textAlign: "center", gap: 8,
+            }}>
+              <div style={{ fontSize: 32 }}>⚠️</div>
+              <div>{error}</div>
+            </div>
+          )}
+        </div>
+        <div style={{ padding: "12px 18px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, flex: 1 }}>
+            {status === "scanning" ? "Centre the barcode in the frame" : status === "loading" ? "" : ""}
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: T.card, color: T.text, border: `1px solid ${T.border}`,
+              borderRadius: 8, padding: "8px 16px", fontFamily: "Bebas Neue",
+              fontSize: 13, letterSpacing: 1, cursor: "pointer",
+            }}
+          >CLOSE</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Mini Calendar ─────────────────────────────────────────────────────────────
 function MiniCalendar({ events, setEvents, profileId }) {
   const today = new Date();
@@ -6486,11 +6689,16 @@ function WeeklyPlanner({
   const [servingLabel, setServingLabel] = useState("100g");
   const [pickerTab, setPickerTab] = useState("search"); // "search" | "barcode"
   const [barcodeInput, setBarcodeInput] = useState("");
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scannerError, setScannerError] = useState("");
+  const scannerRef = useRef(null);
+  const scannerInstanceRef = useRef(null);
   const [barcodeResult, setBarcodeResult] = useState(null);
   const [barcodeError, setBarcodeError] = useState("");
   const [showManualBarcodeForm, setShowManualBarcodeForm] = useState(false);
   const [manualBarcode, setManualBarcode] = useState("");
   const [savingManualBarcode, setSavingManualBarcode] = useState(false);
+  const [showCameraScanner, setShowCameraScanner] = useState(false);
   const [manualBarcodeForm, setManualBarcodeForm] = useState({
     name: "", calories: "", protein: "", carbs: "", fat: "", servingSize: "100"
   });
@@ -6652,6 +6860,88 @@ function WeeklyPlanner({
       ],
     },
   };
+
+  // ── Camera barcode scanner ─────────────────────────────────────────────────
+  // Loads html5-qrcode from CDN on demand. Works in any modern browser AND in
+  // Capacitor's WKWebView/Android WebView (camera permission handled by the OS).
+  const ensureHtml5QrcodeLoaded = () => new Promise((resolve, reject) => {
+    if (window.Html5Qrcode) return resolve(window.Html5Qrcode);
+    const existing = document.getElementById("h5qr-cdn");
+    if (existing) {
+      existing.addEventListener("load", () => resolve(window.Html5Qrcode));
+      existing.addEventListener("error", reject);
+      return;
+    }
+    const s = document.createElement("script");
+    s.id = "h5qr-cdn";
+    s.src = "https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js";
+    s.async = true;
+    s.onload = () => resolve(window.Html5Qrcode);
+    s.onerror = () => reject(new Error("Could not load scanner library"));
+    document.head.appendChild(s);
+  });
+
+  const openScanner = async () => {
+    setScannerError("");
+    setScannerOpen(true);
+    try {
+      const Html5Qrcode = await ensureHtml5QrcodeLoaded();
+      // Wait a tick for the scanner DOM element to mount
+      await new Promise(r => setTimeout(r, 50));
+      const elemId = "nrn-scanner-region";
+      const el = document.getElementById(elemId);
+      if (!el) throw new Error("Scanner area not ready");
+      const inst = new Html5Qrcode(elemId, /* verbose */ false);
+      scannerInstanceRef.current = inst;
+      const onSuccess = async (decodedText) => {
+        const clean = String(decodedText || "").replace(/\D/g, "");
+        if (clean.length < 8) return; // ignore garbage reads
+        // Stop scanner immediately to prevent multiple triggers
+        try { await inst.stop(); inst.clear(); } catch {}
+        scannerInstanceRef.current = null;
+        setScannerOpen(false);
+        setBarcodeInput(clean);
+        // Trigger lookup with the scanned code
+        lookupBarcode(clean);
+      };
+      const onError = () => { /* per-frame failures are noisy; ignore */ };
+      // Try back camera (environment) first, fall back to any available camera
+      const config = { fps: 10, qrbox: { width: 260, height: 140 }, aspectRatio: 1.778 };
+      try {
+        await inst.start({ facingMode: { exact: "environment" } }, config, onSuccess, onError);
+      } catch (e1) {
+        try {
+          await inst.start({ facingMode: "environment" }, config, onSuccess, onError);
+        } catch (e2) {
+          // Last resort: any camera (e.g. desktop webcam)
+          await inst.start(true, config, onSuccess, onError);
+        }
+      }
+    } catch (e) {
+      setScannerError(e?.message || "Camera unavailable. Check browser permissions.");
+    }
+  };
+
+  const closeScanner = async () => {
+    const inst = scannerInstanceRef.current;
+    if (inst) {
+      try { await inst.stop(); inst.clear(); } catch {}
+    }
+    scannerInstanceRef.current = null;
+    setScannerOpen(false);
+    setScannerError("");
+  };
+
+  // Cleanup if the component unmounts while scanner is running
+  useEffect(() => {
+    return () => {
+      const inst = scannerInstanceRef.current;
+      if (inst) {
+        try { inst.stop().then(() => inst.clear()).catch(() => {}); } catch {}
+        scannerInstanceRef.current = null;
+      }
+    };
+  }, []);
 
   const lookupBarcode = async (code) => {
     const clean = code.replace(/\D/g, "");
@@ -7084,6 +7374,113 @@ function WeeklyPlanner({
           );
         })}
       </div>
+
+      {/* Camera Scanner Overlay */}
+      {scannerOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "#000000ee",
+            zIndex: 200,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              fontFamily: "Bebas Neue",
+              fontSize: 22,
+              letterSpacing: 2,
+              color: T.text,
+              marginBottom: 12,
+            }}
+          >
+            POINT AT BARCODE
+          </div>
+          <div
+            id="nrn-scanner-region"
+            ref={scannerRef}
+            style={{
+              width: "min(420px, 100%)",
+              maxWidth: 420,
+              aspectRatio: "16/9",
+              background: "#000",
+              borderRadius: 12,
+              overflow: "hidden",
+              border: `2px solid ${T.accent}`,
+            }}
+          />
+          {scannerError && (
+            <div
+              style={{
+                marginTop: 14,
+                background: `${T.danger}22`,
+                border: `1px solid ${T.danger}66`,
+                borderRadius: 10,
+                padding: "10px 14px",
+                color: T.danger,
+                fontFamily: "DM Sans",
+                fontSize: 12,
+                maxWidth: 420,
+                textAlign: "center",
+              }}
+            >
+              {scannerError}
+              <div style={{ marginTop: 6, color: T.muted, fontSize: 11 }}>
+                Make sure you've granted camera permission. On iPhone you may need
+                to tap the address bar's "AA" icon and choose Website Settings → Camera.
+              </div>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={closeScanner}
+            style={{
+              marginTop: 18,
+              background: T.surface,
+              color: T.text,
+              border: `1px solid ${T.border}`,
+              borderRadius: 10,
+              padding: "10px 24px",
+              fontFamily: "Bebas Neue",
+              fontSize: 15,
+              letterSpacing: 1,
+              cursor: "pointer",
+            }}
+          >
+            CANCEL
+          </button>
+          <div
+            style={{
+              marginTop: 16,
+              fontFamily: "DM Sans",
+              fontSize: 11,
+              color: T.muted,
+              textAlign: "center",
+              maxWidth: 420,
+            }}
+          >
+            Tip: hold your phone 6–10 inches from the barcode. If detection fails,
+            close this and type the number underneath the barcode manually.
+          </div>
+        </div>
+      )}
+
+      {showCameraScanner && (
+        <BarcodeCameraScanner
+          onClose={() => setShowCameraScanner(false)}
+          onDetected={(code) => {
+            setShowCameraScanner(false);
+            setPickerTab("barcode");
+            setBarcodeInput(code);
+            lookupBarcode(code);
+          }}
+        />
+      )}
 
       {showFoodPicker && (
         <div
@@ -7818,6 +8215,52 @@ function WeeklyPlanner({
                   </div>
                 </div>
 
+                {/* Camera scan button */}
+                <button
+                  type="button"
+                  onClick={openScanner}
+                  style={{
+                    width: "100%",
+                    background: `linear-gradient(135deg, ${T.accent}, ${T.accent}dd)`,
+                    color: T.bg,
+                    border: "none",
+                    borderRadius: 10,
+                    padding: "12px",
+                    fontFamily: "Bebas Neue",
+                    fontSize: 16,
+                    letterSpacing: 2,
+                    cursor: "pointer",
+                    marginBottom: 14,
+                  }}
+                >
+                  📷 SCAN WITH CAMERA
+                </button>
+
+                {/* Scan with camera */}
+                <button
+                  onClick={() => setShowCameraScanner(true)}
+                  style={{
+                    width: "100%",
+                    padding: "12px 16px",
+                    background: `linear-gradient(135deg, ${T.accent}, ${T.accent}cc)`,
+                    color: T.bg,
+                    border: "none",
+                    borderRadius: 12,
+                    fontFamily: "Bebas Neue",
+                    fontSize: 16,
+                    letterSpacing: 2,
+                    cursor: "pointer",
+                    marginBottom: 14,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                  }}
+                  type="button"
+                >
+                  📷 SCAN WITH CAMERA
+                </button>
+
                 {/* Barcode input */}
                 <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
                   <input
@@ -7831,7 +8274,7 @@ function WeeklyPlanner({
                     onKeyDown={(e) =>
                       e.key === "Enter" && lookupBarcode(barcodeInput)
                     }
-                    placeholder="Enter barcode number e.g. 5000112637939"
+                    placeholder="Or enter barcode manually e.g. 5000112637939"
                     style={{
                       flex: 1,
                       background: T.card,
@@ -9841,22 +10284,36 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
     if (!profile?.id) return;
     (async () => {
       try {
+        // Compute Monday-Sunday of the CURRENT week (so yesterday's Monday log
+        // can't leak into today if today is a new Monday)
         const today = new Date();
-        const start = new Date(today);
-        start.setDate(today.getDate() - 7);
-        const startStr = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
-        const endStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+        today.setHours(0,0,0,0);
+        const jsDow = today.getDay();              // 0=Sun..6=Sat
+        const daysSinceMon = (jsDow + 6) % 7;       // Mon=0..Sun=6
+        const monday = new Date(today);
+        monday.setDate(today.getDate() - daysSinceMon);
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+        const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        const startStr = fmt(monday);
+        const endStr = fmt(sunday);
         const rows = await apiFetch(`/food-logs/${profile.id}?start=${startStr}&end=${endStr}`);
-        if (Array.isArray(rows) && rows.length > 0) {
-          // Rebuild plan from food logs
-          setPlan((prev) => {
-            const next = { ...prev };
+        // Reset plan to empty for every day of this week before populating — any day
+        // that doesn't have a row gets wiped so stale state can't linger
+        setPlan((prev) => {
+          const next = { ...prev };
+          DAYS.forEach(dk => {
+            next[dk] = {};
+            MEALS.forEach(m => { next[dk][m] = []; });
+          });
+          if (Array.isArray(rows) && rows.length > 0) {
             rows.forEach((dayLog) => {
+              // Only use rows whose date is within this week
+              if (!dayLog || !dayLog.date) return;
+              if (dayLog.date < startStr || dayLog.date > endStr) return;
               const d = new Date(dayLog.date + 'T00:00:00');
               const dayIdx = d.getDay();
               const dayKey = DAYS[dayIdx === 0 ? 6 : dayIdx - 1];
-              if (!next[dayKey]) { next[dayKey] = {}; MEALS.forEach(m => next[dayKey][m] = []); }
-              // Group foods back into meals (default to Snack if no meal info)
               const foods = (dayLog.foods || []).map(f => ({
                 name: f.name,
                 calories: Number(f.calories || 0),
@@ -9865,16 +10322,14 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
                 fat: Number(f.fat_g ?? f.fat ?? 0),
                 meal: f.meal || 'Snack',
               }));
-              // Reset this day's meals
-              MEALS.forEach(m => next[dayKey][m] = []);
               foods.forEach(f => {
                 const meal = MEALS.includes(f.meal) ? f.meal : 'Snack';
                 next[dayKey][meal].push(f);
               });
             });
-            return next;
-          });
-        }
+          }
+          return next;
+        });
       } catch (e) { /* keep empty plan */ }
     })();
   }, [profile?.id]);
