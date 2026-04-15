@@ -6992,8 +6992,9 @@ function WeeklyPlanner({
     // 3) Try OpenFoodFacts via backend proxy
     try {
       const offRes = await apiFetch(`/off/barcode/${clean}`);
-      if (offRes && (offRes.status === "found" || offRes.product)) {
-        const p = offRes.product || offRes;
+      // Backend returns { found: true, name, calories_per_100g, ... } at top level
+      if (offRes && offRes.found) {
+        const p = offRes;
         const grams = Number(p.serving_size_g) > 0 ? Math.round(Number(p.serving_size_g)) : 100;
         const item = {
           n: p.name || "Unknown product",
@@ -8232,31 +8233,6 @@ function WeeklyPlanner({
                     cursor: "pointer",
                     marginBottom: 14,
                   }}
-                >
-                  📷 SCAN WITH CAMERA
-                </button>
-
-                {/* Scan with camera */}
-                <button
-                  onClick={() => setShowCameraScanner(true)}
-                  style={{
-                    width: "100%",
-                    padding: "12px 16px",
-                    background: `linear-gradient(135deg, ${T.accent}, ${T.accent}cc)`,
-                    color: T.bg,
-                    border: "none",
-                    borderRadius: 12,
-                    fontFamily: "Bebas Neue",
-                    fontSize: 16,
-                    letterSpacing: 2,
-                    cursor: "pointer",
-                    marginBottom: 14,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 8,
-                  }}
-                  type="button"
                 >
                   📷 SCAN WITH CAMERA
                 </button>
@@ -9808,7 +9784,10 @@ export default function App() {
       try {
         const res = await apiFetch(`/athlete/${profile.id}/macro-targets`);
         if (res?.macroGoals) setMacroGoalsState(res.macroGoals);
-        if (res?.weekPlan) setPlan(res.weekPlan);
+        // NOTE: do NOT load weekPlan here. weekPlan is keyed by day-of-week (MON/TUE/...),
+        // so loading it overwrites the per-date food logs and makes last week's
+        // Monday meals show up on this week's Monday. Food logs (loaded separately)
+        // are the source of truth, keyed by actual date.
       } catch (e) {
         // Endpoint may not exist yet — keep UI usable without crashing.
       }
