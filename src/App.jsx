@@ -6992,17 +6992,17 @@ function WeeklyPlanner({
     // 3) Try OpenFoodFacts via backend proxy
     try {
       const offRes = await apiFetch(`/off/barcode/${clean}`);
-      // Backend returns { found: true, name, calories_per_100g, ... } at top level
+      // Backend offProductToFood returns: { found, name, calories, protein, carbs, fat, servings, ... }
       if (offRes && offRes.found) {
         const p = offRes;
-        const grams = Number(p.serving_size_g) > 0 ? Math.round(Number(p.serving_size_g)) : 100;
+        // OFF gives macros per 100g already
         const item = {
           n: p.name || "Unknown product",
-          cal: Math.round(Number(p.calories_per_100g) || 0),
-          p: Math.round((Number(p.protein_per_100g) || 0) * 10) / 10,
-          c: Math.round((Number(p.carbs_per_100g) || 0) * 10) / 10,
-          f: Math.round((Number(p.fat_per_100g) || 0) * 10) / 10,
-          s: grams !== 100 ? [[`1 serving (${grams}g)`, grams], ["100g", 100]] : [["100g", 100]],
+          cal: Math.round(Number(p.calories) || 0),
+          p: Math.round((Number(p.protein) || 0) * 10) / 10,
+          c: Math.round((Number(p.carbs) || 0) * 10) / 10,
+          f: Math.round((Number(p.fat) || 0) * 10) / 10,
+          s: Array.isArray(p.servings) && p.servings.length > 0 ? p.servings : [["100g", 100]],
           source: "openfoodfacts",
           barcode: clean,
         };
