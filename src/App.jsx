@@ -5458,15 +5458,30 @@ function WeightTracker({ onWeightSaved, profileId }) {
   const todayKey =
     DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
 
-  // Load weights from backend
+  // Load weights from backend — only current ISO week (Mon-Sun)
   useEffect(() => {
     if (!profileId) return;
     (async () => {
       try {
         const rows = await apiFetch(`/weights/${profileId}`);
         if (!Array.isArray(rows)) return;
+        // Compute Monday-Sunday of current week
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        const jsDow = today.getDay();
+        const daysSinceMon = (jsDow + 6) % 7;
+        const monday = new Date(today);
+        monday.setDate(today.getDate() - daysSinceMon);
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+        const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        const monStr = fmt(monday);
+        const sunStr = fmt(sunday);
         const byDay = {};
         rows.forEach((r) => {
+          if (!r.date) return;
+          // Only include weights from this week
+          if (r.date < monStr || r.date > sunStr) return;
           const d = new Date(r.date + 'T00:00:00');
           const dayIdx = d.getDay();
           const key = DAYS[dayIdx === 0 ? 6 : dayIdx - 1];
