@@ -4264,405 +4264,191 @@ const MOODS = [
   { id: 1, emoji: "😩", label: "Terrible", color: "#ef4444" },
 ];
 
-function MoodTracker({ moodLog, setMoodLog, onMoodSaved }) {
-  const todayKey =
-    DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
-  const [note, setNote] = useState(moodLog[todayKey]?.note || "");
-  const [saved, setSaved] = useState(!!moodLog[todayKey]);
-  const [showHistory, setShowHistory] = useState(false);
+// ── Reusable SVG date-based line chart for Dashboard ────────────────────────
+function DashLineChart({ data, color, yMin, yMax, yUnit, formatY, height = 100 }) {
+  if (!data || data.length === 0) return (
+    <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "DM Sans", fontSize: 12, color: T.muted }}>
+      No data for this period
+    </div>
+  );
+  const vals = data.map(d => d.value);
+  const lo = yMin != null ? yMin : Math.min(...vals) - (Math.max(...vals) - Math.min(...vals)) * 0.15 || Math.min(...vals) - 1;
+  const hi = yMax != null ? yMax : Math.max(...vals) + (Math.max(...vals) - Math.min(...vals)) * 0.15 || Math.max(...vals) + 1;
+  const range = hi - lo || 1;
+  const pad = { t: 8, b: 26, l: 6, r: 6 };
+  const w = 100; // percent
+  const h = height;
+  const innerH = h - pad.t - pad.b;
+  const step = data.length > 1 ? (w - pad.l - pad.r) / (data.length - 1) : 0;
+  const toX = (i) => pad.l + i * step;
+  const toY = (v) => pad.t + innerH - ((v - lo) / range) * innerH;
+  const pts = data.map((d, i) => `${toX(i)}%,${toY(d.value)}`);
+  const polyline = pts.join(" ");
+  const area = `${toX(0)}%,${h - pad.b} ${polyline} ${toX(data.length - 1)}%,${h - pad.b}`;
+  // Date labels: show first, middle, last
+  const labelIdxs = data.length <= 5 ? data.map((_, i) => i) : [0, Math.floor(data.length / 2), data.length - 1];
+  const fmtDate = (d) => { const p = d.split("-"); return `${p[2]}/${p[1]}`; };
+  return (
+    <svg width="100%" height={h} style={{ overflow: "visible" }}>
+      {/* Grid lines */}
+      {[0, 0.25, 0.5, 0.75, 1].map((f, i) => (
+        <line key={i} x1={`${pad.l}%`} x2={`${w - pad.r}%`} y1={pad.t + innerH * (1 - f)} y2={pad.t + innerH * (1 - f)} stroke={T.border} strokeWidth={0.5} strokeDasharray="3 3" />
+      ))}
+      {/* Area fill */}
+      <polygon points={area} fill={`${color}15`} />
+      {/* Line */}
+      <polyline points={polyline} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      {/* Dots */}
+      {data.map((d, i) => (
+        <circle key={i} cx={`${toX(i)}%`} cy={toY(d.value)} r={3} fill={color} stroke={T.card} strokeWidth={1.5} />
+      ))}
+      {/* Value labels on dots */}
+      {data.length <= 14 && data.map((d, i) => (
+        <text key={`v${i}`} x={`${toX(i)}%`} y={toY(d.value) - 8} textAnchor="middle" fill={T.text} fontSize={9} fontFamily="JetBrains Mono">
+          {formatY ? formatY(d.value) : `${d.value}${yUnit || ""}`}
+        </text>
+      ))}
+      {/* Date labels */}
+      {labelIdxs.map(i => (
+        <text key={`d${i}`} x={`${toX(i)}%`} y={h - 4} textAnchor="middle" fill={T.muted} fontSize={9} fontFamily="JetBrains Mono">
+          {fmtDate(data[i].date)}
+        </text>
+      ))}
+    </svg>
+  );
+}
 
-  const todayMood = moodLog[todayKey];
+function MoodTracker({ profileId, onMoodSaved }) {
+  const [allMoods, setAllMoods] = useState([]);
+  const [range, setRange] = useState(7);
+  const [note, setNote] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [selectedMoodId, setSelectedMoodId] = useState(null);
 
-  const selectMood = (mood) => {
-    const entry = { ...mood, note, timestamp: new Date().toISOString() };
-    setMoodLog((prev) => ({
-      ...prev,
-      [todayKey]: entry,
-    }));
-    onMoodSaved?.(todayKey, entry);
-    setSaved(false);
+  const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
+
+  // Load all moods
+  useEffect(() => {
+    if (!profileId) return;
+    (async () => {
+      try {
+        const rows = await apiFetch(`/moods/${profileId}`);
+        if (Array.isArray(rows)) {
+          setAllMoods(rows.sort((a, b) => a.date.localeCompare(b.date)));
+          const todayEntry = rows.find(r => r.date === todayStr);
+          if (todayEntry) {
+            setSelectedMoodId(todayEntry.mood_id);
+            setNote(todayEntry.note || "");
+          }
+        }
+      } catch {}
+    })();
+  }, [profileId]);
+
+  const selectMood = async (mood) => {
+    setSelectedMoodId(mood.id);
+    if (!profileId) return;
+    try {
+      await apiFetch(`/moods/${profileId}`, {
+        method: "POST",
+        body: JSON.stringify({ date: todayStr, id: mood.id, emoji: mood.emoji, label: mood.label, color: mood.color, note: note || "" }),
+      });
+      // Update local state
+      setAllMoods(prev => {
+        const without = prev.filter(m => m.date !== todayStr);
+        return [...without, { date: todayStr, mood_id: mood.id, emoji: mood.emoji, label: mood.label, color: mood.color, note: note || "" }].sort((a, b) => a.date.localeCompare(b.date));
+      });
+      onMoodSaved?.();
+    } catch {}
   };
 
-  const saveNote = () => {
-    if (moodLog[todayKey]) {
-      const updated = { ...moodLog[todayKey], note };
-      setMoodLog((prev) => ({
-        ...prev,
-        [todayKey]: updated,
-      }));
-      onMoodSaved?.(todayKey, updated);
-    }
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  const saveNote = async () => {
+    if (!selectedMoodId || !profileId) return;
+    const mood = MOODS.find(m => m.id === selectedMoodId);
+    if (!mood) return;
+    try {
+      await apiFetch(`/moods/${profileId}`, {
+        method: "POST",
+        body: JSON.stringify({ date: todayStr, id: mood.id, emoji: mood.emoji, label: mood.label, color: mood.color, note }),
+      });
+      setAllMoods(prev => {
+        const without = prev.filter(m => m.date !== todayStr);
+        return [...without, { date: todayStr, mood_id: mood.id, emoji: mood.emoji, label: mood.label, color: mood.color, note }].sort((a, b) => a.date.localeCompare(b.date));
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {}
   };
 
-  // Build week history array
-  const weekHistory = DAYS.map((d) => ({ day: d, entry: moodLog[d] || null }));
-  const avgScore = (() => {
-    const entries = Object.values(moodLog).filter(Boolean);
-    if (!entries.length) return null;
-    return (entries.reduce((a, e) => a + e.id, 0) / entries.length).toFixed(1);
-  })();
+  // Filter by range
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - range);
+  const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth()+1).padStart(2,'0')}-${String(cutoff.getDate()).padStart(2,'0')}`;
+  const filtered = allMoods.filter(m => m.date >= cutoffStr);
+  const chartData = filtered.map(m => ({ date: m.date, value: Number(m.mood_id || 0) }));
+  const avgScore = chartData.length > 0 ? (chartData.reduce((s, d) => s + d.value, 0) / chartData.length).toFixed(1) : null;
+  const moodLabels = { 1: "😩", 2: "😔", 3: "😐", 4: "🙂", 5: "😄" };
 
-  const trendLabel =
-    avgScore >= 4
-      ? "Great week 🔥"
-      : avgScore >= 3
-      ? "Solid week 💪"
-      : avgScore
-      ? "Tough stretch 💙"
-      : null;
+  const rangeOptions = [{ v: 7, l: "7D" }, { v: 14, l: "14D" }, { v: 30, l: "30D" }, { v: 90, l: "90D" }];
 
   return (
-    <div
-      style={{
-        background: T.card,
-        border: `1px solid ${T.border}`,
-        borderRadius: 16,
-        padding: 24,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 20,
-        }}
-      >
+    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 24 }}>
+      {/* Header + range */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
         <div>
-          <div
-            style={{
-              fontFamily: "Bebas Neue",
-              fontSize: 22,
-              letterSpacing: 2,
-              color: T.text,
-            }}
-          >
-            MOOD LOG
-          </div>
-          <div
-            style={{
-              fontFamily: "DM Sans",
-              fontSize: 12,
-              color: T.muted,
-              marginTop: 2,
-            }}
-          >
-            How are you feeling today? Tracked week on week.
+          <div style={{ fontFamily: "Bebas Neue", fontSize: 22, letterSpacing: 2, color: T.text }}>MOOD LOG</div>
+          <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, marginTop: 2 }}>
+            How are you feeling today?
+            {avgScore && <> · Avg: <span style={{ color: Number(avgScore) >= 4 ? T.coachGreen : Number(avgScore) >= 3 ? T.accent : T.danger, fontWeight: 700 }}>{avgScore}/5</span></>}
+            {chartData.length > 0 && <> · {chartData.length} entries</>}
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {avgScore && (
-            <div style={{ textAlign: "right" }}>
-              <div
-                style={{
-                  fontFamily: "JetBrains Mono",
-                  fontSize: 11,
-                  color: T.accent,
-                }}
-              >
-                {trendLabel}
-              </div>
-              <div
-                style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}
-              >
-                Avg score: {avgScore} / 5
-              </div>
-            </div>
-          )}
-          <button
-            onClick={() => setShowHistory((h) => !h)}
-            style={{
-              background: showHistory ? T.border : "none",
-              border: `1px solid ${T.border}`,
-              color: showHistory ? T.text : T.muted,
-              borderRadius: 8,
-              padding: "6px 14px",
-              fontFamily: "DM Sans",
-              fontSize: 11,
-              cursor: "pointer",
-              transition: "all 0.2s",
-            }}
-          >
-            {showHistory ? "Hide history" : "Week history"}
-          </button>
+        <div style={{ display: "flex", gap: 4 }}>
+          {rangeOptions.map(r => (
+            <button key={r.v} onClick={() => setRange(r.v)} style={{
+              background: range === r.v ? `${T.accent}22` : "none",
+              border: `1px solid ${range === r.v ? T.accent + "55" : T.border}`,
+              borderRadius: 6, padding: "4px 10px", color: range === r.v ? T.accent : T.muted,
+              fontFamily: "JetBrains Mono", fontSize: 10, cursor: "pointer",
+            }} type="button">{r.l}</button>
+          ))}
         </div>
       </div>
 
       {/* Today's mood picker */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
+      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
         {MOODS.map((m) => {
-          const isSelected = todayMood?.id === m.id;
+          const isSelected = selectedMoodId === m.id;
           return (
-            <button
-              key={m.id}
-              onClick={() => selectMood(m)}
-              style={{
-                flex: 1,
-                padding: "14px 8px",
-                borderRadius: 12,
-                cursor: "pointer",
-                transition: "all 0.2s",
-                background: isSelected ? `${m.color}22` : T.surface,
-                border: isSelected
-                  ? `2px solid ${m.color}`
-                  : `2px solid ${T.border}`,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 6,
-              }}
-              onMouseEnter={(e) => {
-                if (!isSelected)
-                  e.currentTarget.style.borderColor = m.color + "66";
-              }}
-              onMouseLeave={(e) => {
-                if (!isSelected) e.currentTarget.style.borderColor = T.border;
-              }}
-            >
+            <button key={m.id} onClick={() => selectMood(m)} style={{
+              flex: 1, padding: "14px 8px", borderRadius: 12, cursor: "pointer", transition: "all 0.2s",
+              background: isSelected ? `${m.color}22` : T.surface,
+              border: isSelected ? `2px solid ${m.color}` : `2px solid ${T.border}`,
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+            }}>
               <span style={{ fontSize: 26, lineHeight: 1 }}>{m.emoji}</span>
-              <span
-                style={{
-                  fontFamily: "DM Sans",
-                  fontSize: 10,
-                  color: isSelected ? m.color : T.muted,
-                  fontWeight: isSelected ? 600 : 400,
-                  letterSpacing: 0.3,
-                }}
-              >
-                {m.label}
-              </span>
+              <span style={{ fontFamily: "DM Sans", fontSize: 10, color: isSelected ? m.color : T.muted, fontWeight: isSelected ? 600 : 400 }}>{m.label}</span>
             </button>
           );
         })}
       </div>
 
       {/* Note input */}
-      <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-        <textarea
-          value={note}
-          onChange={(e) => {
-            setNote(e.target.value);
-            setSaved(false);
-          }}
-          placeholder={
-            todayMood
-              ? "Add a note about how you're feeling… (optional)"
-              : "Select a mood above, then add a note…"
-          }
-          disabled={!todayMood}
-          rows={2}
-          style={{
-            flex: 1,
-            background: T.surface,
-            border: `1px solid ${T.border}`,
-            borderRadius: 10,
-            padding: "10px 14px",
-            color: T.text,
-            fontFamily: "DM Sans",
-            fontSize: 12,
-            resize: "none",
-            outline: "none",
-            opacity: todayMood ? 1 : 0.4,
-            caretColor: T.accent,
-            lineHeight: 1.5,
-          }}
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 18 }}>
+        <textarea value={note} onChange={(e) => { setNote(e.target.value); setSaved(false); }}
+          placeholder={selectedMoodId ? "Add a note about how you're feeling… (optional)" : "Select a mood above, then add a note…"}
+          disabled={!selectedMoodId} rows={2}
+          style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 12, resize: "none", outline: "none", opacity: selectedMoodId ? 1 : 0.4, caretColor: T.accent, lineHeight: 1.5 }}
         />
-        <button
-          onClick={saveNote}
-          disabled={!todayMood}
-          style={{
-            background: saved ? T.coachGreen : todayMood ? T.accent : T.border,
-            color: todayMood ? T.bg : T.muted,
-            border: "none",
-            borderRadius: 10,
-            padding: "10px 18px",
-            fontFamily: "Bebas Neue",
-            fontSize: 14,
-            letterSpacing: 1,
-            cursor: todayMood ? "pointer" : "default",
-            transition: "all 0.25s",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {saved ? "✓ SAVED" : "SAVE"}
-        </button>
+        <button onClick={saveNote} disabled={!selectedMoodId} style={{
+          background: saved ? T.coachGreen : selectedMoodId ? T.accent : T.border,
+          color: selectedMoodId ? T.bg : T.muted, border: "none", borderRadius: 10, padding: "10px 18px",
+          fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1, cursor: selectedMoodId ? "pointer" : "default",
+        }}>{saved ? "✓ SAVED" : "SAVE"}</button>
       </div>
 
-      {/* Week history */}
-      {showHistory && (
-        <div
-          style={{
-            marginTop: 20,
-            paddingTop: 20,
-            borderTop: `1px solid ${T.border}`,
-          }}
-        >
-          <div
-            style={{
-              fontFamily: "Bebas Neue",
-              fontSize: 14,
-              letterSpacing: 2,
-              color: T.muted,
-              marginBottom: 14,
-            }}
-          >
-            THIS WEEK
-          </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            {weekHistory.map(({ day, entry }) => (
-              <div
-                key={day}
-                style={{
-                  flex: 1,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 6,
-                }}
-              >
-                {/* Bar */}
-                <div
-                  style={{
-                    width: "100%",
-                    height: 64,
-                    display: "flex",
-                    alignItems: "flex-end",
-                    background: T.surface,
-                    borderRadius: 8,
-                    overflow: "hidden",
-                    position: "relative",
-                  }}
-                >
-                  {entry ? (
-                    <div
-                      style={{
-                        width: "100%",
-                        height: `${(entry.id / 5) * 100}%`,
-                        background: `${entry.color}55`,
-                        borderTop: `2px solid ${entry.color}`,
-                        transition: "height 0.5s ease",
-                        position: "absolute",
-                        bottom: 0,
-                      }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <span style={{ fontSize: 10, color: T.border }}>—</span>
-                    </div>
-                  )}
-                  {entry && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        inset: 0,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <span style={{ fontSize: 18 }}>{entry.emoji}</span>
-                    </div>
-                  )}
-                </div>
-                {/* Tooltip on hover if note */}
-                <div
-                  style={{
-                    fontFamily: "Bebas Neue",
-                    fontSize: 11,
-                    letterSpacing: 1,
-                    color: entry ? entry.color : T.border,
-                  }}
-                >
-                  {day}
-                </div>
-                {entry && (
-                  <div
-                    style={{
-                      fontFamily: "DM Sans",
-                      fontSize: 9,
-                      color: T.muted,
-                      textAlign: "center",
-                    }}
-                  >
-                    {entry.label}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {/* Trend line dots */}
-          <div style={{ marginTop: 16, position: "relative", height: 40 }}>
-            <svg width="100%" height="40" style={{ overflow: "visible" }}>
-              {(() => {
-                const entries = weekHistory
-                  .map((w, i) => ({ i, entry: w.entry }))
-                  .filter((x) => x.entry);
-                if (entries.length < 2) return null;
-                const step = 100 / (DAYS.length - 1);
-                const pts = entries
-                  .map((x) => `${x.i * step}%,${40 - (x.entry.id / 5) * 36}`)
-                  .join(" ");
-                return (
-                  <>
-                    <polyline
-                      points={pts}
-                      fill="none"
-                      stroke={T.accent}
-                      strokeWidth="1.5"
-                      strokeDasharray="4 3"
-                      strokeLinecap="round"
-                    />
-                    {entries.map((x) => (
-                      <circle
-                        key={x.i}
-                        cx={`${x.i * step}%`}
-                        cy={40 - (x.entry.id / 5) * 36}
-                        r="4"
-                        fill={x.entry.color}
-                        stroke={T.card}
-                        strokeWidth="2"
-                      />
-                    ))}
-                  </>
-                );
-              })()}
-            </svg>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                marginTop: 4,
-              }}
-            >
-              {DAYS.map((d) => (
-                <span
-                  key={d}
-                  style={{
-                    fontFamily: "JetBrains Mono",
-                    fontSize: 8,
-                    color: T.border,
-                    flex: 1,
-                    textAlign: "center",
-                  }}
-                >
-                  {d}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Chart */}
+      <DashLineChart data={chartData} color="#f59e0b" yMin={0.5} yMax={5.5} yUnit="" formatY={(v) => moodLabels[Math.round(v)] || `${Math.round(v)}`} height={110} />
     </div>
   );
 }
@@ -5444,475 +5230,130 @@ const WEIGHT_SEED = {};
 ;
 
 function WeightTracker({ onWeightSaved, profileId }) {
-  const [weightLog, setWeightLog] = useState({});
+  const [allWeights, setAllWeights] = useState([]);
+  const [range, setRange] = useState(30);
   const [inputWeight, setInputWeight] = useState("");
-  const [inputTime, setInputTime] = useState(() => {
-    const now = new Date();
-    return `${String(now.getHours()).padStart(2, "0")}:${String(
-      now.getMinutes()
-    ).padStart(2, "0")}`;
-  });
   const [saved, setSaved] = useState(false);
-  const [unit, setUnit] = useState("kg"); // "kg" | "lbs"
+  const [unit, setUnit] = useState("kg");
 
-  const todayKey =
-    DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
+  const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
 
-  // Load weights from backend — only current ISO week (Mon-Sun)
+  // Load all weights
   useEffect(() => {
     if (!profileId) return;
     (async () => {
       try {
         const rows = await apiFetch(`/weights/${profileId}`);
-        if (!Array.isArray(rows)) return;
-        // Compute Monday-Sunday of current week
-        const today = new Date();
-        today.setHours(0,0,0,0);
-        const jsDow = today.getDay();
-        const daysSinceMon = (jsDow + 6) % 7;
-        const monday = new Date(today);
-        monday.setDate(today.getDate() - daysSinceMon);
-        const sunday = new Date(monday);
-        sunday.setDate(monday.getDate() + 6);
-        const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-        const monStr = fmt(monday);
-        const sunStr = fmt(sunday);
-        const byDay = {};
-        rows.forEach((r) => {
-          if (!r.date) return;
-          // Only include weights from this week
-          if (r.date < monStr || r.date > sunStr) return;
-          const d = new Date(r.date + 'T00:00:00');
-          const dayIdx = d.getDay();
-          const key = DAYS[dayIdx === 0 ? 6 : dayIdx - 1];
-          byDay[key] = {
-            weight: Number(r.kg),
-            date: r.date,
-            timestamp: new Date().toISOString(),
-          };
-        });
-        setWeightLog(byDay);
-      } catch (e) { /* keep empty */ }
+        if (Array.isArray(rows)) setAllWeights(rows.sort((a, b) => a.date.localeCompare(b.date)));
+      } catch {}
     })();
   }, [profileId]);
 
-  const toDisplay = (kg) =>
-    unit === "lbs" ? parseFloat((kg * 2.20462).toFixed(1)) : kg;
-  const fromDisplay = (v) =>
-    unit === "lbs" ? parseFloat((v / 2.20462).toFixed(2)) : parseFloat(v);
+  const toDisplay = (kg) => unit === "lbs" ? parseFloat((kg * 2.20462).toFixed(1)) : parseFloat(Number(kg).toFixed(1));
+  const fromDisplay = (v) => unit === "lbs" ? parseFloat((v / 2.20462).toFixed(2)) : parseFloat(v);
 
-  const logWeight = () => {
+  const logWeight = async () => {
     const val = parseFloat(inputWeight);
     if (!val || val <= 0) return;
     const kg = fromDisplay(val);
-    setWeightLog((prev) => ({
-      ...prev,
-      [todayKey]: {
-        weight: kg,
-        time: inputTime,
-        timestamp: new Date().toISOString(),
-      },
-    }));
     // Save to backend
     if (profileId) {
-      const today = new Date();
-      const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-      apiFetch(`/weights/${profileId}`, {
-        method: 'POST',
-        body: JSON.stringify({ date: todayStr, kg }),
-      }).catch(e => console.warn('Weight save failed:', e));
+      try {
+        await apiFetch(`/weights/${profileId}`, {
+          method: "POST",
+          body: JSON.stringify({ date: todayStr, kg }),
+        });
+      } catch (e) { console.warn("Weight save:", e); }
     }
+    // Update local
+    setAllWeights(prev => {
+      const without = prev.filter(w => w.date !== todayStr);
+      return [...without, { date: todayStr, kg }].sort((a, b) => a.date.localeCompare(b.date));
+    });
     onWeightSaved?.(kg);
     setSaved(true);
     setInputWeight("");
     setTimeout(() => setSaved(false), 2000);
   };
 
-  // Build chart data
-  const entries = DAYS.map((d, i) => ({
-    day: d,
-    i,
-    entry: weightLog[d] || null,
-  }));
-  const hasData = entries.filter((e) => e.entry).length > 0;
-  const weights = entries.filter((e) => e.entry).map((e) => e.entry.weight);
-  const minW = Math.min(...weights) - 0.5;
-  const maxW = Math.max(...weights) + 0.5;
-  const range = maxW - minW || 1;
+  // Filter by range
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - range);
+  const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth()+1).padStart(2,'0')}-${String(cutoff.getDate()).padStart(2,'0')}`;
+  const filtered = allWeights.filter(w => w.date >= cutoffStr);
+  const chartData = filtered.map(w => ({ date: w.date, value: Number(w.kg) }));
 
-  const chartH = 80;
-  const chartW = 100; // percentage units
-  const step = chartW / (DAYS.length - 1);
+  const latest = chartData.length > 0 ? chartData[chartData.length - 1].value : null;
+  const oldest = chartData.length > 0 ? chartData[0].value : null;
+  const change = (latest && oldest) ? (latest - oldest).toFixed(1) : null;
+  const todayEntry = allWeights.find(w => w.date === todayStr);
 
-  const toY = (w) => chartH - ((w - minW) / range) * chartH;
-
-  const pointsWithData = entries.filter((e) => e.entry);
-  const polyPts = pointsWithData
-    .map((e) => `${e.i * step}%,${toY(e.entry.weight)}`)
-    .join(" ");
-
-  const todayEntry = weightLog[todayKey];
-  const allEntries = Object.values(weightLog).filter(Boolean);
-  const avgWeight = allEntries.length
-    ? (
-        allEntries.reduce((s, e) => s + e.weight, 0) / allEntries.length
-      ).toFixed(1)
-    : null;
-  const firstW = weights[0];
-  const lastW = weights[weights.length - 1];
-  const trend = weights.length >= 2 ? (lastW - firstW).toFixed(1) : null;
-  const trendUp = trend > 0;
+  const rangeOptions = [{ v: 7, l: "7D" }, { v: 14, l: "14D" }, { v: 30, l: "30D" }, { v: 90, l: "90D" }, { v: 365, l: "1Y" }];
 
   return (
-    <div
-      style={{
-        background: T.card,
-        border: `1px solid ${T.border}`,
-        borderRadius: 16,
-        padding: 24,
-      }}
-    >
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 20,
-        }}
-      >
+    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 24 }}>
+      {/* Header + range */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
         <div>
-          <div
-            style={{
-              fontFamily: "Bebas Neue",
-              fontSize: 22,
-              letterSpacing: 2,
-              color: T.text,
-            }}
-          >
-            WEIGHT TRACKER
-          </div>
-          <div
-            style={{
-              fontFamily: "DM Sans",
-              fontSize: 12,
-              color: T.muted,
-              marginTop: 2,
-            }}
-          >
-            Log your weight daily · Track progress week on week.
+          <div style={{ fontFamily: "Bebas Neue", fontSize: 22, letterSpacing: 2, color: T.text }}>WEIGHT TRACKING</div>
+          <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, marginTop: 2 }}>
+            {latest ? <>Current: <span style={{ color: T.accent, fontWeight: 700 }}>{toDisplay(latest)} {unit}</span></> : "No data yet"}
+            {change !== null && <> · Change: <span style={{ color: Number(change) > 0 ? T.danger : Number(change) < 0 ? T.coachGreen : T.muted, fontWeight: 700 }}>{Number(change) >= 0 ? "+" : ""}{change} kg</span></>}
+            {chartData.length > 0 && <> · {chartData.length} entries</>}
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {avgWeight && (
-            <div style={{ textAlign: "right" }}>
-              <div
-                style={{
-                  fontFamily: "JetBrains Mono",
-                  fontSize: 11,
-                  color: trendUp ? T.danger : T.coachGreen,
-                }}
-              >
-                {trend > 0 ? `▲ +${trend}` : `▼ ${trend}`} {unit} this week
-              </div>
-              <div
-                style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}
-              >
-                Avg: {toDisplay(parseFloat(avgWeight))} {unit}
-              </div>
-            </div>
-          )}
-          {/* Unit toggle */}
-          <div
-            style={{
-              display: "flex",
-              background: T.surface,
-              borderRadius: 8,
-              border: `1px solid ${T.border}`,
-              overflow: "hidden",
-            }}
-          >
-            {["kg", "lbs"].map((u) => (
-              <button
-                key={u}
-                onClick={() => setUnit(u)}
-                style={{
-                  padding: "5px 12px",
-                  border: "none",
-                  cursor: "pointer",
-                  fontFamily: "DM Sans",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  background: unit === u ? T.accent : "transparent",
-                  color: unit === u ? T.bg : T.muted,
-                  transition: "all 0.15s",
-                }}
-              >
-                {u}
-              </button>
-            ))}
-          </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          {rangeOptions.map(r => (
+            <button key={r.v} onClick={() => setRange(r.v)} style={{
+              background: range === r.v ? `${T.accent}22` : "none",
+              border: `1px solid ${range === r.v ? T.accent + "55" : T.border}`,
+              borderRadius: 6, padding: "4px 10px", color: range === r.v ? T.accent : T.muted,
+              fontFamily: "JetBrains Mono", fontSize: 10, cursor: "pointer",
+            }} type="button">{r.l}</button>
+          ))}
         </div>
+      </div>
+
+      {/* Today's weight input */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 4 }}>
+          {["kg", "lbs"].map(u => (
+            <button key={u} onClick={() => setUnit(u)} style={{
+              background: unit === u ? T.accent : "none",
+              color: unit === u ? T.bg : T.muted,
+              border: `1px solid ${unit === u ? T.accent : T.border}`,
+              borderRadius: 6, padding: "6px 12px",
+              fontFamily: "Bebas Neue", fontSize: 12, letterSpacing: 1, cursor: "pointer",
+            }} type="button">{u.toUpperCase()}</button>
+          ))}
+        </div>
+        <input
+          type="number" inputMode="decimal" step="0.1" min="20" max="300"
+          value={inputWeight}
+          onChange={(e) => setInputWeight(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && logWeight()}
+          placeholder={todayEntry ? `Today: ${toDisplay(todayEntry.kg)} ${unit}` : `Enter weight (${unit})`}
+          style={{
+            flex: 1, minWidth: 120, padding: "10px 14px",
+            background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10,
+            color: T.text, fontFamily: "JetBrains Mono", fontSize: 14, outline: "none",
+          }}
+        />
+        <button onClick={logWeight} disabled={!inputWeight} style={{
+          background: saved ? T.coachGreen : inputWeight ? T.accent : T.border,
+          color: inputWeight ? T.bg : T.muted,
+          border: "none", borderRadius: 10, padding: "10px 18px",
+          fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1,
+          cursor: inputWeight ? "pointer" : "default",
+        }} type="button">{saved ? "\u2713 SAVED" : "LOG"}</button>
       </div>
 
       {/* Chart */}
-      <div style={{ position: "relative", marginBottom: 20 }}>
-        <svg
-          width="100%"
-          height={chartH + 2}
-          style={{ overflow: "visible", display: "block" }}
-        >
-          {/* Goal line (optional reference) */}
-          {hasData && (
-            <line
-              x1="0"
-              y1={chartH / 2}
-              x2="100%"
-              y2={chartH / 2}
-              stroke={T.border}
-              strokeWidth="1"
-              strokeDasharray="4 4"
-            />
-          )}
-          {/* Area fill */}
-          {hasData && pointsWithData.length >= 2 && (
-            <polyline
-              points={[
-                `${pointsWithData[0].i * step}%,${chartH}`,
-                ...pointsWithData.map(
-                  (e) => `${e.i * step}%,${toY(e.entry.weight)}`
-                ),
-                `${
-                  pointsWithData[pointsWithData.length - 1].i * step
-                }%,${chartH}`,
-              ].join(" ")}
-              fill={`${T.protein}18`}
-              stroke="none"
-            />
-          )}
-          {/* Line */}
-          {hasData && pointsWithData.length >= 2 && (
-            <polyline
-              points={polyPts}
-              fill="none"
-              stroke={T.protein}
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          )}
-          {/* Data points */}
-          {entries.map((e) => {
-            if (!e.entry) return null;
-            const cx = `${e.i * step}%`;
-            const cy = toY(e.entry.weight);
-            const isToday = e.day === todayKey;
-            return (
-              <g key={e.day}>
-                <circle
-                  cx={cx}
-                  cy={cy}
-                  r={isToday ? 6 : 4}
-                  fill={isToday ? T.accent : T.protein}
-                  stroke={T.card}
-                  strokeWidth="2"
-                />
-                <text
-                  x={cx}
-                  y={cy - 10}
-                  textAnchor="middle"
-                  style={{
-                    fontFamily: "JetBrains Mono",
-                    fontSize: 9,
-                    fill: isToday ? T.accent : T.muted,
-                  }}
-                >
-                  {toDisplay(e.entry.weight)}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-        {/* Day labels */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            marginTop: 6,
-          }}
-        >
-          {DAYS.map((d, i) => (
-            <span
-              key={d}
-              style={{
-                fontFamily: "Bebas Neue",
-                fontSize: 11,
-                color: d === todayKey ? T.accent : T.muted,
-                flex: 1,
-                textAlign:
-                  i === 0 ? "left" : i === DAYS.length - 1 ? "right" : "center",
-                letterSpacing: 1,
-              }}
-            >
-              {d}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      {/* Log input row */}
-      <div
-        style={{
-          display: "flex",
-          gap: 10,
-          alignItems: "center",
-          background: T.surface,
-          border: `1px solid ${T.border}`,
-          borderRadius: 12,
-          padding: "12px 16px",
-        }}
-      >
-        <span style={{ fontSize: 20 }}>⚖️</span>
-        <div style={{ flex: 1 }}>
-          <div
-            style={{
-              fontFamily: "DM Sans",
-              fontSize: 10,
-              color: T.muted,
-              letterSpacing: 1,
-              textTransform: "uppercase",
-              marginBottom: 4,
-            }}
-          >
-            Log today's weight ({unit})
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <input
-              type="number"
-              step="0.1"
-              min="30"
-              max="300"
-              value={inputWeight}
-              onChange={(e) => setInputWeight(e.target.value)}
-              placeholder={
-                todayEntry
-                  ? `${toDisplay(todayEntry.weight)} ${unit} (logged)`
-                  : `e.g. ${unit === "kg" ? "83.5" : "184.0"}`
-              }
-              style={{
-                flex: 1,
-                background: "transparent",
-                border: `1px solid ${T.border}`,
-                borderRadius: 8,
-                padding: "8px 12px",
-                color: T.text,
-                fontFamily: "JetBrains Mono",
-                fontSize: 13,
-                outline: "none",
-                caretColor: T.accent,
-              }}
-            />
-            <input
-              type="time"
-              value={inputTime}
-              onChange={(e) => setInputTime(e.target.value)}
-              style={{
-                background: "transparent",
-                border: `1px solid ${T.border}`,
-                borderRadius: 8,
-                padding: "8px 12px",
-                color: T.muted,
-                fontFamily: "JetBrains Mono",
-                fontSize: 12,
-                outline: "none",
-                colorScheme: "dark",
-                width: 110,
-              }}
-            />
-          </div>
-        </div>
-        <button
-          onClick={logWeight}
-          style={{
-            background: saved ? T.coachGreen : T.protein,
-            color: "#fff",
-            border: "none",
-            borderRadius: 10,
-            padding: "10px 20px",
-            fontFamily: "Bebas Neue",
-            fontSize: 14,
-            letterSpacing: 1,
-            cursor: "pointer",
-            transition: "all 0.25s",
-            whiteSpace: "nowrap",
-            flexShrink: 0,
-          }}
-        >
-          {saved ? "✓ SAVED" : "LOG WEIGHT"}
-        </button>
-      </div>
-
-      {/* This week summary row */}
-      {hasData && (
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            marginTop: 14,
-            paddingTop: 14,
-            borderTop: `1px solid ${T.border}`,
-          }}
-        >
-          {[
-            {
-              label: "Current",
-              val: todayEntry ? `${toDisplay(todayEntry.weight)} ${unit}` : "—",
-              color: T.accent,
-            },
-            {
-              label: "This week",
-              val:
-                trend !== null
-                  ? `${trendUp ? "+" : ""}${
-                      unit === "kg" ? trend : (trend * 2.20462).toFixed(1)
-                    } ${unit}`
-                  : "—",
-              color: trendUp ? T.danger : T.coachGreen,
-            },
-            {
-              label: "Days logged",
-              val: `${weights.length} / 7`,
-              color: T.protein,
-            },
-          ].map((s) => (
-            <div key={s.label} style={{ flex: 1, textAlign: "center" }}>
-              <div
-                style={{
-                  fontFamily: "JetBrains Mono",
-                  fontSize: 13,
-                  color: s.color,
-                  fontWeight: 600,
-                }}
-              >
-                {s.val}
-              </div>
-              <div
-                style={{
-                  fontFamily: "DM Sans",
-                  fontSize: 9,
-                  color: T.muted,
-                  marginTop: 2,
-                }}
-              >
-                {s.label}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      <DashLineChart data={chartData} color={T.accent} yUnit=" kg" height={120} />
     </div>
   );
 }
+
 
 // ── Dashboard (main landing page) ─────────────────────────────────────────────
 function Dashboard({
@@ -5920,11 +5361,8 @@ function Dashboard({
   profile,
   onNavigate,
   selectedDay,
-  moodLog,
-  setMoodLog,
   threads,
   setThreads,
-  onMoodSaved,
   profileId,
   events,
   setEvents,
@@ -6661,7 +6099,7 @@ function Dashboard({
       </div>
 
       {/* ── Mood Tracker ── */}
-      <MoodTracker moodLog={moodLog} setMoodLog={setMoodLog} onMoodSaved={onMoodSaved} />
+      <MoodTracker profileId={profileId} />
 
       {/* ── Weight Tracker ── */}
       <WeightTracker onWeightSaved={onWeightSaved} profileId={profileId} />
@@ -10613,13 +10051,8 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
             profile={profile}
             onNavigate={setTab}
             selectedDay={selectedDay}
-            moodLog={moodLog}
-            setMoodLog={setMoodLog}
             threads={threads}
             setThreads={setThreads}
-            mfpData={mfpData}
-            mfpConnected={mfpConnected}
-            onMoodSaved={saveMoodToBackend}
             profileId={profile?.id}
             events={events}
             setEvents={setEvents}
