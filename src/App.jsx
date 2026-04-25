@@ -380,6 +380,24 @@ function LoginScreen({ onLoggedIn }) {
               Forgot password?
             </span>
           </div>
+
+          <div style={{ textAlign: "center", marginTop: 20 }}>
+            <a
+              href="https://gerardqueen.github.io/No-Rules-Nutirition/privacy.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                fontFamily: "DM Sans",
+                fontSize: 11,
+                color: T.muted,
+                textDecoration: "none",
+              }}
+              onMouseEnter={(e) => (e.target.style.color = T.accent)}
+              onMouseLeave={(e) => (e.target.style.color = T.muted)}
+            >
+              Privacy Policy
+            </a>
+          </div>
         </div>
 
       </div>
@@ -419,6 +437,14 @@ function ProfileMenu({ profile, onLogout, onNavigate }) {
     },
     { icon: "🔔", label: "Notifications", action: () => setOpen(false) },
     { icon: "🔒", label: "Change Password", action: () => setOpen(false) },
+    {
+      icon: "🛡️",
+      label: "Privacy Policy",
+      action: () => {
+        window.open("https://gerardqueen.github.io/No-Rules-Nutirition/privacy.html", "_blank");
+        setOpen(false);
+      },
+    },
   ];
 
   return (
