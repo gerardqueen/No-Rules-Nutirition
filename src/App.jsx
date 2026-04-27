@@ -383,7 +383,7 @@ function LoginScreen({ onLoggedIn }) {
 
           <div style={{ textAlign: "center", marginTop: 20 }}>
             <a
-              href="https://gerardqueen.github.io/No-Rules-Nutirition/privacy.html"
+              href="https://norulenutrition.uk/privacy.html"
               target="_blank"
               rel="noopener noreferrer"
               style={{
@@ -441,7 +441,7 @@ function ProfileMenu({ profile, onLogout, onNavigate }) {
       icon: "🛡️",
       label: "Privacy Policy",
       action: () => {
-        window.open("https://gerardqueen.github.io/No-Rules-Nutirition/privacy.html", "_blank");
+        window.open("https://norulenutrition.uk/privacy.html", "_blank");
         setOpen(false);
       },
     },
