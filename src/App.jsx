@@ -6141,6 +6141,21 @@ function Dashboard({
       >
         <CoachVideos profileId={profileId} />
       </div>
+
+      {/* Health disclaimer — required for App Store compliance (Guideline 1.4.1) */}
+      <div style={{
+        background: T.card,
+        border: `1px solid ${T.border}`,
+        borderRadius: 12,
+        padding: "14px 18px",
+        marginTop: 20,
+      }}>
+        <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, lineHeight: 1.6 }}>
+          <strong style={{ color: T.muted }}>Disclaimer:</strong> No Rule Nutrition is a food tracking tool for general wellness and fitness purposes only. It is not a medical device and does not provide medical advice, diagnosis, or treatment. Nutritional data is sourced from{" "}
+          <a href="https://openfoodfacts.org" target="_blank" rel="noopener noreferrer" style={{ color: T.accent, textDecoration: "none" }}>OpenFoodFacts</a>{" "}
+          (an open-source community database) and user contributions. Values may vary by product batch and region — always check product packaging for accurate information. Consult a qualified healthcare professional before making significant dietary changes, especially if you have medical conditions or specific dietary requirements.
+        </div>
+      </div>
     </div>
   );
 }
@@ -8167,6 +8182,9 @@ function WeeklyPlanner({
                         >
                           ADD TO {selectedMeal?.toUpperCase()} ➜
                         </button>
+                        <div style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, textAlign: "center", marginTop: 8, lineHeight: 1.4 }}>
+                          Nutritional data sourced from <a href="https://openfoodfacts.org" target="_blank" rel="noopener noreferrer" style={{ color: T.muted, textDecoration: "underline" }}>OpenFoodFacts</a>. Values may vary by product batch. Always check packaging for accurate information. This is not medical advice.
+                        </div>
                       </div>
                     );
                   })()}
@@ -8887,6 +8905,11 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
             </span>
           )}
         </div>
+      </div>
+
+      {/* Health disclaimer */}
+      <div style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, lineHeight: 1.5, marginTop: 16, padding: "0 4px" }}>
+        Macro targets are set by your coach for general fitness guidance only. This is not medical or dietetic advice. Nutritional data from <a href="https://openfoodfacts.org" target="_blank" rel="noopener noreferrer" style={{ color: T.muted, textDecoration: "underline" }}>OpenFoodFacts</a> and user contributions. Consult a healthcare professional before making significant dietary changes.
       </div>
     </div>
   );
