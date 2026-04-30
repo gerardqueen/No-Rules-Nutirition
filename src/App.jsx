@@ -6870,6 +6870,24 @@ function WeeklyPlanner({
         })}
       </div>
 
+      {/* Nutritional Information Sources — App Store Guideline 1.4.1 */}
+      <div style={{
+        background: `${T.accent}08`,
+        border: `1px solid ${T.accent}22`,
+        borderRadius: 12,
+        padding: "14px 18px",
+        display: "flex",
+        gap: 12,
+        alignItems: "flex-start",
+      }}>
+        <span style={{ fontSize: 18, lineHeight: 1, flexShrink: 0 }}>ℹ️</span>
+        <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, lineHeight: 1.6 }}>
+          <strong style={{ color: T.text }}>Nutritional Information Sources</strong><br />
+          Food nutritional data is sourced from <a href="https://openfoodfacts.org" target="_blank" rel="noopener noreferrer" style={{ color: T.accent }}>OpenFoodFacts</a> (open-source community database) and user-submitted entries. Calorie and macro calculations use standard nutritional science formulas based on{" "}
+          <a href="https://www.fao.org/3/Y5022E/y5022e04.htm" target="_blank" rel="noopener noreferrer" style={{ color: T.accent }}>FAO/WHO guidelines</a> (4 kcal/g protein, 4 kcal/g carbohydrate, 9 kcal/g fat). Values may vary by product batch and region — always verify against product packaging. This app is a food tracking tool for general wellness, not a medical device. Consult a healthcare professional before making significant dietary changes.
+        </div>
+      </div>
+
       {/* Camera Scanner Overlay */}
       {scannerOpen && (
         <div
@@ -8908,8 +8926,23 @@ function MacroTracker({ plan, selectedDay, mfpData, mfpConnected }) {
       </div>
 
       {/* Health disclaimer */}
-      <div style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, lineHeight: 1.5, marginTop: 16, padding: "0 4px" }}>
-        Macro targets are set by your coach for general fitness guidance only. This is not medical or dietetic advice. Nutritional data from <a href="https://openfoodfacts.org" target="_blank" rel="noopener noreferrer" style={{ color: T.muted, textDecoration: "underline" }}>OpenFoodFacts</a> and user contributions. Consult a healthcare professional before making significant dietary changes.
+      <div style={{
+        background: `${T.accent}08`,
+        border: `1px solid ${T.accent}22`,
+        borderRadius: 12,
+        padding: "14px 18px",
+        marginTop: 16,
+        display: "flex",
+        gap: 12,
+        alignItems: "flex-start",
+      }}>
+        <span style={{ fontSize: 18, lineHeight: 1, flexShrink: 0 }}>ℹ️</span>
+        <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, lineHeight: 1.6 }}>
+          <strong style={{ color: T.text }}>Nutritional Information Sources</strong><br />
+          Macro targets are set by your coach for general fitness guidance. Calorie and macronutrient calculations follow{" "}
+          <a href="https://www.fao.org/3/Y5022E/y5022e04.htm" target="_blank" rel="noopener noreferrer" style={{ color: T.accent }}>FAO/WHO energy conversion factors</a> (4 kcal/g protein, 4 kcal/g carbohydrate, 9 kcal/g fat). Food data sourced from{" "}
+          <a href="https://openfoodfacts.org" target="_blank" rel="noopener noreferrer" style={{ color: T.accent }}>OpenFoodFacts</a> and user contributions. This is not medical or dietetic advice — consult a qualified healthcare professional before making significant dietary changes.
+        </div>
       </div>
     </div>
   );
