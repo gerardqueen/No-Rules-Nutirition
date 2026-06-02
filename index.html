@@ -1,10 +1,108 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>no-rules-app</title>
+
+    <!--
+      viewport-fit=cover is the single most important line for mobile.
+      Without it, content clips inside the safe area on notched iPhones.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+
+    <!-- Tells iOS Safari to render as a full-screen app when added to home screen -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <!-- Android theme colour -->
+    <meta name="theme-color" content="#0a0a0a" />
+
+    <title>No Rules Nutrition</title>
+
+    <!--
+      Fonts moved here from App.jsx so they load before JS executes.
+      This eliminates the flash of unstyled text on launch.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      /*
+        These rules must live in HTML, not in React, because they
+        affect the document shell that exists before React mounts.
+      */
+
+      *, *::before, *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        /* Removes the 300ms tap delay on older Android WebViews */
+        touch-action: manipulation;
+        /* Prevents text being selected on long-press — critical for app feel */
+        -webkit-user-select: none;
+        user-select: none;
+        /* Removes the iOS call-out / dictionary popup on long-press */
+        -webkit-touch-callout: none;
+        /* Removes the grey flash that appears when you tap anything in WebView */
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      /* Allow text selection only inside inputs and textareas */
+      input, textarea {
+        -webkit-user-select: text;
+        user-select: text;
+      }
+
+      html {
+        /* Prevents the whole page rubber-banding like a browser page */
+        overscroll-behavior: none;
+        /* Locks the HTML element so the viewport never scrolls */
+        overflow: hidden;
+        height: 100%;
+        background-color: #0a0a0a;
+      }
+
+      body {
+        overscroll-behavior: none;
+        overflow: hidden;
+        /* 100dvh = dynamic viewport height, accounts for browser chrome on mobile */
+        height: 100dvh;
+        height: 100vh; /* fallback for older browsers */
+        background-color: #0a0a0a;
+        /* Prevents body from being repositioned by the keyboard on iOS */
+        position: fixed;
+        width: 100%;
+      }
+
+      #root {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        position: relative;
+      }
+
+      /*
+        CSS custom properties for safe area insets.
+        Use var(--sat), var(--sab), var(--sal), var(--sar) throughout the app.
+      */
+      :root {
+        --sat: env(safe-area-inset-top, 0px);
+        --sab: env(safe-area-inset-bottom, 0px);
+        --sal: env(safe-area-inset-left, 0px);
+        --sar: env(safe-area-inset-right, 0px);
+      }
+
+      /* Scrollbar styling for the content area */
+      ::-webkit-scrollbar { width: 3px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #1f1f1f; border-radius: 2px; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
