@@ -6691,11 +6691,11 @@ function WeeklyPlanner({
         })}
       </div>
 
-      {/* Meal cards */}
+      {/* Meal cards — single vertical column for a clean mobile layout */}
       <div
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(2,1fr)",
+          display: "flex",
+          flexDirection: "column",
           gap: 12,
         }}
       >
