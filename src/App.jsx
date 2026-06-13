@@ -30,7 +30,12 @@ async function apiFetch(path, options = {}) {
 }
 
 
-// ── Google Fonts are loaded in index.html (no flash of unstyled text) ──
+// ── Google Fonts ──────────────────────────────────────────────────────────────
+const fontLink = document.createElement("link");
+fontLink.rel = "stylesheet";
+fontLink.href =
+  "https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;600&display=swap";
+document.head.appendChild(fontLink);
 
 // ── Brand Logo ───────────────────────────────────────────────────────────────
 const LOGO_SRC =
@@ -164,44 +169,45 @@ function LoginScreen({ onLoggedIn }) {
   return (
     <div
       style={{
-        height: "100dvh",
+        minHeight: "100vh",
         background: T.bg,
         display: "flex",
         flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
         fontFamily: "DM Sans",
-        paddingTop: "env(safe-area-inset-top, 0px)",
-        paddingBottom: "env(safe-area-inset-bottom, 0px)",
-        paddingLeft: "max(24px, env(safe-area-inset-left))",
-        paddingRight: "max(24px, env(safe-area-inset-right))",
-        overflowY: "auto",
-        WebkitOverflowScrolling: "touch",
       }}
     >
-      <style>{`@keyframes fadeUp { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
-        button:active { opacity:0.65; }
+      <style>{`* { box-sizing:border-box; margin:0; padding:0; }
+        input::placeholder { color:${T.muted}; } input { caret-color:${T.accent}; outline:none; }
+        @keyframes fadeUp { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
       `}</style>
 
-      <div style={{ flex: 1, minHeight: 24 }} />
-
-      <div style={{ width: "100%", maxWidth: 420, margin: "0 auto", animation: "fadeUp 0.4s ease" }}>
-        <div style={{ textAlign: "center", marginBottom: 36 }}>
-          <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+      <div
+        style={{ width: "100%", maxWidth: 420, animation: "fadeUp 0.4s ease" }}
+      >
+        {/* Logo */}
+        <div style={{ textAlign: "center", marginBottom: 40 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              marginBottom: 16,
+            }}
+          >
             <img
               src={LOGO_SRC}
               alt="No Rule Nutrition"
               style={{
-                width: 96,
-                height: 96,
+                width: 110,
+                height: 110,
                 borderRadius: "50%",
                 objectFit: "cover",
                 border: `3px solid ${T.accent}55`,
-                boxShadow: `0 0 40px ${T.accent}22`,
+                boxShadow: `0 0 40px ${T.accent}22, 0 0 80px #00000066`,
               }}
             />
-          </div>
-          <div style={{ fontFamily: "Bebas Neue", fontSize: 28, letterSpacing: 3 }}>
-            <span style={{ color: T.accent }}>NO RULE</span>
-            <span style={{ color: T.text }}> NUTRITION</span>
           </div>
           <div
             style={{
@@ -217,18 +223,19 @@ function LoginScreen({ onLoggedIn }) {
           </div>
         </div>
 
+        {/* Sign in card */}
         <div
           style={{
             background: T.card,
             border: `1px solid ${T.border}`,
             borderRadius: 20,
-            padding: 28,
+            padding: 32,
           }}
         >
           <div
             style={{
               fontFamily: "Bebas Neue",
-              fontSize: 20,
+              fontSize: 22,
               letterSpacing: 2,
               color: T.text,
               marginBottom: 24,
@@ -257,18 +264,15 @@ function LoginScreen({ onLoggedIn }) {
               onKeyDown={(e) => e.key === "Enter" && handleLogin()}
               placeholder="you@example.com"
               type="email"
-              autoCapitalize="none"
-              autoCorrect="off"
-              autoComplete="email"
               style={{
                 width: "100%",
                 background: T.surface,
                 border: `1px solid ${T.border}`,
                 borderRadius: 10,
-                padding: "14px",
+                padding: "12px 14px",
                 color: T.text,
                 fontFamily: "DM Sans",
-                fontSize: 15,
+                fontSize: 13,
               }}
             />
           </div>
@@ -294,35 +298,33 @@ function LoginScreen({ onLoggedIn }) {
                 onKeyDown={(e) => e.key === "Enter" && handleLogin()}
                 placeholder="••••••••"
                 type={showPass ? "text" : "password"}
-                autoComplete="current-password"
                 style={{
                   width: "100%",
                   background: T.surface,
                   border: `1px solid ${T.border}`,
                   borderRadius: 10,
-                  padding: "14px 52px 14px 14px",
+                  padding: "12px 44px 12px 14px",
                   color: T.text,
                   fontFamily: "DM Sans",
-                  fontSize: 15,
+                  fontSize: 13,
                 }}
               />
               <button
                 onClick={() => setShowPass((p) => !p)}
                 style={{
                   position: "absolute",
-                  right: 8,
+                  right: 12,
                   top: "50%",
                   transform: "translateY(-50%)",
                   background: "none",
                   border: "none",
                   color: T.muted,
                   cursor: "pointer",
-                  fontFamily: "DM Sans",
                   fontSize: 12,
-                  padding: "10px 8px",
+                  fontFamily: "DM Sans",
                 }}
               >
-                {showPass ? "HIDE" : "SHOW"}
+                {showPass ? "hide" : "show"}
               </button>
             </div>
           </div>
@@ -336,7 +338,7 @@ function LoginScreen({ onLoggedIn }) {
                 padding: "10px 14px",
                 marginBottom: 16,
                 fontFamily: "DM Sans",
-                fontSize: 13,
+                fontSize: 12,
                 color: T.danger,
               }}
             >
@@ -353,7 +355,7 @@ function LoginScreen({ onLoggedIn }) {
               color: loading ? T.muted : T.bg,
               border: "none",
               borderRadius: 12,
-              padding: "16px",
+              padding: "14px",
               fontFamily: "Bebas Neue",
               fontSize: 18,
               letterSpacing: 2,
@@ -364,24 +366,41 @@ function LoginScreen({ onLoggedIn }) {
             {loading ? "SIGNING IN…" : "SIGN IN"}
           </button>
 
-          <div style={{ textAlign: "center", marginTop: 18 }}>
+          <div style={{ textAlign: "center", marginTop: 16 }}>
             <span
               style={{
                 fontFamily: "DM Sans",
-                fontSize: 13,
+                fontSize: 12,
                 color: T.muted,
                 cursor: "pointer",
-                padding: "8px 16px",
-                display: "inline-block",
               }}
+              onMouseEnter={(e) => (e.target.style.color = T.accent)}
+              onMouseLeave={(e) => (e.target.style.color = T.muted)}
             >
               Forgot password?
             </span>
           </div>
-        </div>
-      </div>
 
-      <div style={{ flex: 1, minHeight: 24 }} />
+          <div style={{ textAlign: "center", marginTop: 20 }}>
+            <a
+              href="https://norulenutrition.uk/privacy.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                fontFamily: "DM Sans",
+                fontSize: 11,
+                color: T.muted,
+                textDecoration: "none",
+              }}
+              onMouseEnter={(e) => (e.target.style.color = T.accent)}
+              onMouseLeave={(e) => (e.target.style.color = T.muted)}
+            >
+              Privacy Policy
+            </a>
+          </div>
+        </div>
+
+      </div>
     </div>
   );
 }
@@ -3021,6 +3040,23 @@ const SEED_EVENTS = [];
 // Props:
 //   onDetected(code) — called with the scanned barcode string
 //   onClose()        — called when user dismisses the scanner
+
+// Preload the scanner library in the background so it is already cached in
+// memory by the time the user opens the scanner. Removes the "Starting camera…"
+// network delay on first use. Safe to call multiple times.
+function preloadBarcodeLib() {
+  try {
+    if (typeof window === "undefined") return;
+    if (window.Html5Qrcode) return;
+    if (document.querySelector("script[data-html5qrcode]")) return;
+    const s = document.createElement("script");
+    s.src = "https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js";
+    s.async = true;
+    s.dataset.html5qrcode = "1";
+    document.head.appendChild(s);
+  } catch (_) {}
+}
+
 function BarcodeCameraScanner({ onDetected, onClose }) {
   const containerRef = useRef(null);
   const scannerRef = useRef(null);
@@ -3063,7 +3099,9 @@ function BarcodeCameraScanner({ onDetected, onClose }) {
         scannerRef.current = instance;
 
         const config = {
-          fps: 10,
+          // Higher fps = the decoder analyses far more frames per second,
+          // so it locks onto a barcode much faster.
+          fps: 25,
           qrbox: (vw, vh) => {
             const minEdge = Math.min(vw, vh);
             const w = Math.floor(minEdge * 0.85);
@@ -3082,12 +3120,21 @@ function BarcodeCameraScanner({ onDetected, onClose }) {
             11, // CODE_39
             13, // ITF
           ],
+          // Use the browser/OS-native BarcodeDetector when available — it is
+          // hardware-accelerated and dramatically faster than JS decoding.
           experimentalFeatures: { useBarCodeDetectorIfSupported: true },
           rememberLastUsedCamera: true,
         };
 
         await instance.start(
-          { facingMode: { exact: "environment" } },
+          // Request the rear camera with continuous autofocus and high
+          // resolution. Sharp, well-focused frames scan far more reliably.
+          {
+            facingMode: { ideal: "environment" },
+            focusMode: { ideal: "continuous" },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
           config,
           (decodedText) => {
             if (detectedRef.current) return;
@@ -3100,7 +3147,7 @@ function BarcodeCameraScanner({ onDetected, onClose }) {
           },
           () => { /* per-frame failures are normal — ignore */ }
         ).catch(async (err) => {
-          // Some devices reject "exact: environment" — try without
+          // Some devices reject detailed constraints — fall back to simplest
           try {
             await instance.start(
               { facingMode: "environment" },
@@ -6154,8 +6201,6 @@ function WeeklyPlanner({
   mfpLastSync,
   onImportMFP,
   onSyncNow,
-  onAddToList,
-  onAddMealToList,
 }) {
   const [selectedMeal, setSelectedMeal] = useState(null);
   const [showFoodPicker, setShowFoodPicker] = useState(false);
@@ -6691,11 +6736,11 @@ function WeeklyPlanner({
         })}
       </div>
 
-      {/* Meal cards — single vertical column for a clean mobile layout */}
+      {/* Meal cards */}
       <div
         style={{
-          display: "flex",
-          flexDirection: "column",
+          display: "grid",
+          gridTemplateColumns: "repeat(2,1fr)",
           gap: 12,
         }}
       >
@@ -6730,37 +6775,15 @@ function WeeklyPlanner({
                 >
                   {meal}
                 </span>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span
-                    style={{
-                      fontFamily: "JetBrains Mono",
-                      fontSize: 11,
-                      color: T.accent,
-                    }}
-                  >
-                    {tot.calories} kcal
-                  </span>
-                  {foods.length > 0 && (
-                    <button
-                      onClick={() => onAddMealToList && onAddMealToList(foods)}
-                      title="Add all foods in this meal to the shopping list"
-                      style={{
-                        background: `${T.coachGreen}1a`,
-                        border: `1px solid ${T.coachGreen}44`,
-                        borderRadius: 6,
-                        color: T.coachGreen,
-                        fontFamily: "DM Sans",
-                        fontSize: 10,
-                        fontWeight: 600,
-                        padding: "3px 8px",
-                        cursor: "pointer",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      + all to list
-                    </button>
-                  )}
-                </div>
+                <span
+                  style={{
+                    fontFamily: "JetBrains Mono",
+                    fontSize: 11,
+                    color: T.accent,
+                  }}
+                >
+                  {tot.calories} kcal
+                </span>
               </div>
               {foods.map((f, i) => (
                 <div
@@ -6824,26 +6847,6 @@ function WeeklyPlanner({
                     </div>
                   </div>
                   <button
-                    onClick={() => onAddToList && onAddToList(f.name)}
-                    title="Add to shopping list"
-                    style={{
-                      background: `${T.coachGreen}1a`,
-                      border: `1px solid ${T.coachGreen}44`,
-                      color: T.coachGreen,
-                      cursor: "pointer",
-                      fontFamily: "DM Sans",
-                      fontSize: 10,
-                      fontWeight: 600,
-                      borderRadius: 6,
-                      padding: "3px 7px",
-                      marginRight: 4,
-                      flexShrink: 0,
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    + list
-                  </button>
-                  <button
                     onClick={() => removeFood(selectedDay, meal, i)}
                     style={{
                       background: "none",
@@ -6853,7 +6856,6 @@ function WeeklyPlanner({
                       fontSize: 16,
                       padding: "0 4px",
                       lineHeight: 1,
-                      flexShrink: 0,
                     }}
                     onMouseEnter={(e) => (e.target.style.color = T.danger)}
                     onMouseLeave={(e) => (e.target.style.color = T.muted)}
@@ -9311,339 +9313,6 @@ const mfpMealToPlan = (name) => {
   return "Snack";
 };
 
-// ── Shopping List helpers + storage ───────────────────────────────────────────
-const SHOPPING_KEY = "nrn_shopping_list";
-
-function loadShoppingList() {
-  try {
-    const raw = localStorage.getItem(SHOPPING_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveShoppingList(list) {
-  try {
-    localStorage.setItem(SHOPPING_KEY, JSON.stringify(list));
-  } catch {}
-}
-
-// Normalise a food name so "Chicken Breast" and "chicken breast " combine.
-function normaliseName(name) {
-  return (name || "").trim().toLowerCase();
-}
-
-// ── Shopping List screen ──────────────────────────────────────────────────────
-function ShoppingList({ items, setItems }) {
-  const update = (next) => {
-    setItems(next);
-    saveShoppingList(next);
-  };
-
-  const toggle = (id) =>
-    update(items.map((it) => (it.id === id ? { ...it, checked: !it.checked } : it)));
-
-  const removeItem = (id) => update(items.filter((it) => it.id !== id));
-
-  const clearChecked = () => update(items.filter((it) => !it.checked));
-
-  const clearAll = () => {
-    if (items.length === 0) return;
-    if (window.confirm("Clear the whole shopping list?")) update([]);
-  };
-
-  const remaining = items.filter((it) => !it.checked).length;
-
-  return (
-    <div>
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontFamily: "Bebas Neue", fontSize: 26, letterSpacing: 2, color: T.text }}>
-          SHOPPING LIST
-        </div>
-        <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, marginTop: 4 }}>
-          {items.length === 0
-            ? "Add items from your meal plan to build a list"
-            : `${remaining} item${remaining === 1 ? "" : "s"} left · ${items.length} total`}
-        </div>
-      </div>
-
-      {items.length > 0 && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          <button
-            onClick={clearChecked}
-            style={{
-              flex: 1,
-              padding: "10px",
-              background: T.surface,
-              border: `1px solid ${T.border}`,
-              borderRadius: 10,
-              color: T.text,
-              fontFamily: "DM Sans",
-              fontSize: 12,
-              cursor: "pointer",
-            }}
-          >
-            Clear checked
-          </button>
-          <button
-            onClick={clearAll}
-            style={{
-              flex: 1,
-              padding: "10px",
-              background: `${T.danger}18`,
-              border: `1px solid ${T.danger}44`,
-              borderRadius: 10,
-              color: T.danger,
-              fontFamily: "DM Sans",
-              fontSize: 12,
-              cursor: "pointer",
-            }}
-          >
-            Clear all
-          </button>
-        </div>
-      )}
-
-      {items.length === 0 ? (
-        <div
-          style={{
-            textAlign: "center",
-            padding: "48px 20px",
-            color: T.muted,
-            fontFamily: "DM Sans",
-            fontSize: 13,
-          }}
-        >
-          <div style={{ fontSize: 40, marginBottom: 12 }}>🛒</div>
-          Your shopping list is empty.
-          <br />
-          Open the Meals tab and tap "+ list" on any food.
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {items.map((it) => (
-            <div
-              key={it.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "12px 14px",
-                background: T.card,
-                border: `1px solid ${T.border}`,
-                borderRadius: 12,
-                opacity: it.checked ? 0.5 : 1,
-                transition: "opacity 0.15s",
-              }}
-            >
-              <button
-                onClick={() => toggle(it.id)}
-                style={{
-                  width: 24,
-                  height: 24,
-                  borderRadius: 6,
-                  flexShrink: 0,
-                  background: it.checked ? T.accent : "none",
-                  border: `2px solid ${it.checked ? T.accent : T.border}`,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: T.bg,
-                  fontSize: 14,
-                  lineHeight: 1,
-                }}
-              >
-                {it.checked ? "✓" : ""}
-              </button>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontFamily: "DM Sans",
-                    fontSize: 14,
-                    color: T.text,
-                    fontWeight: 500,
-                    textDecoration: it.checked ? "line-through" : "none",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {it.name}
-                  {it.qty > 1 && (
-                    <span style={{ color: T.accent, marginLeft: 6 }}>×{it.qty}</span>
-                  )}
-                </div>
-              </div>
-              <button
-                onClick={() => removeItem(it.id)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: T.muted,
-                  cursor: "pointer",
-                  fontSize: 18,
-                  padding: "0 4px",
-                  lineHeight: 1,
-                }}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Bottom Tab Navigation (native app pattern) ────────────────────────────────
-function BottomNav({ tab, setTab, threads, listCount }) {
-  const unread = (threads || []).filter((t) => t.unread).length;
-
-  const activeColor = (id) =>
-    id === "inbox" ? T.coachGreen : id === "list" ? T.coachGreen : T.accent;
-
-  const items = [
-    {
-      id: "dashboard",
-      label: "HOME",
-      icon: (c) => (
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-          <path d="M3 12L12 3L21 12V21H15V15H9V21H3V12Z" stroke={c} strokeWidth="2"
-            strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      ),
-    },
-    {
-      id: "meals",
-      label: "MEALS",
-      icon: (c) => (
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-          <path d="M18 8h1a4 4 0 0 1 0 8h-1" stroke={c} strokeWidth="2" strokeLinecap="round" />
-          <path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8Z" stroke={c} strokeWidth="2" />
-          <line x1="6" y1="1" x2="6" y2="4" stroke={c} strokeWidth="2" strokeLinecap="round" />
-          <line x1="10" y1="1" x2="10" y2="4" stroke={c} strokeWidth="2" strokeLinecap="round" />
-          <line x1="14" y1="1" x2="14" y2="4" stroke={c} strokeWidth="2" strokeLinecap="round" />
-        </svg>
-      ),
-    },
-    {
-      id: "tracker",
-      label: "MACROS",
-      icon: (c) => (
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-          <rect x="3" y="10" width="4" height="11" rx="1" stroke={c} strokeWidth="2" />
-          <rect x="10" y="5" width="4" height="16" rx="1" stroke={c} strokeWidth="2" />
-          <rect x="17" y="13" width="4" height="8" rx="1" stroke={c} strokeWidth="2" />
-        </svg>
-      ),
-    },
-    {
-      id: "list",
-      label: "LIST",
-      badge: listCount,
-      icon: (c) => (
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-          <circle cx="9" cy="21" r="1.6" stroke={c} strokeWidth="2" />
-          <circle cx="18" cy="21" r="1.6" stroke={c} strokeWidth="2" />
-          <path d="M2 3h2.2l2.4 12.4a1.6 1.6 0 0 0 1.6 1.3h8.8a1.6 1.6 0 0 0 1.6-1.3L21.5 7H5.3"
-            stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      ),
-    },
-    {
-      id: "inbox",
-      label: "INBOX",
-      badge: unread,
-      icon: (c) => (
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"
-            stroke={c} strokeWidth="2" />
-          <polyline points="22,6 12,13 2,6" stroke={c} strokeWidth="2" />
-        </svg>
-      ),
-    },
-  ];
-
-  return (
-    <div
-      style={{
-        paddingBottom: "env(safe-area-inset-bottom, 0px)",
-        background: T.card,
-        borderTop: `1px solid ${T.border}`,
-        flexShrink: 0,
-      }}
-    >
-      <div style={{ display: "flex", height: 58 }}>
-        {items.map((item) => {
-          const active = tab === item.id;
-          const col = active ? activeColor(item.id) : T.muted;
-          return (
-            <button
-              key={item.id}
-              onClick={() => setTab(item.id)}
-              style={{
-                flex: 1,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 3,
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                position: "relative",
-                borderTop: active
-                  ? `2px solid ${activeColor(item.id)}`
-                  : "2px solid transparent",
-                transition: "border-color 0.15s",
-              }}
-            >
-              {item.badge > 0 && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: 7,
-                    left: "calc(50% + 6px)",
-                    background: item.id === "inbox" ? T.coachGreen : T.accent,
-                    borderRadius: "50%",
-                    minWidth: 16,
-                    height: 16,
-                    padding: "0 3px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontFamily: "DM Sans",
-                    fontSize: 9,
-                    fontWeight: 700,
-                    color: T.bg,
-                  }}
-                >
-                  {item.badge > 9 ? "9+" : item.badge}
-                </div>
-              )}
-              {item.icon(col)}
-              <div
-                style={{
-                  fontFamily: "Bebas Neue",
-                  fontSize: 9,
-                  letterSpacing: 1,
-                  color: col,
-                  transition: "color 0.15s",
-                }}
-              >
-                {item.label}
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 export default function App() {
   const [tokenState, setTokenState] = useState(() => getToken());
   const [profile, setProfile] = useState(null);
@@ -9653,46 +9322,10 @@ export default function App() {
   const [macroGoalsState, setMacroGoalsState] = useState(() => macroGoals);
   const [threads, setThreads] = useState(MSG_SEED);
 
-  // ── Shopping list (persisted to localStorage; survives reloads) ──────────────
-  const [shoppingList, setShoppingList] = useState(() => loadShoppingList());
-
-  // Add a single food to the shopping list; combines duplicates by name.
-  const addToShoppingList = (name) => {
-    const clean = (name || "").trim();
-    if (!clean) return;
-    setShoppingList((prev) => {
-      const key = normaliseName(clean);
-      const idx = prev.findIndex((it) => normaliseName(it.name) === key);
-      let next;
-      if (idx >= 0) {
-        next = prev.map((it, i) => (i === idx ? { ...it, qty: it.qty + 1, checked: false } : it));
-      } else {
-        next = [...prev, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: clean, qty: 1, checked: false }];
-      }
-      saveShoppingList(next);
-      return next;
-    });
-  };
-
-  // Add every food from a meal at once.
-  const addMealToShoppingList = (foods) => {
-    (foods || []).forEach((f) => addToShoppingList(f.name));
-  };
-
-  // ✅ Native shell init (Capacitor): status bar + splash screen.
+  // Preload the barcode scanner library in the background at startup, so the
+  // scanner opens instantly when the user taps it instead of fetching first.
   useEffect(() => {
-    (async () => {
-      try {
-        const { StatusBar, Style } = await import("@capacitor/status-bar");
-        await StatusBar.setStyle({ style: Style.Dark });
-        await StatusBar.setBackgroundColor({ color: "#0a0a0a" });
-        await StatusBar.setOverlaysWebView({ overlay: false });
-      } catch (_) {}
-      try {
-        const { SplashScreen } = await import("@capacitor/splash-screen");
-        await SplashScreen.hide({ fadeOutDuration: 400 });
-      } catch (_) {}
-    })();
+    preloadBarcodeLib();
   }, []);
 
   // ✅ Restore session using /auth/me (keeps login after refresh)
@@ -10338,141 +9971,194 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
     { id: "dashboard", label: "DASHBOARD" },
     { id: "meals", label: "MEAL PLAN" },
     { id: "tracker", label: "MACRO TRACKER" },
-    { id: "list", label: "SHOPPING LIST" },
-    { id: "inbox", label: "INBOX", highlight: true },
-    { id: "calendar", label: "CALENDAR" },
+    { id: "calendar", label: "📅 CALENDAR" },
+    { id: "inbox", label: "📥 INBOX", highlight: true },
   ];
-
-  const listCount = shoppingList.filter((it) => !it.checked).length;
 
   return (
     <div
       style={{
-        height: "100dvh",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
+        minHeight: "100vh",
         background: T.bg,
         color: T.text,
         fontFamily: "DM Sans",
       }}
     >
       <style>{`
-        @keyframes pulse { 0%,100%{transform:scale(0.6);opacity:0.4} 50%{transform:scale(1);opacity:1} }
-        @keyframes fadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes scanLine { from{top:30%} to{top:70%} }
-        button:active { opacity:0.7; }
-        ::-webkit-scrollbar { width:3px; }
-        ::-webkit-scrollbar-track { background:transparent; }
+        html, body { width:100%; min-height:100vh; margin:0; padding:0; }
+        #root { width:100% !important; max-width:100% !important; margin:0 !important; padding:0 !important; text-align:left !important; }
+        * { box-sizing:border-box; margin:0; padding:0; }
+        ::-webkit-scrollbar { width:4px; }
+        ::-webkit-scrollbar-track { background:${T.surface}; }
         ::-webkit-scrollbar-thumb { background:${T.border}; border-radius:2px; }
         input::placeholder { color:${T.muted}; }
         input { caret-color:${T.accent}; }
+        @keyframes pulse { 0%,100%{transform:scale(0.6);opacity:0.4} 50%{transform:scale(1);opacity:1} }
+        @keyframes fadeUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes scanLine { from{top:30%} to{top:70%} }
       `}</style>
 
-      {/* ── Compact App Header ─────────────────────────────────────────── */}
+      {/* Header */}
       <div
         style={{
-          paddingTop: "env(safe-area-inset-top, 0px)",
-          paddingLeft: "env(safe-area-inset-left, 0px)",
-          paddingRight: "env(safe-area-inset-right, 0px)",
+          borderBottom: `1px solid ${T.border}`,
+          padding: "0 28px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          height: 64,
+          position: "sticky",
+          top: 0,
           background: T.bg + "f0",
           backdropFilter: "blur(12px)",
-          WebkitBackdropFilter: "blur(12px)",
-          borderBottom: `1px solid ${T.border}`,
-          flexShrink: 0,
           zIndex: 50,
         }}
       >
-        <div
-          style={{
-            height: 56,
-            display: "flex",
-            alignItems: "center",
-            padding: "0 16px",
-            gap: 10,
-          }}
-        >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <img
             src={LOGO_SRC}
             alt="No Rule Nutrition"
             style={{
-              width: 34,
-              height: 34,
+              width: 38,
+              height: 38,
               borderRadius: "50%",
               objectFit: "cover",
               border: `2px solid ${T.accent}44`,
-              flexShrink: 0,
             }}
           />
           <div
             style={{
               fontFamily: "Bebas Neue",
-              fontSize: 20,
+              fontSize: 24,
               letterSpacing: 2,
               lineHeight: 1,
-              flex: 1,
             }}
           >
             <span style={{ color: T.accent }}>NO RULE</span>
             <span style={{ color: T.text }}> NUTRITION</span>
           </div>
-
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            {[
-              { label: "C", val: macroGoals.calories, color: T.accent },
-              { label: "P", val: macroGoals.protein, color: T.protein },
-            ].map((g) => (
-              <div
-                key={g.label}
-                style={{
-                  background: `${g.color}18`,
-                  border: `1px solid ${g.color}33`,
-                  borderRadius: 6,
-                  padding: "2px 7px",
-                  display: "flex",
-                  alignItems: "baseline",
-                  gap: 2,
-                }}
-              >
-                <span style={{ fontFamily: "JetBrains Mono", fontSize: 11, fontWeight: 600, color: g.color }}>
-                  {g.val}
-                </span>
-                <span style={{ fontFamily: "DM Sans", fontSize: 8, color: T.muted }}>
-                  {g.label}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <InboxBell threads={threads} setThreads={setThreads} />
-            <ProfileMenu
-              profile={profile}
-              onLogout={() => {
-                setProfile(null);
-                setPlan(initWeekPlan());
-                setTab("dashboard");
-                setMoodLog({});
-              }}
-              onNavigate={setTab}
-            />
-          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <InboxBell threads={threads} setThreads={setThreads} />
+          <ProfileMenu
+            profile={profile}
+            onLogout={() => {
+              setProfile(null);
+              setPlan(initWeekPlan());
+              setTab("dashboard");
+              setMoodLog({});
+            }}
+            onNavigate={setTab}
+          />
         </div>
       </div>
 
-      {/* ── Scrollable Content ─────────────────────────────────────────── */}
+      {/* Tabs */}
       <div
-        key={tab}
         style={{
-          flex: 1,
-          overflowY: "auto",
-          overflowX: "hidden",
+          borderBottom: `1px solid ${T.border}`,
+          padding: "0 12px",
+          display: "flex",
+          alignItems: "center",
+          gap: 2,
+          overflowX: "auto",
+          flexWrap: "wrap",
           WebkitOverflowScrolling: "touch",
-          overscrollBehavior: "contain",
-          padding: "20px 16px",
-          paddingLeft: "max(16px, env(safe-area-inset-left))",
-          paddingRight: "max(16px, env(safe-area-inset-right))",
-          animation: "fadeUp 0.2s ease",
+        }}
+      >
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            style={{
+              padding: "14px 18px",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontFamily: "Bebas Neue",
+              fontSize: 14,
+              letterSpacing: 1.5,
+              whiteSpace: "nowrap",
+              color:
+                tab === t.id
+                  ? t.mfp
+                    ? T.mfp
+                    : t.highlight
+                    ? T.coachGreen
+                    : T.accent
+                  : T.muted,
+              borderBottom:
+                tab === t.id
+                  ? `2px solid ${
+                      t.mfp ? T.mfp : t.highlight ? T.coachGreen : T.accent
+                    }`
+                  : "2px solid transparent",
+              transition: "all 0.2s",
+              marginBottom: -1,
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+        <div
+          style={{
+            marginLeft: "auto",
+            display: "flex",
+            gap: 16,
+            alignItems: "center",
+            paddingLeft: 16,
+          }}
+        >
+          {[
+            {
+              label: "CAL",
+              val: macroGoals.calories,
+              unit: "kcal",
+              color: T.accent,
+            },
+            {
+              label: "PRO",
+              val: macroGoals.protein,
+              unit: "g",
+              color: T.protein,
+            },
+            { label: "CARB", val: macroGoals.carbs, unit: "g", color: T.carbs },
+            { label: "FAT", val: macroGoals.fat, unit: "g", color: T.fat },
+          ].map((g) => (
+            <div key={g.label} style={{ textAlign: "center" }}>
+              <div
+                style={{
+                  fontFamily: "JetBrains Mono",
+                  fontSize: 12,
+                  color: g.color,
+                  fontWeight: 600,
+                }}
+              >
+                {g.val}
+                <span style={{ fontSize: 9, color: T.muted }}>{g.unit}</span>
+              </div>
+              <div
+                style={{
+                  fontFamily: "DM Sans",
+                  fontSize: 9,
+                  color: T.muted,
+                  letterSpacing: 1,
+                }}
+              >
+                {g.label}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Content */}
+      <div
+        style={{
+          padding: "28px 32px",
+          width: "100%",
+          boxSizing: "border-box",
+          animation: "fadeUp 0.3s ease",
         }}
       >
         {tab === "dashboard" && (
@@ -10504,8 +10190,6 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
             onSyncNow={() =>
               mfpUsername && fetchMFP(mfpUsername, plan[selectedDay])
             }
-            onAddToList={addToShoppingList}
-            onAddMealToList={addMealToShoppingList}
           />
         )}
         {tab === "tracker" && (
@@ -10515,9 +10199,6 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
             mfpData={mfpData}
             mfpConnected={mfpConnected}
           />
-        )}
-        {tab === "list" && (
-          <ShoppingList items={shoppingList} setItems={setShoppingList} />
         )}
         {tab === "inbox" && (
           <div>
@@ -10564,9 +10245,6 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
           </div>
         )}
       </div>
-
-      {/* ── Bottom Navigation ──────────────────────────────────────────── */}
-      <BottomNav tab={tab} setTab={setTab} threads={threads} listCount={listCount} />
     </div>
   );
 }
