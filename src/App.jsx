@@ -6201,6 +6201,8 @@ function WeeklyPlanner({
   mfpLastSync,
   onImportMFP,
   onSyncNow,
+  onAddToList,
+  onAddMealToList,
 }) {
   const [selectedMeal, setSelectedMeal] = useState(null);
   const [showFoodPicker, setShowFoodPicker] = useState(false);
@@ -6775,15 +6777,37 @@ function WeeklyPlanner({
                 >
                   {meal}
                 </span>
-                <span
-                  style={{
-                    fontFamily: "JetBrains Mono",
-                    fontSize: 11,
-                    color: T.accent,
-                  }}
-                >
-                  {tot.calories} kcal
-                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span
+                    style={{
+                      fontFamily: "JetBrains Mono",
+                      fontSize: 11,
+                      color: T.accent,
+                    }}
+                  >
+                    {tot.calories} kcal
+                  </span>
+                  {foods.length > 0 && (
+                    <button
+                      onClick={() => onAddMealToList && onAddMealToList(foods)}
+                      title="Add all foods in this meal to the shopping list"
+                      style={{
+                        background: `${T.coachGreen}1a`,
+                        border: `1px solid ${T.coachGreen}44`,
+                        borderRadius: 6,
+                        color: T.coachGreen,
+                        fontFamily: "DM Sans",
+                        fontSize: 10,
+                        fontWeight: 600,
+                        padding: "3px 8px",
+                        cursor: "pointer",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      + all to list
+                    </button>
+                  )}
+                </div>
               </div>
               {foods.map((f, i) => (
                 <div
@@ -6846,6 +6870,26 @@ function WeeklyPlanner({
                       P:{f.protein}g · C:{f.carbs}g · F:{f.fat}g
                     </div>
                   </div>
+                  <button
+                    onClick={() => onAddToList && onAddToList(f.name)}
+                    title="Add to shopping list"
+                    style={{
+                      background: `${T.coachGreen}1a`,
+                      border: `1px solid ${T.coachGreen}44`,
+                      color: T.coachGreen,
+                      cursor: "pointer",
+                      fontFamily: "DM Sans",
+                      fontSize: 10,
+                      fontWeight: 600,
+                      borderRadius: 6,
+                      padding: "3px 7px",
+                      marginRight: 4,
+                      flexShrink: 0,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    + list
+                  </button>
                   <button
                     onClick={() => removeFood(selectedDay, meal, i)}
                     style={{
@@ -9313,6 +9357,197 @@ const mfpMealToPlan = (name) => {
   return "Snack";
 };
 
+// ── Shopping List helpers + storage ───────────────────────────────────────────
+const SHOPPING_KEY = "nrn_shopping_list";
+
+function loadShoppingList() {
+  try {
+    const raw = localStorage.getItem(SHOPPING_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveShoppingList(list) {
+  try {
+    localStorage.setItem(SHOPPING_KEY, JSON.stringify(list));
+  } catch {}
+}
+
+function normaliseName(name) {
+  return (name || "").trim().toLowerCase();
+}
+
+// ── Shopping List screen ──────────────────────────────────────────────────────
+function ShoppingList({ items, setItems }) {
+  const update = (next) => {
+    setItems(next);
+    saveShoppingList(next);
+  };
+  const toggle = (id) =>
+    update(items.map((it) => (it.id === id ? { ...it, checked: !it.checked } : it)));
+  const removeItem = (id) => update(items.filter((it) => it.id !== id));
+  const clearChecked = () => update(items.filter((it) => !it.checked));
+  const clearAll = () => {
+    if (items.length === 0) return;
+    if (window.confirm("Clear the whole shopping list?")) update([]);
+  };
+  const remaining = items.filter((it) => !it.checked).length;
+
+  return (
+    <div>
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontFamily: "Bebas Neue", fontSize: 26, letterSpacing: 2, color: T.text }}>
+          SHOPPING LIST
+        </div>
+        <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, marginTop: 4 }}>
+          {items.length === 0
+            ? "Add items from your meal plan to build a list"
+            : `${remaining} item${remaining === 1 ? "" : "s"} left \u00b7 ${items.length} total`}
+        </div>
+      </div>
+
+      {items.length > 0 && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <button onClick={clearChecked}
+            style={{ flex: 1, padding: "10px", background: T.surface, border: `1px solid ${T.border}`,
+              borderRadius: 10, color: T.text, fontFamily: "DM Sans", fontSize: 12, cursor: "pointer" }}>
+            Clear checked
+          </button>
+          <button onClick={clearAll}
+            style={{ flex: 1, padding: "10px", background: `${T.danger}18`, border: `1px solid ${T.danger}44`,
+              borderRadius: 10, color: T.danger, fontFamily: "DM Sans", fontSize: 12, cursor: "pointer" }}>
+            Clear all
+          </button>
+        </div>
+      )}
+
+      {items.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "48px 20px", color: T.muted,
+          fontFamily: "DM Sans", fontSize: 13 }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>{"\uD83D\uDED2"}</div>
+          Your shopping list is empty.
+          <br />
+          Open the Meals tab and tap "+ list" on any food.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {items.map((it) => (
+            <div key={it.id}
+              style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px",
+                background: T.card, border: `1px solid ${T.border}`, borderRadius: 12,
+                opacity: it.checked ? 0.5 : 1, transition: "opacity 0.15s" }}>
+              <button onClick={() => toggle(it.id)}
+                style={{ width: 24, height: 24, borderRadius: 6, flexShrink: 0,
+                  background: it.checked ? T.accent : "none",
+                  border: `2px solid ${it.checked ? T.accent : T.border}`, cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  color: T.bg, fontSize: 14, lineHeight: 1 }}>
+                {it.checked ? "\u2713" : ""}
+              </button>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: "DM Sans", fontSize: 14, color: T.text, fontWeight: 500,
+                  textDecoration: it.checked ? "line-through" : "none",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {it.name}
+                  {it.qty > 1 && <span style={{ color: T.accent, marginLeft: 6 }}>{"\u00d7"}{it.qty}</span>}
+                </div>
+              </div>
+              <button onClick={() => removeItem(it.id)}
+                style={{ background: "none", border: "none", color: T.muted, cursor: "pointer",
+                  fontSize: 18, padding: "0 4px", lineHeight: 1 }}>
+                {"\u00d7"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Bottom Tab Navigation (native app pattern) ────────────────────────────────
+function BottomNav({ tab, setTab, threads, listCount }) {
+  const unread = (threads || []).filter((t) => t.unread).length;
+  const activeColor = (id) =>
+    id === "inbox" ? T.coachGreen : id === "list" ? T.coachGreen : T.accent;
+
+  const items = [
+    { id: "dashboard", label: "HOME", icon: (c) => (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <path d="M3 12L12 3L21 12V21H15V15H9V21H3V12Z" stroke={c} strokeWidth="2"
+          strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    )},
+    { id: "meals", label: "MEALS", icon: (c) => (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <path d="M18 8h1a4 4 0 0 1 0 8h-1" stroke={c} strokeWidth="2" strokeLinecap="round" />
+        <path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8Z" stroke={c} strokeWidth="2" />
+        <line x1="6" y1="1" x2="6" y2="4" stroke={c} strokeWidth="2" strokeLinecap="round" />
+        <line x1="10" y1="1" x2="10" y2="4" stroke={c} strokeWidth="2" strokeLinecap="round" />
+        <line x1="14" y1="1" x2="14" y2="4" stroke={c} strokeWidth="2" strokeLinecap="round" />
+      </svg>
+    )},
+    { id: "tracker", label: "MACROS", icon: (c) => (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <rect x="3" y="10" width="4" height="11" rx="1" stroke={c} strokeWidth="2" />
+        <rect x="10" y="5" width="4" height="16" rx="1" stroke={c} strokeWidth="2" />
+        <rect x="17" y="13" width="4" height="8" rx="1" stroke={c} strokeWidth="2" />
+      </svg>
+    )},
+    { id: "list", label: "LIST", badge: listCount, icon: (c) => (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <circle cx="9" cy="21" r="1.6" stroke={c} strokeWidth="2" />
+        <circle cx="18" cy="21" r="1.6" stroke={c} strokeWidth="2" />
+        <path d="M2 3h2.2l2.4 12.4a1.6 1.6 0 0 0 1.6 1.3h8.8a1.6 1.6 0 0 0 1.6-1.3L21.5 7H5.3"
+          stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    )},
+    { id: "inbox", label: "INBOX", badge: unread, icon: (c) => (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"
+          stroke={c} strokeWidth="2" />
+        <polyline points="22,6 12,13 2,6" stroke={c} strokeWidth="2" />
+      </svg>
+    )},
+  ];
+
+  return (
+    <div style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)", background: T.card,
+      borderTop: `1px solid ${T.border}`, flexShrink: 0 }}>
+      <div style={{ display: "flex", height: 58 }}>
+        {items.map((item) => {
+          const active = tab === item.id;
+          const col = active ? activeColor(item.id) : T.muted;
+          return (
+            <button key={item.id} onClick={() => setTab(item.id)}
+              style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+                justifyContent: "center", gap: 3, background: "none", border: "none", cursor: "pointer",
+                position: "relative",
+                borderTop: active ? `2px solid ${activeColor(item.id)}` : "2px solid transparent",
+                transition: "border-color 0.15s" }}>
+              {item.badge > 0 && (
+                <div style={{ position: "absolute", top: 7, left: "calc(50% + 6px)",
+                  background: item.id === "inbox" ? T.coachGreen : T.accent, borderRadius: "50%",
+                  minWidth: 16, height: 16, padding: "0 3px", display: "flex", alignItems: "center",
+                  justifyContent: "center", fontFamily: "DM Sans", fontSize: 9, fontWeight: 700, color: T.bg }}>
+                  {item.badge > 9 ? "9+" : item.badge}
+                </div>
+              )}
+              {item.icon(col)}
+              <div style={{ fontFamily: "Bebas Neue", fontSize: 9, letterSpacing: 1, color: col,
+                transition: "color 0.15s" }}>
+                {item.label}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tokenState, setTokenState] = useState(() => getToken());
   const [profile, setProfile] = useState(null);
@@ -9321,6 +9556,46 @@ export default function App() {
   const [selectedDay, setSelectedDay] = useState("MON");
   const [macroGoalsState, setMacroGoalsState] = useState(() => macroGoals);
   const [threads, setThreads] = useState(MSG_SEED);
+
+  // ── Shopping list (persisted to localStorage; survives reloads) ──────────────
+  const [shoppingList, setShoppingList] = useState(() => loadShoppingList());
+
+  const addToShoppingList = (name) => {
+    const clean = (name || "").trim();
+    if (!clean) return;
+    setShoppingList((prev) => {
+      const key = normaliseName(clean);
+      const idx = prev.findIndex((it) => normaliseName(it.name) === key);
+      let next;
+      if (idx >= 0) {
+        next = prev.map((it, i) => (i === idx ? { ...it, qty: it.qty + 1, checked: false } : it));
+      } else {
+        next = [...prev, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: clean, qty: 1, checked: false }];
+      }
+      saveShoppingList(next);
+      return next;
+    });
+  };
+
+  const addMealToShoppingList = (foods) => {
+    (foods || []).forEach((f) => addToShoppingList(f.name));
+  };
+
+  // ✅ Native shell init (Capacitor): status bar + splash screen.
+  useEffect(() => {
+    (async () => {
+      try {
+        const { StatusBar, Style } = await import("@capacitor/status-bar");
+        await StatusBar.setStyle({ style: Style.Dark });
+        await StatusBar.setBackgroundColor({ color: "#0a0a0a" });
+        await StatusBar.setOverlaysWebView({ overlay: false });
+      } catch (_) {}
+      try {
+        const { SplashScreen } = await import("@capacitor/splash-screen");
+        await SplashScreen.hide({ fadeOutDuration: 400 });
+      } catch (_) {}
+    })();
+  }, []);
 
   // Preload the barcode scanner library in the background at startup, so the
   // scanner opens instantly when the user taps it instead of fetching first.
@@ -9971,194 +10246,140 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
     { id: "dashboard", label: "DASHBOARD" },
     { id: "meals", label: "MEAL PLAN" },
     { id: "tracker", label: "MACRO TRACKER" },
-    { id: "calendar", label: "📅 CALENDAR" },
-    { id: "inbox", label: "📥 INBOX", highlight: true },
+    { id: "list", label: "SHOPPING LIST" },
+    { id: "inbox", label: "INBOX" },
+    { id: "calendar", label: "CALENDAR" },
   ];
+
+  const listCount = shoppingList.filter((it) => !it.checked).length;
 
   return (
     <div
       style={{
-        minHeight: "100vh",
+        height: "100dvh",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
         background: T.bg,
         color: T.text,
         fontFamily: "DM Sans",
       }}
     >
       <style>{`
-        html, body { width:100%; min-height:100vh; margin:0; padding:0; }
-        #root { width:100% !important; max-width:100% !important; margin:0 !important; padding:0 !important; text-align:left !important; }
-        * { box-sizing:border-box; margin:0; padding:0; }
-        ::-webkit-scrollbar { width:4px; }
-        ::-webkit-scrollbar-track { background:${T.surface}; }
+        @keyframes pulse { 0%,100%{transform:scale(0.6);opacity:0.4} 50%{transform:scale(1);opacity:1} }
+        @keyframes fadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes scanLine { from{top:30%} to{top:70%} }
+        button:active { opacity:0.7; }
+        ::-webkit-scrollbar { width:3px; }
+        ::-webkit-scrollbar-track { background:transparent; }
         ::-webkit-scrollbar-thumb { background:${T.border}; border-radius:2px; }
         input::placeholder { color:${T.muted}; }
         input { caret-color:${T.accent}; }
-        @keyframes pulse { 0%,100%{transform:scale(0.6);opacity:0.4} 50%{transform:scale(1);opacity:1} }
-        @keyframes fadeUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes scanLine { from{top:30%} to{top:70%} }
       `}</style>
 
-      {/* Header */}
+      {/* ── Compact App Header ─────────────────────────────────────────── */}
       <div
         style={{
-          borderBottom: `1px solid ${T.border}`,
-          padding: "0 28px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          height: 64,
-          position: "sticky",
-          top: 0,
+          paddingTop: "env(safe-area-inset-top, 0px)",
+          paddingLeft: "env(safe-area-inset-left, 0px)",
+          paddingRight: "env(safe-area-inset-right, 0px)",
           background: T.bg + "f0",
           backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+          borderBottom: `1px solid ${T.border}`,
+          flexShrink: 0,
           zIndex: 50,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div
+          style={{
+            height: 56,
+            display: "flex",
+            alignItems: "center",
+            padding: "0 16px",
+            gap: 10,
+          }}
+        >
           <img
             src={LOGO_SRC}
             alt="No Rule Nutrition"
             style={{
-              width: 38,
-              height: 38,
+              width: 34,
+              height: 34,
               borderRadius: "50%",
               objectFit: "cover",
               border: `2px solid ${T.accent}44`,
+              flexShrink: 0,
             }}
           />
           <div
             style={{
               fontFamily: "Bebas Neue",
-              fontSize: 24,
+              fontSize: 20,
               letterSpacing: 2,
               lineHeight: 1,
+              flex: 1,
             }}
           >
             <span style={{ color: T.accent }}>NO RULE</span>
             <span style={{ color: T.text }}> NUTRITION</span>
           </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <InboxBell threads={threads} setThreads={setThreads} />
-          <ProfileMenu
-            profile={profile}
-            onLogout={() => {
-              setProfile(null);
-              setPlan(initWeekPlan());
-              setTab("dashboard");
-              setMoodLog({});
-            }}
-            onNavigate={setTab}
-          />
+
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            {[
+              { label: "C", val: macroGoals.calories, color: T.accent },
+              { label: "P", val: macroGoals.protein, color: T.protein },
+            ].map((g) => (
+              <div
+                key={g.label}
+                style={{
+                  background: `${g.color}18`,
+                  border: `1px solid ${g.color}33`,
+                  borderRadius: 6,
+                  padding: "2px 7px",
+                  display: "flex",
+                  alignItems: "baseline",
+                  gap: 2,
+                }}
+              >
+                <span style={{ fontFamily: "JetBrains Mono", fontSize: 11, fontWeight: 600, color: g.color }}>
+                  {g.val}
+                </span>
+                <span style={{ fontFamily: "DM Sans", fontSize: 8, color: T.muted }}>
+                  {g.label}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <InboxBell threads={threads} setThreads={setThreads} />
+            <ProfileMenu
+              profile={profile}
+              onLogout={() => {
+                setProfile(null);
+                setPlan(initWeekPlan());
+                setTab("dashboard");
+              }}
+              onNavigate={setTab}
+            />
+          </div>
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* ── Scrollable Content ─────────────────────────────────────────── */}
       <div
+        key={tab}
         style={{
-          borderBottom: `1px solid ${T.border}`,
-          padding: "0 12px",
-          display: "flex",
-          alignItems: "center",
-          gap: 2,
-          overflowX: "auto",
-          flexWrap: "wrap",
+          flex: 1,
+          overflowY: "auto",
+          overflowX: "hidden",
           WebkitOverflowScrolling: "touch",
-        }}
-      >
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            style={{
-              padding: "14px 18px",
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              fontFamily: "Bebas Neue",
-              fontSize: 14,
-              letterSpacing: 1.5,
-              whiteSpace: "nowrap",
-              color:
-                tab === t.id
-                  ? t.mfp
-                    ? T.mfp
-                    : t.highlight
-                    ? T.coachGreen
-                    : T.accent
-                  : T.muted,
-              borderBottom:
-                tab === t.id
-                  ? `2px solid ${
-                      t.mfp ? T.mfp : t.highlight ? T.coachGreen : T.accent
-                    }`
-                  : "2px solid transparent",
-              transition: "all 0.2s",
-              marginBottom: -1,
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-        <div
-          style={{
-            marginLeft: "auto",
-            display: "flex",
-            gap: 16,
-            alignItems: "center",
-            paddingLeft: 16,
-          }}
-        >
-          {[
-            {
-              label: "CAL",
-              val: macroGoals.calories,
-              unit: "kcal",
-              color: T.accent,
-            },
-            {
-              label: "PRO",
-              val: macroGoals.protein,
-              unit: "g",
-              color: T.protein,
-            },
-            { label: "CARB", val: macroGoals.carbs, unit: "g", color: T.carbs },
-            { label: "FAT", val: macroGoals.fat, unit: "g", color: T.fat },
-          ].map((g) => (
-            <div key={g.label} style={{ textAlign: "center" }}>
-              <div
-                style={{
-                  fontFamily: "JetBrains Mono",
-                  fontSize: 12,
-                  color: g.color,
-                  fontWeight: 600,
-                }}
-              >
-                {g.val}
-                <span style={{ fontSize: 9, color: T.muted }}>{g.unit}</span>
-              </div>
-              <div
-                style={{
-                  fontFamily: "DM Sans",
-                  fontSize: 9,
-                  color: T.muted,
-                  letterSpacing: 1,
-                }}
-              >
-                {g.label}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Content */}
-      <div
-        style={{
-          padding: "28px 32px",
-          width: "100%",
-          boxSizing: "border-box",
-          animation: "fadeUp 0.3s ease",
+          overscrollBehavior: "contain",
+          padding: "20px 16px",
+          paddingLeft: "max(16px, env(safe-area-inset-left))",
+          paddingRight: "max(16px, env(safe-area-inset-right))",
+          animation: "fadeUp 0.2s ease",
         }}
       >
         {tab === "dashboard" && (
@@ -10190,6 +10411,8 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
             onSyncNow={() =>
               mfpUsername && fetchMFP(mfpUsername, plan[selectedDay])
             }
+            onAddToList={addToShoppingList}
+            onAddMealToList={addMealToShoppingList}
           />
         )}
         {tab === "tracker" && (
@@ -10200,12 +10423,15 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
             mfpConnected={mfpConnected}
           />
         )}
+        {tab === "list" && (
+          <ShoppingList items={shoppingList} setItems={setShoppingList} />
+        )}
         {tab === "inbox" && (
           <div>
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontFamily: "Bebas Neue", fontSize: 28, letterSpacing: 2, color: T.text }}>INBOX</div>
               <div style={{ fontFamily: "DM Sans", fontSize: 13, color: T.muted, marginTop: 4 }}>
-                Messages from your coaching team · Real coach + AI assistants
+                Messages from your coaching team
               </div>
             </div>
             <InboxPage
@@ -10220,24 +10446,10 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
         {tab === "calendar" && (
           <div style={{ minHeight: 400 }}>
             <div style={{ marginBottom: 20 }}>
-              <div
-                style={{
-                  fontFamily: "Bebas Neue",
-                  fontSize: 28,
-                  letterSpacing: 2,
-                  color: T.text,
-                }}
-              >
+              <div style={{ fontFamily: "Bebas Neue", fontSize: 28, letterSpacing: 2, color: T.text }}>
                 CALENDAR
               </div>
-              <div
-                style={{
-                  fontFamily: "DM Sans",
-                  fontSize: 13,
-                  color: T.muted,
-                  marginTop: 4,
-                }}
-              >
+              <div style={{ fontFamily: "DM Sans", fontSize: 13, color: T.muted, marginTop: 4 }}>
                 Upcoming sessions, check-ins and competitions
               </div>
             </div>
@@ -10245,6 +10457,9 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
           </div>
         )}
       </div>
+
+      {/* ── Bottom Navigation ──────────────────────────────────────────── */}
+      <BottomNav tab={tab} setTab={setTab} threads={threads} listCount={listCount} />
     </div>
   );
 }
