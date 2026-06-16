@@ -9553,7 +9553,14 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [tab, setTab] = useState("dashboard");
   const [plan, setPlan] = useState(initWeekPlan);
-  const [selectedDay, setSelectedDay] = useState("MON");
+  // Default to today's day of the week. getDay() is 0=Sun..6=Sat, but our
+  // DAYS array is Monday-first, so map accordingly.
+  const todayDay = (() => {
+    const jsDay = new Date().getDay(); // 0=Sun, 1=Mon, ... 6=Sat
+    const map = { 0: "SUN", 1: "MON", 2: "TUE", 3: "WED", 4: "THU", 5: "FRI", 6: "SAT" };
+    return map[jsDay] || "MON";
+  })();
+  const [selectedDay, setSelectedDay] = useState(todayDay);
   const [macroGoalsState, setMacroGoalsState] = useState(() => macroGoals);
   const [threads, setThreads] = useState(MSG_SEED);
 
