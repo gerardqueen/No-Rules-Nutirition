@@ -3063,6 +3063,82 @@ function BarcodeCameraScanner({ onDetected, onClose }) {
   const detectedRef = useRef(false);
   const [status, setStatus] = useState("loading"); // loading | scanning | error
   const [error, setError] = useState("");
+  const [isNative, setIsNative] = useState(false);
+
+  // ── NATIVE PATH (Capacitor app): use ML Kit's native scanner ────────────────
+  // On a real device we use @capacitor-mlkit/barcode-scanning, which is
+  // hardware-accelerated (Apple Vision / Google ML Kit) and dramatically faster
+  // and more reliable than the JS web scanner. In a plain browser this import
+  // does nothing and we fall through to the web scanner below.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let Capacitor, BarcodeScanner;
+      try {
+        ({ Capacitor } = await import("@capacitor/core"));
+      } catch (_) {
+        return; // not in a Capacitor context — web path handles it
+      }
+      if (!Capacitor?.isNativePlatform?.()) return; // browser — use web path
+      if (cancelled) return;
+      setIsNative(true);
+
+      try {
+        ({ BarcodeScanner } = await import("@capacitor-mlkit/barcode-scanning"));
+      } catch (e) {
+        setError("Scanner module unavailable. Please update the app.");
+        setStatus("error");
+        return;
+      }
+
+      try {
+        // Make sure the on-device ML Kit module is ready (Android downloads it
+        // once on first use; iOS has it built in).
+        try {
+          const avail = await BarcodeScanner.isGoogleBarcodeScannerModuleAvailable();
+          if (avail && avail.available === false) {
+            await BarcodeScanner.installGoogleBarcodeScannerModule();
+          }
+        } catch (_) {}
+
+        // Request camera permission.
+        const perm = await BarcodeScanner.requestPermissions();
+        if (cancelled) return;
+        if (perm?.camera !== "granted" && perm?.camera !== "limited") {
+          setError("Camera permission was denied. Enable camera access in Settings and try again.");
+          setStatus("error");
+          return;
+        }
+
+        setStatus("scanning");
+
+        // Open the native full-screen scanner UI and wait for a result.
+        const { barcodes } = await BarcodeScanner.scan();
+        if (cancelled) return;
+
+        const raw = barcodes && barcodes.length ? barcodes[0].rawValue : "";
+        const clean = String(raw || "").replace(/\D/g, "");
+        if (clean.length >= 8) {
+          detectedRef.current = true;
+          onDetected(clean);
+        } else {
+          // User closed the native scanner without scanning, or scanned a
+          // non-product code — just close back to the picker.
+          onClose();
+        }
+      } catch (e) {
+        if (cancelled) return;
+        const msg = (e && e.message) || String(e);
+        if (/cancel/i.test(msg)) {
+          onClose(); // user backed out of the native scanner
+        } else {
+          setError("Could not start the scanner. Please try again.");
+          setStatus("error");
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Load html5-qrcode from CDN if not already loaded
   const ensureLib = () => new Promise((resolve, reject) => {
@@ -3087,6 +3163,12 @@ function BarcodeCameraScanner({ onDetected, onClose }) {
     let instance = null;
 
     (async () => {
+      // Skip the web scanner entirely on native — the ML Kit effect handles it.
+      try {
+        const { Capacitor } = await import("@capacitor/core");
+        if (Capacitor?.isNativePlatform?.()) return;
+      } catch (_) { /* not Capacitor — continue with web scanner */ }
+
       try {
         const Html5Qrcode = await ensureLib();
         if (cancelled) return;
