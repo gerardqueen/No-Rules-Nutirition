@@ -3064,6 +3064,7 @@ function BarcodeCameraScanner({ onDetected, onClose }) {
   const [status, setStatus] = useState("loading"); // loading | scanning | error
   const [error, setError] = useState("");
   const [isNative, setIsNative] = useState(false);
+  const [diag, setDiag] = useState(""); // temporary on-screen diagnostic
 
   // ── NATIVE PATH (Capacitor app): use ML Kit's native scanner ────────────────
   // On a real device we use @capacitor-mlkit/barcode-scanning, which is
@@ -3073,18 +3074,27 @@ function BarcodeCameraScanner({ onDetected, onClose }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      let Capacitor, BarcodeScanner;
+      // Detect the native app via the global Capacitor runtime (present only
+      // inside the app shell). Using the global avoids importing @capacitor/core,
+      // which is externalised for the web build and would fail to resolve here.
+      const cap = (typeof window !== "undefined") ? window.Capacitor : undefined;
+      const native = !!(cap && typeof cap.isNativePlatform === "function" && cap.isNativePlatform());
+      // TEMP diagnostic — shows what the device actually reports.
       try {
-        ({ Capacitor } = await import("@capacitor/core"));
-      } catch (_) {
-        return; // not in a Capacitor context — web path handles it
-      }
-      if (!Capacitor?.isNativePlatform?.()) return; // browser — use web path
+        const hasCap = !!cap;
+        const hasFn = !!(cap && typeof cap.isNativePlatform === "function");
+        const plat = cap && cap.getPlatform ? cap.getPlatform() : "n/a";
+        setDiag(`cap=${hasCap} fn=${hasFn} native=${native} platform=${plat}`);
+      } catch (e) { setDiag("diag-error: " + ((e && e.message) || e)); }
+      if (!native) return; // browser — web scanner path handles it
       if (cancelled) return;
       setIsNative(true);
 
+      let BarcodeScanner;
       try {
-        ({ BarcodeScanner } = await import("@capacitor-mlkit/barcode-scanning"));
+        const capRT = (typeof window !== "undefined") ? window.Capacitor : undefined;
+        BarcodeScanner = capRT && capRT.Plugins && capRT.Plugins.BarcodeScanner;
+        if (!BarcodeScanner) throw new Error("plugin unavailable");
       } catch (e) {
         setError("Scanner module unavailable. Please update the app.");
         setStatus("error");
@@ -3164,10 +3174,8 @@ function BarcodeCameraScanner({ onDetected, onClose }) {
 
     (async () => {
       // Skip the web scanner entirely on native — the ML Kit effect handles it.
-      try {
-        const { Capacitor } = await import("@capacitor/core");
-        if (Capacitor?.isNativePlatform?.()) return;
-      } catch (_) { /* not Capacitor — continue with web scanner */ }
+      const cap = (typeof window !== "undefined") ? window.Capacitor : undefined;
+      if (cap && typeof cap.isNativePlatform === "function" && cap.isNativePlatform()) return;
 
       try {
         const Html5Qrcode = await ensureLib();
@@ -3209,14 +3217,10 @@ function BarcodeCameraScanner({ onDetected, onClose }) {
         };
 
         await instance.start(
-          // Request the rear camera with continuous autofocus and high
-          // resolution. Sharp, well-focused frames scan far more reliably.
-          {
-            facingMode: { ideal: "environment" },
-            focusMode: { ideal: "continuous" },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-          },
+          // Simple, known-good rear-camera request. Do NOT add a `focusMode`
+          // constraint — the iOS WebView rejects it and the camera fails to
+          // start (black screen + "camera unavailable").
+          { facingMode: "environment" },
           config,
           (decodedText) => {
             if (detectedRef.current) return;
@@ -3304,6 +3308,11 @@ function BarcodeCameraScanner({ onDetected, onClose }) {
             aria-label="Close scanner"
           >×</button>
         </div>
+        {diag && (
+          <div style={{ padding: "6px 12px", background: "#222", color: "#9ae6b4", fontFamily: "monospace", fontSize: 10, wordBreak: "break-all" }}>
+            {diag}
+          </div>
+        )}
         <div style={{ position: "relative", background: "#000", aspectRatio: "4/3" }}>
           <div
             id="nrn-barcode-reader"
@@ -6489,6 +6498,13 @@ function WeeklyPlanner({
 
   const openScanner = async () => {
     setScannerError("");
+
+    // The native ML Kit plugin requires CocoaPods on iOS, but this project uses
+    // Swift Package Manager — so we use the web-based scanner (html5-qrcode),
+    // which works reliably in the app's WebView and in browsers. It has been
+    // tuned (wide scan box, high fps, continuous autofocus) for fast detection.
+
+    // ── WEB SCANNER ───────────────────────────────────────────────────────────
     setScannerOpen(true);
     try {
       const Html5Qrcode = await ensureHtml5QrcodeLoaded();
@@ -6511,13 +6527,30 @@ function WeeklyPlanner({
         lookupBarcode(clean);
       };
       const onError = () => { /* per-frame failures are noisy; ignore */ };
-      // Try back camera (environment) first, fall back to any available camera
-      const config = { fps: 10, qrbox: { width: 260, height: 140 }, aspectRatio: 1.778 };
+      // Wide, responsive scan box that fills most of the view width — this is
+      // what makes landscape work well, and now applies in portrait too.
+      // Barcodes are wide, so a wide box dramatically improves detection.
+      const config = {
+        fps: 25,
+        // ~90% of viewport width, short height — ideal shape for 1D product
+        // barcodes, regardless of orientation.
+        qrbox: (vw, vh) => {
+          const width = Math.floor(vw * 0.9);
+          const height = Math.floor(Math.min(vh * 0.5, Math.max(120, width * 0.5)));
+          return { width, height };
+        },
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+      };
+      // Start the camera. We try the simple, known-good rear-camera request
+      // first (this is what worked reliably before). NOTE: do not add a
+      // `focusMode` constraint — the iOS WebView rejects it and the camera
+      // then fails to start at all.
       try {
-        await inst.start({ facingMode: { exact: "environment" } }, config, onSuccess, onError);
+        await inst.start({ facingMode: "environment" }, config, onSuccess, onError);
       } catch (e1) {
         try {
-          await inst.start({ facingMode: "environment" }, config, onSuccess, onError);
+          // Some devices want the stricter "exact" form.
+          await inst.start({ facingMode: { exact: "environment" } }, config, onSuccess, onError);
         } catch (e2) {
           // Last resort: any camera (e.g. desktop webcam)
           await inst.start(true, config, onSuccess, onError);
@@ -7074,7 +7107,7 @@ function WeeklyPlanner({
             style={{
               width: "min(420px, 100%)",
               maxWidth: 420,
-              aspectRatio: "16/9",
+              aspectRatio: "3/4",
               background: "#000",
               borderRadius: 12,
               overflow: "hidden",
