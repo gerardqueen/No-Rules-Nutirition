@@ -4155,13 +4155,51 @@ function CoachVideos({ profileId }) {
       })
       .catch((e) => {
         if (cancelled) return;
-        setError(e.message || "Could not load videos");
+        setError(e.message || "Could not load content");
         setLoading(false);
       });
     return () => { cancelled = true; };
   }, [profileId]);
 
+  // The coach broadcast tool encodes the content type into the category field
+  // as "type:<type>|<realCategory>" (so no backend schema change was needed).
+  // Decode it here. Items without the prefix are treated as YouTube videos
+  // (the original behaviour), so existing content keeps working.
+  const decode = (v) => {
+    const rawCat = v.category || "";
+    let type = "youtube";
+    let category = rawCat;
+    const m = /^type:(youtube|pdf|link)\|?(.*)$/i.exec(rawCat);
+    if (m) {
+      type = m[1].toLowerCase();
+      category = m[2] || "";
+    }
+    // If there's a youtube_id we always treat it as a video regardless.
+    const ytId = v.youtube_id || v.youtubeId || "";
+    if (ytId) type = "youtube";
+    return { ...v, _type: type, _category: category, _ytId: ytId };
+  };
+
+  const items = videos.map(decode);
   const categoryColor = (cat) => categoryColors[cat] || T.accent;
+
+  const typeMeta = {
+    youtube: { icon: "▶", label: "Video" },
+    pdf: { icon: "📄", label: "PDF" },
+    link: { icon: "🔗", label: "Link" },
+  };
+
+  const openItem = (item) => {
+    if (item._type === "youtube") {
+      setActiveVideo(item);
+    } else {
+      // PDFs and links open directly in a new tab / external viewer.
+      const url = item.url || item.link || "";
+      if (url) {
+        try { window.open(url, "_blank", "noopener,noreferrer"); } catch (_) { window.location.href = url; }
+      }
+    }
+  };
 
   return (
     <div>
@@ -4182,7 +4220,7 @@ function CoachVideos({ profileId }) {
               color: T.text,
             }}
           >
-            COACH VIDEOS
+            FROM YOUR COACH
           </div>
           <div
             style={{
@@ -4192,16 +4230,16 @@ function CoachVideos({ profileId }) {
               marginTop: 2,
             }}
           >
-            {videos.length > 0
-              ? `${videos.length} video${videos.length === 1 ? "" : "s"} from your coach`
-              : "Videos shared by your coach will appear here"}
+            {items.length > 0
+              ? `${items.length} item${items.length === 1 ? "" : "s"} shared with you`
+              : "Videos, PDFs and links from your coach will appear here"}
           </div>
         </div>
       </div>
 
       {loading && (
         <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, padding: 20, textAlign: "center" }}>
-          Loading videos…
+          Loading…
         </div>
       )}
 
@@ -4211,7 +4249,7 @@ function CoachVideos({ profileId }) {
         </div>
       )}
 
-      {!loading && !error && videos.length === 0 && (
+      {!loading && !error && items.length === 0 && (
         <div
           style={{
             fontFamily: "DM Sans",
@@ -4223,11 +4261,11 @@ function CoachVideos({ profileId }) {
             borderRadius: 12,
           }}
         >
-          📺 No videos yet — your coach hasn't shared any content
+          📭 Nothing yet — your coach hasn't shared any content
         </div>
       )}
 
-      {!loading && videos.length > 0 && (
+      {!loading && items.length > 0 && (
         <div
           style={{
             display: "grid",
@@ -4235,13 +4273,15 @@ function CoachVideos({ profileId }) {
             gap: 14,
           }}
         >
-          {videos.map((v) => {
-            const ytId = v.youtube_id || v.youtubeId || "";
-            const thumbUrl = ytId ? `https://img.youtube.com/vi/${ytId}/mqdefault.jpg` : null;
+          {items.map((v) => {
+            const meta = typeMeta[v._type] || typeMeta.youtube;
+            const thumbUrl = v._type === "youtube" && v._ytId
+              ? `https://img.youtube.com/vi/${v._ytId}/mqdefault.jpg`
+              : null;
             return (
               <div
                 key={v.id}
-                onClick={() => setActiveVideo(v)}
+                onClick={() => openItem(v)}
                 style={{
                   background: T.card,
                   border: `1px solid ${T.border}`,
@@ -4257,7 +4297,7 @@ function CoachVideos({ profileId }) {
                     aspectRatio: "16/9",
                     background: thumbUrl
                       ? `#000 url(${thumbUrl}) center/cover no-repeat`
-                      : `linear-gradient(135deg, ${categoryColor(v.category)}33, ${categoryColor(v.category)}11)`,
+                      : `linear-gradient(135deg, ${categoryColor(v._category)}33, ${categoryColor(v._category)}11)`,
                     position: "relative",
                   }}
                 >
@@ -4268,18 +4308,37 @@ function CoachVideos({ profileId }) {
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      background: "rgba(0,0,0,0.25)",
+                      background: thumbUrl ? "rgba(0,0,0,0.25)" : "transparent",
                     }}
                   >
-                    <div style={{ fontSize: 36, color: "#fff", textShadow: "0 2px 8px rgba(0,0,0,0.6)" }}>▶</div>
+                    <div style={{ fontSize: 36, color: "#fff", textShadow: "0 2px 8px rgba(0,0,0,0.6)" }}>
+                      {meta.icon}
+                    </div>
                   </div>
-                  {v.category && (
+                  {/* type badge (top-right) */}
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 8,
+                      right: 8,
+                      background: "rgba(0,0,0,0.6)",
+                      color: "#fff",
+                      fontFamily: "Bebas Neue",
+                      fontSize: 10,
+                      letterSpacing: 1,
+                      padding: "3px 8px",
+                      borderRadius: 6,
+                    }}
+                  >
+                    {meta.label}
+                  </div>
+                  {v._category && (
                     <div
                       style={{
                         position: "absolute",
                         top: 8,
                         left: 8,
-                        background: categoryColor(v.category),
+                        background: categoryColor(v._category),
                         color: "#fff",
                         fontFamily: "Bebas Neue",
                         fontSize: 10,
@@ -4288,7 +4347,7 @@ function CoachVideos({ profileId }) {
                         borderRadius: 6,
                       }}
                     >
-                      {v.category}
+                      {v._category}
                     </div>
                   )}
                 </div>
@@ -4325,6 +4384,11 @@ function CoachVideos({ profileId }) {
                       {v.notes}
                     </div>
                   )}
+                  {v._type !== "youtube" && (
+                    <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.accent, marginTop: 6 }}>
+                      {v._type === "pdf" ? "Tap to open PDF →" : "Tap to open link →"}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -4356,9 +4420,9 @@ function CoachVideos({ profileId }) {
             }}
           >
             <div style={{ aspectRatio: "16/9", background: "#000" }}>
-              {(activeVideo.youtube_id || activeVideo.youtubeId) && (
+              {(activeVideo.youtube_id || activeVideo.youtubeId || activeVideo._ytId) && (
                 <iframe
-                  src={`https://www.youtube.com/embed/${activeVideo.youtube_id || activeVideo.youtubeId}?autoplay=1`}
+                  src={`https://www.youtube.com/embed/${activeVideo.youtube_id || activeVideo.youtubeId || activeVideo._ytId}?autoplay=1`}
                   title={activeVideo.title}
                   frameBorder="0"
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -9778,9 +9842,14 @@ export default function App() {
   const mfpUsername = profile?.mfpUsername || null;
 
   // ✅ Load macro plan from backend so coach updates show in the client
-  // Polls every 30s so coach changes appear live
+  // Polls every 30s so coach changes appear live.
+  // IMPORTANT: the plan has one row per day (day_of_week). We keep ALL days
+  // keyed by day so a deliberately different day (e.g. a carb-load Friday)
+  // shows that day's exact targets — NOT an average across the week.
   const profileIdRef = useRef(null);
   profileIdRef.current = profile?.id;
+
+  const [macroGoalsByDay, setMacroGoalsByDay] = useState({}); // { MON: {...}, ... }
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -9791,6 +9860,23 @@ export default function App() {
         const rows = await apiFetch(`/macro-plans/${pid}`);
         const vals = (rows || []).filter(Boolean);
         if (!vals.length) return;
+
+        // Build a per-day map of targets.
+        const byDay = {};
+        for (const r of vals) {
+          const day = r.day_of_week;
+          if (!day) continue;
+          byDay[day] = {
+            calories: Number(r.calories || 0),
+            protein: Number(r.protein_g || 0),
+            carbs: Number(r.carbs_g || 0),
+            fat: Number(r.fat_g || 0),
+          };
+        }
+        setMacroGoalsByDay(byDay);
+
+        // Also compute an average as a SAFE FALLBACK only — used for any day
+        // the coach hasn't set, so nothing ever shows zero.
         const sum = vals.reduce((a, r) => ({
           calories: a.calories + Number(r.calories || 0),
           protein: a.protein + Number(r.protein_g || 0),
@@ -9804,8 +9890,13 @@ export default function App() {
           carbs: Math.round(sum.carbs / n),
           fat: Math.round(sum.fat / n),
         };
-        macroGoals = avg;
-        setMacroGoalsState(avg);
+        byDay.__avg = avg;
+        setMacroGoalsByDay({ ...byDay });
+
+        // Set the active goals to the CURRENTLY SELECTED day (fallback to avg).
+        const active = byDay[selectedDay] || avg;
+        macroGoals = active;
+        setMacroGoalsState(active);
       } catch {
         // keep current values
       }
@@ -9814,6 +9905,17 @@ export default function App() {
     const interval = setInterval(fetchMacroGoals, 30 * 1000); // poll every 30s
     return () => clearInterval(interval);
   }, [profile?.id]);
+
+  // When the user switches day, point the active macro goals at that day's
+  // targets (or the average fallback) so every macro readout reflects the day.
+  useEffect(() => {
+    if (!macroGoalsByDay || Object.keys(macroGoalsByDay).length === 0) return;
+    const active = macroGoalsByDay[selectedDay] || macroGoalsByDay.__avg;
+    if (active) {
+      macroGoals = active;
+      setMacroGoalsState(active);
+    }
+  }, [selectedDay, macroGoalsByDay]);
 
   const SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 min — matches Senpro cadence
 
