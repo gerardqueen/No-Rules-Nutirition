@@ -9539,18 +9539,26 @@ const mfpMealToPlan = (name) => {
 // ── Shopping List helpers + storage ───────────────────────────────────────────
 const SHOPPING_KEY = "nrn_shopping_list";
 
-function loadShoppingList() {
+// The shopping list is stored per-athlete so two people using the same device
+// (or account switching during testing) never see each other's list. The key
+// includes the athlete's id; we keep a legacy un-namespaced key only for
+// one-time migration of an existing list to the logged-in athlete.
+function shoppingKeyFor(athleteId) {
+  return athleteId ? `${SHOPPING_KEY}_${athleteId}` : SHOPPING_KEY;
+}
+
+function loadShoppingList(athleteId) {
   try {
-    const raw = localStorage.getItem(SHOPPING_KEY);
+    const raw = localStorage.getItem(shoppingKeyFor(athleteId));
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
 }
 
-function saveShoppingList(list) {
+function saveShoppingList(list, athleteId) {
   try {
-    localStorage.setItem(SHOPPING_KEY, JSON.stringify(list));
+    localStorage.setItem(shoppingKeyFor(athleteId), JSON.stringify(list));
   } catch {}
 }
 
@@ -9559,10 +9567,10 @@ function normaliseName(name) {
 }
 
 // ── Shopping List screen ──────────────────────────────────────────────────────
-function ShoppingList({ items, setItems }) {
+function ShoppingList({ items, setItems, athleteId }) {
   const update = (next) => {
     setItems(next);
-    saveShoppingList(next);
+    saveShoppingList(next, athleteId);
   };
   const toggle = (id) =>
     update(items.map((it) => (it.id === id ? { ...it, checked: !it.checked } : it)));
@@ -9743,8 +9751,33 @@ export default function App() {
   const [macroGoalsState, setMacroGoalsState] = useState(() => macroGoals);
   const [threads, setThreads] = useState(MSG_SEED);
 
-  // ── Shopping list (persisted to localStorage; survives reloads) ──────────────
-  const [shoppingList, setShoppingList] = useState(() => loadShoppingList());
+  // ── Shopping list (persisted per-athlete to localStorage) ────────────────────
+  // Start empty; the correct athlete's list is loaded once the profile is known
+  // (and reloaded if the logged-in athlete changes), so lists never leak between
+  // athletes sharing a device.
+  const [shoppingList, setShoppingList] = useState([]);
+
+  useEffect(() => {
+    if (!profile?.id) { setShoppingList([]); return; }
+    let list = loadShoppingList(profile.id);
+    // One-time migration: if this athlete has no namespaced list yet but a
+    // legacy un-namespaced list exists, adopt it for this athlete and clear the
+    // shared key so it can't bleed to anyone else.
+    if ((!list || list.length === 0)) {
+      try {
+        const legacyRaw = localStorage.getItem(SHOPPING_KEY);
+        if (legacyRaw) {
+          const legacy = JSON.parse(legacyRaw);
+          if (Array.isArray(legacy) && legacy.length) {
+            list = legacy;
+            saveShoppingList(list, profile.id);
+          }
+          localStorage.removeItem(SHOPPING_KEY); // remove the shared list
+        }
+      } catch {}
+    }
+    setShoppingList(list || []);
+  }, [profile?.id]);
 
   const addToShoppingList = (name) => {
     const clean = (name || "").trim();
@@ -9758,7 +9791,7 @@ export default function App() {
       } else {
         next = [...prev, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: clean, qty: 1, checked: false }];
       }
-      saveShoppingList(next);
+      saveShoppingList(next, profile?.id);
       return next;
     });
   };
@@ -10648,7 +10681,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
           />
         )}
         {tab === "list" && (
-          <ShoppingList items={shoppingList} setItems={setShoppingList} />
+          <ShoppingList items={shoppingList} setItems={setShoppingList} athleteId={profile?.id} />
         )}
         {tab === "inbox" && (
           <div>
