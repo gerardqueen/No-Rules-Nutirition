@@ -9592,10 +9592,32 @@ function loadShoppingList(athleteId) {
   }
 }
 
+// Fetch the authoritative list from the backend so it syncs across the app,
+// the website, and any device. localStorage is kept only as an instant-load
+// cache; the backend is the source of truth.
+async function fetchShoppingList(athleteId) {
+  if (!athleteId) return null;
+  try {
+    const rows = await apiFetch(`/shopping-list/${athleteId}`);
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return null; // network/endpoint error → caller keeps the cached list
+  }
+}
+
 function saveShoppingList(list, athleteId) {
+  // Write-through: update the local cache immediately (instant + offline), then
+  // push to the backend so other devices/the website pick it up.
   try {
     localStorage.setItem(shoppingKeyFor(athleteId), JSON.stringify(list));
   } catch {}
+  if (athleteId) {
+    // Fire-and-forget; the UI already updated optimistically.
+    apiFetch(`/shopping-list/${athleteId}`, {
+      method: "PUT",
+      body: JSON.stringify({ items: list }),
+    }).catch(() => { /* offline or endpoint missing → cache still holds it */ });
+  }
 }
 
 function normaliseName(name) {
@@ -9787,32 +9809,50 @@ export default function App() {
   const [macroGoalsState, setMacroGoalsState] = useState(() => macroGoals);
   const [threads, setThreads] = useState(MSG_SEED);
 
-  // ── Shopping list (persisted per-athlete to localStorage) ────────────────────
-  // Start empty; the correct athlete's list is loaded once the profile is known
-  // (and reloaded if the logged-in athlete changes), so lists never leak between
-  // athletes sharing a device.
+  // ── Shopping list (synced via backend; localStorage is an instant cache) ─────
+  // Shows the cached list instantly, then pulls the authoritative list from the
+  // backend so it stays in sync across the app, the website, and every device.
   const [shoppingList, setShoppingList] = useState([]);
 
   useEffect(() => {
     if (!profile?.id) { setShoppingList([]); return; }
-    let list = loadShoppingList(profile.id);
-    // One-time migration: if this athlete has no namespaced list yet but a
-    // legacy un-namespaced list exists, adopt it for this athlete and clear the
-    // shared key so it can't bleed to anyone else.
-    if ((!list || list.length === 0)) {
+    let cancelled = false;
+
+    // 1) Show cached list immediately (fast paint, works offline).
+    let cached = loadShoppingList(profile.id);
+
+    // One-time migration of any legacy un-namespaced list to this athlete.
+    if ((!cached || cached.length === 0)) {
       try {
         const legacyRaw = localStorage.getItem(SHOPPING_KEY);
         if (legacyRaw) {
           const legacy = JSON.parse(legacyRaw);
           if (Array.isArray(legacy) && legacy.length) {
-            list = legacy;
-            saveShoppingList(list, profile.id);
+            cached = legacy;
+            saveShoppingList(legacy, profile.id); // also pushes to backend
           }
-          localStorage.removeItem(SHOPPING_KEY); // remove the shared list
+          localStorage.removeItem(SHOPPING_KEY);
         }
       } catch {}
     }
-    setShoppingList(list || []);
+    setShoppingList(cached || []);
+
+    // 2) Pull the authoritative list from the backend and reconcile.
+    (async () => {
+      const remote = await fetchShoppingList(profile.id);
+      if (cancelled || remote == null) return; // error → keep cache
+      // If the device had cached items the server doesn't have yet (e.g. added
+      // offline) and the server list is empty, push the cache up instead of
+      // wiping it. Otherwise the server is the source of truth.
+      if (remote.length === 0 && (cached && cached.length > 0)) {
+        saveShoppingList(cached, profile.id);
+      } else {
+        setShoppingList(remote);
+        try { localStorage.setItem(shoppingKeyFor(profile.id), JSON.stringify(remote)); } catch {}
+      }
+    })();
+
+    return () => { cancelled = true; };
   }, [profile?.id]);
 
   const addToShoppingList = (name) => {
