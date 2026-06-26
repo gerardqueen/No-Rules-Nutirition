@@ -5564,6 +5564,86 @@ function WeightTracker({ onWeightSaved, profileId }) {
 }
 
 
+// ── Recent coach check-ins (dashboard card) ───────────────────────────────────
+// Shows the most recent coach-logged check-ins so the athlete can scan their
+// history at a glance. Reads the same /checkins/:id the coach writes to — no
+// backend change needed. Full list lives in the Check-ins area.
+function RecentCheckIns({ profileId, onNavigate }) {
+  const [checkins, setCheckins] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!profileId) return;
+    let cancelled = false;
+    setLoading(true);
+    apiFetch(`/checkins/${profileId}`)
+      .then((rows) => {
+        if (cancelled) return;
+        setCheckins(Array.isArray(rows) ? rows : []);
+        setLoading(false);
+      })
+      .catch(() => { if (!cancelled) { setCheckins([]); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [profileId]);
+
+  // Most recent first
+  const sorted = [...checkins].sort((a, b) => {
+    const da = new Date(a.date || a.created_at || 0).getTime();
+    const db = new Date(b.date || b.created_at || 0).getTime();
+    return db - da;
+  });
+  const shown = expanded ? sorted : sorted.slice(0, 2);
+
+  if (!loading && sorted.length === 0) return null; // nothing to show
+
+  return (
+    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 20, padding: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div style={{ fontFamily: "Bebas Neue", fontSize: 20, letterSpacing: 2, color: T.text }}>
+          CHECK-INS
+        </div>
+        {sorted.length > 2 && (
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            style={{ background: "none", border: "none", color: T.accent, fontFamily: "DM Sans", fontSize: 12, cursor: "pointer" }}
+            type="button"
+          >
+            {expanded ? "Show less" : `View all (${sorted.length})`}
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, padding: 8 }}>Loading…</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {shown.map((c) => (
+            <div key={c.id} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: c.notes ? 8 : 0 }}>
+                <span style={{ background: `${T.coachGreen}22`, border: `1px solid ${T.coachGreen}44`, borderRadius: 6, padding: "3px 10px", fontFamily: "JetBrains Mono", fontSize: 10, color: T.coachGreen, fontWeight: 600 }}>
+                  {c.date || (c.created_at ? new Date(c.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "")}
+                </span>
+                <span style={{ fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1, color: T.text }}>{c.title || "Check-in"}</span>
+              </div>
+              {c.notes && (
+                <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.text, lineHeight: 1.6, whiteSpace: "pre-wrap", marginBottom: c.linkUrl ? 8 : 0 }}>
+                  {c.notes}
+                </div>
+              )}
+              {c.linkUrl && (
+                <a href={c.linkUrl} target="_blank" rel="noopener noreferrer" style={{ fontFamily: "DM Sans", fontSize: 11, color: T.accent, textDecoration: "none" }}>
+                  🔗 View link
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Dashboard (main landing page) ─────────────────────────────────────────────
 function Dashboard({
   plan,
@@ -6087,6 +6167,9 @@ function Dashboard({
 
           {/* Check-in countdown */}
           <CheckInCountdown daysLeft={profile.nextCheckIn} />
+
+          {/* Recent coach check-ins (scrollable history) */}
+          <RecentCheckIns profileId={profileId} onNavigate={onNavigate} />
 
           {/* Weekly calorie bar chart */}
           <div
@@ -9245,11 +9328,24 @@ function InboxPage({ plan, selectedDay, profile, threads, setThreads }) {
     if (!input.trim() || !activeCoachId || loading) return;
     setLoading(true);
     try {
+      // Attach this reply to the existing conversation's thread so the coach
+      // sees one continuous thread instead of a new thread per reply. We take
+      // the threadId (and subject) from the most recent message already loaded
+      // in this conversation. If there are none yet, the backend starts a thread.
+      const last = realMsgs.length ? realMsgs[realMsgs.length - 1] : null;
+      const existingThreadId = last && (last.threadId ?? last.thread_id);
+      const existingSubject = last && (last.subject || last.threadSubject);
+      const body = {
+        content: input.trim(),
+        messageType: msgFilter === "checkin" ? "checkin" : "chat",
+      };
+      if (existingThreadId != null && Number(existingThreadId) > 0) {
+        body.threadId = existingThreadId;
+      }
+      if (existingSubject) body.subject = existingSubject;
+
       const msg = await apiFetch(`/messages/${activeCoachId}`, {
-        method: 'POST', body: JSON.stringify({
-          content: input.trim(),
-          messageType: msgFilter === "checkin" ? "checkin" : "chat",
-        }),
+        method: 'POST', body: JSON.stringify(body),
       });
       setRealMsgs(prev => [...prev, msg]);
       setInput("");
