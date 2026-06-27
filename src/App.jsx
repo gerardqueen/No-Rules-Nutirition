@@ -735,7 +735,7 @@ function CheckInCountdown({ daysLeft }) {
       >
         <span style={{ fontSize: 22 }}>{urgent ? "⚠️" : "📋"}</span>
       </div>
-      <div style={{ flex: 1 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{
             fontFamily: "Bebas Neue",
@@ -5996,13 +5996,7 @@ function Dashboard({
         {/* LEFT COLUMN */}
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           {/* Macro overview cards */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(2,1fr)",
-              gap: 14,
-            }}
-          >
+          <div className="nrn-macro-grid">
             {macroCards.map((m) => {
               const todayPct = Math.min((m.today / m.goal) * 100, 100);
               const weekPct = Math.min((m.week / m.weekGoal) * 100, 100);
@@ -10610,12 +10604,23 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
         input { caret-color:${T.accent}; }
         /* Header fits narrow phones: drop the profile name/sport (and the brand
            word "NUTRITION") on small screens so the row never overflows. */
-        @media (max-width: 400px) {
+        @media (max-width: 360px) {
           .nrn-profile-text { display: none !important; }
+        }
+        @media (max-width: 300px) {
           .nrn-brand-sub { display: none !important; }
         }
-        @media (max-width: 340px) {
-          .nrn-header-pills { display: none !important; }
+        /* Macro cards: 2-up by default, but stack to a single full-width column
+           on narrow phones so the ring + stats never get cramped or clipped.
+           minmax(0,1fr) lets columns shrink below content width (prevents the
+           classic CSS-grid overflow). */
+        .nrn-macro-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 14px;
+        }
+        @media (max-width: 430px) {
+          .nrn-macro-grid { grid-template-columns: 1fr; }
         }
       `}</style>
 
@@ -10671,33 +10676,8 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
             <span className="nrn-brand-sub" style={{ color: T.text }}> NUTRITION</span>
           </div>
 
-          <div className="nrn-header-pills" style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
-            {[
-              { label: "C", val: macroGoals.calories, color: T.accent },
-              { label: "P", val: macroGoals.protein, color: T.protein },
-            ].map((g) => (
-              <div
-                key={g.label}
-                style={{
-                  background: `${g.color}18`,
-                  border: `1px solid ${g.color}33`,
-                  borderRadius: 6,
-                  padding: "2px 7px",
-                  display: "flex",
-                  alignItems: "baseline",
-                  gap: 2,
-                }}
-              >
-                <span style={{ fontFamily: "JetBrains Mono", fontSize: 11, fontWeight: 600, color: g.color }}>
-                  {g.val}
-                </span>
-                <span style={{ fontFamily: "DM Sans", fontSize: 8, color: T.muted }}>
-                  {g.label}
-                </span>
-              </div>
-            ))}
-          </div>
-
+          {/* Header right side. Space freed by removing the cal/macro pills —
+              a notification option can be added here later. */}
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
             <InboxBell threads={threads} setThreads={setThreads} />
             <ProfileMenu
