@@ -480,7 +480,7 @@ function ProfileMenu({ profile, onLogout, onNavigate }) {
         >
           {profile.name.charAt(0)}
         </div>
-        <div style={{ textAlign: "left" }}>
+        <div className="nrn-profile-text" style={{ textAlign: "left" }}>
           <div
             style={{
               fontFamily: "DM Sans",
@@ -10608,6 +10608,15 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
         ::-webkit-scrollbar-thumb { background:${T.border}; border-radius:2px; }
         input::placeholder { color:${T.muted}; }
         input { caret-color:${T.accent}; }
+        /* Header fits narrow phones: drop the profile name/sport (and the brand
+           word "NUTRITION") on small screens so the row never overflows. */
+        @media (max-width: 400px) {
+          .nrn-profile-text { display: none !important; }
+          .nrn-brand-sub { display: none !important; }
+        }
+        @media (max-width: 340px) {
+          .nrn-header-pills { display: none !important; }
+        }
       `}</style>
 
       {/* ── Compact App Header ─────────────────────────────────────────── */}
@@ -10652,13 +10661,17 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
               letterSpacing: 2,
               lineHeight: 1,
               flex: 1,
+              minWidth: 0,
+              overflow: "hidden",
+              whiteSpace: "nowrap",
+              textOverflow: "ellipsis",
             }}
           >
             <span style={{ color: T.accent }}>NO RULE</span>
-            <span style={{ color: T.text }}> NUTRITION</span>
+            <span className="nrn-brand-sub" style={{ color: T.text }}> NUTRITION</span>
           </div>
 
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <div className="nrn-header-pills" style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
             {[
               { label: "C", val: macroGoals.calories, color: T.accent },
               { label: "P", val: macroGoals.protein, color: T.protein },
@@ -10685,7 +10698,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
             ))}
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
             <InboxBell threads={threads} setThreads={setThreads} />
             <ProfileMenu
               profile={profile}
