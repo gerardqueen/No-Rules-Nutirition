@@ -30,6 +30,91 @@ async function apiFetch(path, options = {}) {
 }
 
 
+// ── Push notifications (native app only) ──────────────────────────────────────
+// Uses @capacitor-firebase/messaging via the global Capacitor runtime, so this
+// whole block no-ops on the website (where window.Capacitor is undefined).
+// Flow: ask permission on first launch; once the user is logged in, fetch the
+// FCM token and register it with the backend so the server knows which
+// device(s) to push to. The token is removed on logout.
+const PUSH_ASKED_KEY = "nrn_push_asked";
+
+function getFirebaseMessaging() {
+  const cap = typeof window !== "undefined" ? window.Capacitor : undefined;
+  if (!cap || !cap.isNativePlatform || !cap.isNativePlatform()) return null;
+  return cap.Plugins?.FirebaseMessaging || null;
+}
+
+// Ask for notification permission. Safe to call before login; triggers the iOS
+// system prompt the first time. Returns true if granted.
+async function requestPushPermission() {
+  const FM = getFirebaseMessaging();
+  if (!FM) return false;
+  try {
+    const result = await FM.requestPermissions();
+    return result?.receive === "granted";
+  } catch {
+    return false;
+  }
+}
+
+// Once logged in and permission granted, get the FCM token and send it to the
+// backend. Non-fatal on failure — push simply won't work until the next try.
+async function registerPushToken() {
+  const FM = getFirebaseMessaging();
+  if (!FM) return;
+  try {
+    const perm = await FM.checkPermissions();
+    if (perm?.receive !== "granted") return;
+    const { token } = await FM.getToken();
+    if (!token) return;
+    await apiFetch("/device-token", {
+      method: "POST",
+      body: JSON.stringify({ token, platform: "ios" }),
+    });
+  } catch {
+    /* ignore — token will be retried on next login/app open */
+  }
+}
+
+// On logout, tell the backend to drop this device's token so pushes stop.
+// MUST run before the auth token is cleared from localStorage.
+async function unregisterPushToken() {
+  const FM = getFirebaseMessaging();
+  if (!FM) return;
+  try {
+    const { token } = await FM.getToken();
+    if (token) {
+      await apiFetch("/device-token", {
+        method: "DELETE",
+        body: JSON.stringify({ token }),
+      });
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+// Listen for FCM token rotation so a refreshed token is re-registered.
+function setupPushTokenRefresh() {
+  const FM = getFirebaseMessaging();
+  if (!FM) return;
+  try {
+    FM.addListener("tokenReceived", (event) => {
+      const token = event?.token;
+      if (!token) return;
+      // Only register if logged in (auth token present).
+      if (!getToken()) return;
+      apiFetch("/device-token", {
+        method: "POST",
+        body: JSON.stringify({ token, platform: "ios" }),
+      }).catch(() => {});
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+
 // ── Google Fonts ──────────────────────────────────────────────────────────────
 const fontLink = document.createElement("link");
 fontLink.rel = "stylesheet";
@@ -9910,6 +9995,28 @@ export default function App() {
     })();
   }, [tokenState]);
 
+  // ✅ Push notifications: ask permission on first launch (no-ops on web), and
+  // set up the token-refresh listener once. Asking before login is fine — the
+  // token is only sent to the backend once the user is logged in (below).
+  useEffect(() => {
+    setupPushTokenRefresh();
+    try {
+      const asked = localStorage.getItem(PUSH_ASKED_KEY);
+      if (!asked) {
+        localStorage.setItem(PUSH_ASKED_KEY, "1");
+        requestPushPermission();
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  // ✅ Once logged in, register this device's FCM token with the backend.
+  useEffect(() => {
+    if (!profile) return;
+    registerPushToken();
+  }, [profile]);
+
   // ✅ Pull coach-set macro targets + week plan from backend (starts clean; no demo defaults)
   useEffect(() => {
     if (!profile?.id) return;
@@ -10683,6 +10790,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
             <ProfileMenu
               profile={profile}
               onLogout={() => {
+                unregisterPushToken();
                 setProfile(null);
                 setPlan(initWeekPlan());
                 setTab("dashboard");
