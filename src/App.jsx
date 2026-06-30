@@ -3103,6 +3103,7 @@ function MFPPanel({
 // ── Calendar event types ──────────────────────────────────────────────────────
 const CAL_TYPES = [
   { id: "checkin", label: "Check-In", color: "#22c55e", icon: "✅" },
+  { id: "coach-checkin", label: "Coach Check-In", color: "#22c55e", icon: "📹" },
   { id: "nutrition", label: "Nutrition Plan", color: "#FF9A52", icon: "🥗" },
   { id: "training", label: "Training", color: "#3b82f6", icon: "🏋️" },
   { id: "competition", label: "Competition", color: "#ef4444", icon: "🏆" },
@@ -3450,6 +3451,7 @@ function MiniCalendar({ events, setEvents, profileId }) {
   });
   const [showModal, setShowModal] = useState(false);
   const [editEvent, setEditEvent] = useState(null);
+  const [inviteEvent, setInviteEvent] = useState(null); // read-only coach check-in invite view
   const [selectedDate, setSelectedDate] = useState(null);
   const [form, setForm] = useState({
     title: "",
@@ -3502,6 +3504,11 @@ function MiniCalendar({ events, setEvents, profileId }) {
   };
   const openEdit = (ev, e) => {
     e.stopPropagation();
+    // Coach check-ins are read-only: open the invite view instead of the editor.
+    if (ev.type === "coach-checkin" || ev.readOnly) {
+      setInviteEvent(ev);
+      return;
+    }
     setEditEvent(ev);
     setForm({
       title: ev.title,
@@ -3559,8 +3566,162 @@ function MiniCalendar({ events, setEvents, profileId }) {
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 5);
 
+  // Build a downloadable .ics so the athlete can add the check-in to their
+  // own device calendar (iOS/Android both open .ics natively).
+  const addInviteToDeviceCalendar = (ev) => {
+    if (!ev) return;
+    const dt = String(ev.date).replace(/-/g, ""); // YYYYMMDD
+    let dtStart, dtEnd;
+    if (ev.time) {
+      const hhmm = String(ev.time).replace(":", "").slice(0, 4).padEnd(4, "0");
+      dtStart = `${dt}T${hhmm}00`;
+      // default 30-minute duration
+      let h = parseInt(hhmm.slice(0, 2), 10);
+      let m = parseInt(hhmm.slice(2, 4), 10) + 30;
+      if (m >= 60) { m -= 60; h = (h + 1) % 24; }
+      dtEnd = `${dt}T${_pad(h)}${_pad(m)}00`;
+    } else {
+      dtStart = dt;
+      dtEnd = dt;
+    }
+    const esc = (s) => String(s || "").replace(/([,;\\])/g, "\\$1").replace(/\n/g, "\\n");
+    const descParts = [];
+    if (ev.notes) descParts.push(ev.notes);
+    if (ev.linkUrl) descParts.push(`Join: ${ev.linkUrl}`);
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//No Rule Nutrition//Check-in//EN",
+      "BEGIN:VEVENT",
+      `UID:nrn-${ev.id}@norulenutrition.uk`,
+      ev.time ? `DTSTART:${dtStart}` : `DTSTART;VALUE=DATE:${dtStart}`,
+      ev.time ? `DTEND:${dtEnd}` : `DTEND;VALUE=DATE:${dtEnd}`,
+      `SUMMARY:${esc(ev.title || "Coach check-in")}`,
+      descParts.length ? `DESCRIPTION:${esc(descParts.join("\n\n"))}` : "",
+      ev.linkUrl ? `LOCATION:${esc(ev.linkUrl)}` : "",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].filter(Boolean).join("\r\n");
+    try {
+      const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `checkin-${ev.date}.ics`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (_) {
+      // Fallback: open the link directly if file creation fails
+      if (ev.linkUrl) window.open(ev.linkUrl, "_blank");
+    }
+  };
+
   return (
     <>
+      {/* ── Coach Check-in Invite (read-only) ── */}
+      {inviteEvent && (
+        <div
+          onClick={() => setInviteEvent(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: T.card,
+              border: `1px solid ${T.border}`,
+              borderRadius: 16,
+              padding: 22,
+              maxWidth: 380,
+              width: "100%",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <span style={{ fontSize: 20 }}>📹</span>
+              <span style={{ fontFamily: "Bebas Neue", fontSize: 12, letterSpacing: 2, color: T.coachGreen }}>
+                COACH CHECK-IN
+              </span>
+            </div>
+            <div style={{ fontFamily: "Bebas Neue", fontSize: 22, letterSpacing: 1, color: T.text, marginBottom: 8 }}>
+              {inviteEvent.title}
+            </div>
+            <div style={{ fontFamily: "JetBrains Mono", fontSize: 13, color: T.accent, marginBottom: 14 }}>
+              {new Date(inviteEvent.date + "T00:00:00").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}
+              {inviteEvent.time ? ` · ${inviteEvent.time}` : ""}
+            </div>
+            {inviteEvent.notes && (
+              <div style={{ fontFamily: "DM Sans", fontSize: 13, color: T.text, lineHeight: 1.6, whiteSpace: "pre-wrap", marginBottom: 16 }}>
+                {inviteEvent.notes}
+              </div>
+            )}
+            {inviteEvent.linkUrl && (
+              <a
+                href={inviteEvent.linkUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: "block",
+                  textAlign: "center",
+                  background: T.coachGreen,
+                  color: "#06210f",
+                  fontFamily: "Bebas Neue",
+                  fontSize: 15,
+                  letterSpacing: 1.5,
+                  textDecoration: "none",
+                  padding: "12px",
+                  borderRadius: 10,
+                  marginBottom: 10,
+                }}
+              >
+                📹 JOIN GOOGLE MEET
+              </a>
+            )}
+            <button
+              onClick={() => addInviteToDeviceCalendar(inviteEvent)}
+              style={{
+                width: "100%",
+                background: T.surface,
+                color: T.text,
+                border: `1px solid ${T.border}`,
+                borderRadius: 10,
+                padding: "11px",
+                fontFamily: "DM Sans",
+                fontSize: 13,
+                cursor: "pointer",
+                marginBottom: 8,
+              }}
+            >
+              📅 Add to my device calendar
+            </button>
+            <button
+              onClick={() => setInviteEvent(null)}
+              style={{
+                width: "100%",
+                background: "none",
+                color: T.muted,
+                border: "none",
+                padding: "8px",
+                fontFamily: "DM Sans",
+                fontSize: 12,
+                cursor: "pointer",
+              }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Event Modal ── */}
       {showModal && (
         <div
@@ -11106,8 +11267,24 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
   const fetchCalendarEvents = async () => {
     if (!profile?.id) return;
     try {
-      const rows = await apiFetch(`/calendar-events/${profile.id}`);
-      if (Array.isArray(rows)) setEvents(rows);
+      const [rows, checkins] = await Promise.all([
+        apiFetch(`/calendar-events/${profile.id}`).catch(() => []),
+        apiFetch(`/checkins/${profile.id}`).catch(() => []),
+      ]);
+      const base = Array.isArray(rows) ? rows : [];
+      // Coach check-ins become read-only calendar entries the athlete can open
+      // to view the invite (date/time, notes, Google Meet link).
+      const checkinEvents = (Array.isArray(checkins) ? checkins : []).map((c) => ({
+        id: `checkin-${c.id}`,
+        date: c.date,
+        time: c.time || null,
+        title: c.title || "Coach check-in",
+        notes: c.notes || "",
+        linkUrl: c.linkUrl || null,
+        type: "coach-checkin",
+        readOnly: true,
+      }));
+      setEvents([...base, ...checkinEvents]);
     } catch (e) { /* keep current */ }
   };
   useEffect(() => {
