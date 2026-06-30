@@ -6525,6 +6525,12 @@ function WeeklyPlanner({
   const [showFoodPicker, setShowFoodPicker] = useState(false);
   const [foodSearch, setFoodSearch] = useState("");
   const [foodSearchResults, setFoodSearchResults] = useState([]);
+  const [onlineResults, setOnlineResults] = useState([]); // OpenFoodFacts results
+  const [onlineSearching, setOnlineSearching] = useState(false);
+  const [savedMeals, setSavedMeals] = useState([]); // localStorage-backed quick-add meals
+  const [recentFoods, setRecentFoods] = useState([]); // localStorage-backed recent items
+  const [showCopyMeal, setShowCopyMeal] = useState(false); // copy-from-another-day panel
+  const offSearchSeq = useRef(0); // stale-query guard for async OFF search
   const [selectedFoodItem, setSelectedFoodItem] = useState(null);
   const [servingGrams, setServingGrams] = useState(100);
   const [servingLabel, setServingLabel] = useState("100g");
@@ -6949,6 +6955,9 @@ function WeeklyPlanner({
     setShowFoodPicker(false);
     setFoodSearch("");
     setFoodSearchResults([]);
+    setOnlineResults([]);
+    setOnlineSearching(false);
+    setShowCopyMeal(false);
     setSelectedFoodItem(null);
     setPickerTab("search");
     setBarcodeResult(null);
@@ -6965,6 +6974,8 @@ function WeeklyPlanner({
     setSelectedFoodItem(null);
     if (query.trim().length < 2) {
       setFoodSearchResults([]);
+      setOnlineResults([]);
+      setOnlineSearching(false);
       return;
     }
     const q = query.toLowerCase();
@@ -6981,7 +6992,123 @@ function WeeklyPlanner({
     setServingLabel("100g");
   };
 
+  // ── Saved meals + recent foods (localStorage, per-athlete) ──────────────────
+  const athleteKey = (profile && profile.id) ? `u${profile.id}` : "guest";
+  const SAVED_MEALS_KEY = `nrn_saved_meals_${athleteKey}`;
+  const RECENT_FOODS_KEY = `nrn_recent_foods_${athleteKey}`;
+
+  useEffect(() => {
+    try {
+      const sm = JSON.parse(localStorage.getItem(SAVED_MEALS_KEY) || "[]");
+      if (Array.isArray(sm)) setSavedMeals(sm);
+      const rf = JSON.parse(localStorage.getItem(RECENT_FOODS_KEY) || "[]");
+      if (Array.isArray(rf)) setRecentFoods(rf);
+    } catch { /* ignore corrupt storage */ }
+  }, [SAVED_MEALS_KEY, RECENT_FOODS_KEY]);
+
+  const persistSavedMeals = (next) => {
+    setSavedMeals(next);
+    try { localStorage.setItem(SAVED_MEALS_KEY, JSON.stringify(next)); } catch {}
+  };
+  const persistRecentFoods = (next) => {
+    setRecentFoods(next);
+    try { localStorage.setItem(RECENT_FOODS_KEY, JSON.stringify(next)); } catch {}
+  };
+
+  // Remember an added food at the top of the recents list (delicate, max 12).
+  const rememberRecentFood = (food) => {
+    if (!food || !food.n) return;
+    const without = recentFoods.filter((f) => f.n !== food.n);
+    const next = [{ n: food.n, c: food.c, p: food.p, b: food.b, f: food.f, s: food.s, source: food.source }, ...without].slice(0, 12);
+    persistRecentFoods(next);
+  };
+
+  // Save the CURRENT meal slot's foods as a named quick-add meal.
+  const saveCurrentMeal = (name) => {
+    const items = (plan?.[selectedDay]?.[selectedMeal]) || [];
+    if (items.length === 0) return;
+    const cleanName = String(name || "").trim().slice(0, 60) || `Meal ${savedMeals.length + 1}`;
+    const without = savedMeals.filter((m) => m.name.toLowerCase() !== cleanName.toLowerCase());
+    const next = [{ name: cleanName, items: items.map((it) => ({ ...it })) }, ...without].slice(0, 30);
+    persistSavedMeals(next);
+  };
+
+  const deleteSavedMeal = (name) => {
+    persistSavedMeals(savedMeals.filter((m) => m.name !== name));
+  };
+
+  // Quick-add a whole saved meal into the current slot.
+  const quickAddSavedMeal = (meal) => {
+    if (!meal || !Array.isArray(meal.items)) return;
+    setPlan((prev) => {
+      const next = { ...prev };
+      next[selectedDay] = { ...next[selectedDay] };
+      next[selectedDay][selectedMeal] = [
+        ...next[selectedDay][selectedMeal],
+        ...meal.items.map((it) => ({ ...it })),
+      ];
+      return next;
+    });
+    resetPicker();
+  };
+
+  // ── Copy a meal from another day/slot into the current slot ─────────────────
+  const copyMealFrom = (fromDay, fromMeal) => {
+    const items = (plan?.[fromDay]?.[fromMeal]) || [];
+    if (items.length === 0) return;
+    setPlan((prev) => {
+      const next = { ...prev };
+      next[selectedDay] = { ...next[selectedDay] };
+      next[selectedDay][selectedMeal] = [
+        ...next[selectedDay][selectedMeal],
+        ...items.map((it) => ({ ...it })),
+      ];
+      return next;
+    });
+    setShowCopyMeal(false);
+    resetPicker();
+  };
+
+  // ── Debounced OpenFoodFacts online search (appends to local results) ────────
+  useEffect(() => {
+    const q = foodSearch.trim();
+    if (q.length < 2) {
+      setOnlineResults([]);
+      setOnlineSearching(false);
+      return;
+    }
+    const seq = ++offSearchSeq.current;
+    setOnlineSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const data = await apiFetch(`/off/search?q=${encodeURIComponent(q)}`);
+        if (seq !== offSearchSeq.current) return; // a newer query superseded this
+        const mapped = (data?.products || [])
+          .filter((p) => p && (p.calories > 0 || p.protein > 0 || p.carbs > 0 || p.fat > 0))
+          .map((p) => ({
+            n: p.brand ? `${p.name} (${p.brand})` : p.name,
+            c: Math.round(Number(p.calories) || 0),
+            p: Math.round((Number(p.protein) || 0) * 10) / 10,
+            b: Math.round((Number(p.carbs) || 0) * 10) / 10,
+            f: Math.round((Number(p.fat) || 0) * 10) / 10,
+            s: Array.isArray(p.servings) && p.servings.length ? p.servings : [["100g", 100]],
+            source: "openfoodfacts",
+          }));
+        // Drop online items whose name already appears in local results.
+        const localNames = new Set(foodSearchResults.map((r) => r.n.toLowerCase()));
+        setOnlineResults(mapped.filter((m) => !localNames.has(m.n.toLowerCase())));
+      } catch {
+        if (seq === offSearchSeq.current) setOnlineResults([]);
+      } finally {
+        if (seq === offSearchSeq.current) setOnlineSearching(false);
+      }
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [foodSearch]);
+
   const addFood = (food) => {
+    rememberRecentFood(food);
     setPlan((prev) => {
       const next = { ...prev };
       next[selectedDay] = { ...next[selectedDay] };
@@ -7574,6 +7701,264 @@ function WeeklyPlanner({
                     padding: "12px 24px 20px",
                   }}
                 >
+                  {/* ── Quick-add zone: shown when not actively searching ── */}
+                  {foodSearch.trim().length < 2 && !selectedFoodItem && (
+                    <div>
+                      {/* Copy from another day */}
+                      <button
+                        onClick={() => setShowCopyMeal((v) => !v)}
+                        style={{
+                          width: "100%",
+                          padding: "10px 12px",
+                          background: T.card,
+                          border: `1px solid ${showCopyMeal ? T.accent : T.border}`,
+                          borderRadius: 10,
+                          color: T.text,
+                          fontFamily: "DM Sans",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          marginBottom: 12,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                        }}
+                      >
+                        <span>📋 Copy a meal from another day</span>
+                        <span style={{ color: T.muted }}>{showCopyMeal ? "▲" : "▼"}</span>
+                      </button>
+
+                      {showCopyMeal && (
+                        <div style={{ marginBottom: 14 }}>
+                          {Object.keys(plan || {}).map((day) => {
+                            const meals = plan[day] || {};
+                            const slotsWithFood = Object.keys(meals).filter(
+                              (m) => Array.isArray(meals[m]) && meals[m].length > 0
+                            );
+                            if (slotsWithFood.length === 0) return null;
+                            return (
+                              <div key={day} style={{ marginBottom: 8 }}>
+                                <div
+                                  style={{
+                                    fontFamily: "Bebas Neue",
+                                    fontSize: 12,
+                                    letterSpacing: 1,
+                                    color: T.muted,
+                                    marginBottom: 4,
+                                  }}
+                                >
+                                  {day}
+                                </div>
+                                {slotsWithFood.map((m) => (
+                                  <button
+                                    key={m}
+                                    onClick={() => copyMealFrom(day, m)}
+                                    style={{
+                                      width: "100%",
+                                      textAlign: "left",
+                                      padding: "8px 10px",
+                                      background: T.surface,
+                                      border: `1px solid ${T.border}`,
+                                      borderRadius: 8,
+                                      color: T.text,
+                                      fontFamily: "DM Sans",
+                                      fontSize: 12,
+                                      cursor: "pointer",
+                                      marginBottom: 4,
+                                      display: "flex",
+                                      justifyContent: "space-between",
+                                      gap: 8,
+                                    }}
+                                  >
+                                    <span style={{ textTransform: "capitalize" }}>{m}</span>
+                                    <span style={{ color: T.muted, whiteSpace: "nowrap" }}>
+                                      {meals[m].length} item{meals[m].length === 1 ? "" : "s"} → copy
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Save current slot as a meal */}
+                      {((plan?.[selectedDay]?.[selectedMeal]) || []).length > 0 && (
+                        <button
+                          onClick={() => {
+                            const name = window.prompt(
+                              "Name this meal (so you can quick-add it later):",
+                              ""
+                            );
+                            if (name && name.trim()) saveCurrentMeal(name);
+                          }}
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            background: T.accent + "15",
+                            border: `1px solid ${T.accent}`,
+                            borderRadius: 10,
+                            color: T.accent,
+                            fontFamily: "DM Sans",
+                            fontSize: 12,
+                            cursor: "pointer",
+                            marginBottom: 14,
+                          }}
+                        >
+                          💾 Save current {selectedMeal} as a quick-add meal
+                        </button>
+                      )}
+
+                      {/* Saved meals */}
+                      {savedMeals.length > 0 && (
+                        <div style={{ marginBottom: 14 }}>
+                          <div
+                            style={{
+                              fontFamily: "DM Sans",
+                              fontSize: 11,
+                              color: T.muted,
+                              marginBottom: 8,
+                            }}
+                          >
+                            SAVED MEALS
+                          </div>
+                          {savedMeals.map((meal) => {
+                            const tot = (meal.items || []).reduce(
+                              (acc, it) => {
+                                const g = (it.s && it.s[0] && it.s[0][1]) || 100;
+                                const sc = scaleMacros(it, g);
+                                acc.cal += sc.calories;
+                                return acc;
+                              },
+                              { cal: 0 }
+                            );
+                            return (
+                              <div
+                                key={meal.name}
+                                style={{
+                                  display: "flex",
+                                  gap: 6,
+                                  marginBottom: 6,
+                                }}
+                              >
+                                <button
+                                  onClick={() => quickAddSavedMeal(meal)}
+                                  style={{
+                                    flex: 1,
+                                    textAlign: "left",
+                                    padding: "10px 12px",
+                                    background: T.card,
+                                    border: `1px solid ${T.border}`,
+                                    borderRadius: 10,
+                                    color: T.text,
+                                    fontFamily: "DM Sans",
+                                    fontSize: 12,
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    gap: 8,
+                                  }}
+                                >
+                                  <span style={{ fontWeight: 500 }}>{meal.name}</span>
+                                  <span style={{ color: T.muted, whiteSpace: "nowrap" }}>
+                                    {(meal.items || []).length} items · {Math.round(tot.cal)} kcal
+                                  </span>
+                                </button>
+                                <button
+                                  onClick={() => deleteSavedMeal(meal.name)}
+                                  title="Delete saved meal"
+                                  style={{
+                                    padding: "0 10px",
+                                    background: "none",
+                                    border: `1px solid ${T.border}`,
+                                    borderRadius: 10,
+                                    color: T.muted,
+                                    cursor: "pointer",
+                                    fontSize: 14,
+                                  }}
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Recent foods */}
+                      {recentFoods.length > 0 && (
+                        <div style={{ marginBottom: 6 }}>
+                          <div
+                            style={{
+                              fontFamily: "DM Sans",
+                              fontSize: 11,
+                              color: T.muted,
+                              marginBottom: 8,
+                            }}
+                          >
+                            RECENT
+                          </div>
+                          {recentFoods.map((item, i) => (
+                            <button
+                              key={`recent-${i}`}
+                              onClick={() => selectFoodItem(item)}
+                              style={{
+                                width: "100%",
+                                textAlign: "left",
+                                padding: "9px 12px",
+                                background: T.card,
+                                border: `1px solid ${T.border}`,
+                                borderRadius: 10,
+                                marginBottom: 6,
+                                cursor: "pointer",
+                                display: "flex",
+                                justifyContent: "space-between",
+                                gap: 8,
+                              }}
+                            >
+                              <span
+                                style={{
+                                  fontFamily: "DM Sans",
+                                  fontSize: 12,
+                                  color: T.text,
+                                  flex: 1,
+                                }}
+                              >
+                                {item.n}
+                              </span>
+                              <span
+                                style={{
+                                  fontFamily: "JetBrains Mono",
+                                  fontSize: 11,
+                                  color: T.accent,
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {item.c} kcal
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {savedMeals.length === 0 &&
+                        recentFoods.length === 0 &&
+                        !showCopyMeal &&
+                        ((plan?.[selectedDay]?.[selectedMeal]) || []).length === 0 && (
+                          <div
+                            style={{
+                              textAlign: "center",
+                              padding: "20px 0",
+                              color: T.muted,
+                              fontFamily: "DM Sans",
+                              fontSize: 12,
+                            }}
+                          >
+                            Start typing to search foods, or scan a barcode.
+                          </div>
+                        )}
+                    </div>
+                  )}
+
                   {selectedFoodItem &&
                     (() => {
                       const preview = scaleMacros(
@@ -8002,6 +8387,131 @@ function WeeklyPlanner({
                       ))}
                     </div>
                   )}
+
+                  {/* Online results from OpenFoodFacts (appended under local) */}
+                  <style>{`@keyframes nrnspin { to { transform: rotate(360deg); } }`}</style>
+                  {foodSearch.trim().length >= 2 &&
+                    (onlineSearching || onlineResults.length > 0) && (
+                      <div style={{ marginTop: 14 }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            fontFamily: "DM Sans",
+                            fontSize: 11,
+                            color: T.muted,
+                            marginBottom: 8,
+                          }}
+                        >
+                          <span>MORE FROM OPENFOODFACTS</span>
+                          {onlineSearching && (
+                            <span
+                              style={{
+                                width: 12,
+                                height: 12,
+                                border: `2px solid ${T.border}`,
+                                borderTopColor: T.accent,
+                                borderRadius: "50%",
+                                display: "inline-block",
+                                animation: "nrnspin 0.7s linear infinite",
+                              }}
+                            />
+                          )}
+                        </div>
+                        {onlineResults.map((item, i) => (
+                          <button
+                            key={`off-${i}`}
+                            onClick={() => selectFoodItem(item)}
+                            style={{
+                              width: "100%",
+                              textAlign: "left",
+                              padding: "10px 12px",
+                              background:
+                                selectedFoodItem?.n === item.n
+                                  ? T.accent + "15"
+                                  : T.card,
+                              border: `1px solid ${
+                                selectedFoodItem?.n === item.n
+                                  ? T.accent
+                                  : T.border
+                              }`,
+                              borderRadius: 10,
+                              marginBottom: 6,
+                              cursor: "pointer",
+                              transition: "all 0.15s",
+                            }}
+                            onMouseEnter={(e) => {
+                              if (selectedFoodItem?.n !== item.n)
+                                e.currentTarget.style.borderColor =
+                                  T.accent + "66";
+                            }}
+                            onMouseLeave={(e) => {
+                              if (selectedFoodItem?.n !== item.n)
+                                e.currentTarget.style.borderColor = T.border;
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "flex-start",
+                                gap: 8,
+                              }}
+                            >
+                              <span
+                                style={{
+                                  fontFamily: "DM Sans",
+                                  fontSize: 12,
+                                  color: T.text,
+                                  fontWeight: 500,
+                                  lineHeight: 1.3,
+                                  flex: 1,
+                                }}
+                              >
+                                {item.n}
+                              </span>
+                              <span
+                                style={{
+                                  fontFamily: "JetBrains Mono",
+                                  fontSize: 11,
+                                  color: T.accent,
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {item.c} kcal
+                              </span>
+                            </div>
+                            <div
+                              style={{
+                                fontFamily: "JetBrains Mono",
+                                fontSize: 10,
+                                color: T.muted,
+                                marginTop: 3,
+                              }}
+                            >
+                              P:{item.p}g · C:{item.b}g · F:{item.f}g{" "}
+                              <span style={{ color: T.border }}>per 100g</span>
+                            </div>
+                          </button>
+                        ))}
+                        {!onlineSearching &&
+                          onlineResults.length === 0 &&
+                          foodSearchResults.length === 0 && (
+                            <div
+                              style={{
+                                fontFamily: "DM Sans",
+                                fontSize: 12,
+                                color: T.muted,
+                                padding: "8px 2px",
+                              }}
+                            >
+                              No matches found. Try the barcode scanner or add a
+                              custom food.
+                            </div>
+                          )}
+                      </div>
+                    )}
                 </div>
               </>
             )}
