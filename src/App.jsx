@@ -6696,6 +6696,9 @@ function WeeklyPlanner({
   const [servingGrams, setServingGrams] = useState(100);
   const [servingLabel, setServingLabel] = useState("100g");
   const [pickerTab, setPickerTab] = useState("search"); // "search" | "barcode"
+  const [showCustomFoodForm, setShowCustomFoodForm] = useState(false);
+  const [customFoodForm, setCustomFoodForm] = useState({ name: "", calories: "", protein: "", carbs: "", fat: "" });
+  const [savingCustomFood, setSavingCustomFood] = useState(false);
   const [barcodeInput, setBarcodeInput] = useState("");
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scannerError, setScannerError] = useState("");
@@ -7065,11 +7068,11 @@ function WeeklyPlanner({
         body: JSON.stringify({
           name: manualBarcodeForm.name.trim(),
           barcode: manualBarcode,
-          calories_per_100g: cals,
-          protein_per_100g: parseFloat(manualBarcodeForm.protein) || 0,
-          carbs_per_100g: parseFloat(manualBarcodeForm.carbs) || 0,
-          fat_per_100g: parseFloat(manualBarcodeForm.fat) || 0,
-          serving_size_g: parseFloat(manualBarcodeForm.servingSize) || 100,
+          calories: cals,
+          protein_g: parseFloat(manualBarcodeForm.protein) || 0,
+          carbs_g: parseFloat(manualBarcodeForm.carbs) || 0,
+          fat_g: parseFloat(manualBarcodeForm.fat) || 0,
+          serving_size: parseFloat(manualBarcodeForm.servingSize) || 100,
         }),
       });
       // After successful save, populate barcodeResult so user can adjust grams + add to meal
@@ -7096,15 +7099,59 @@ function WeeklyPlanner({
     setSavingManualBarcode(false);
   };
 
+  // Save a custom food (typed from the search tab when nothing is found) to the
+  // shared foods DB, then select it so the user can set grams and add to a meal.
+  const saveCustomFoodFromSearch = async () => {
+    const name = customFoodForm.name.trim() || foodSearch.trim();
+    if (!name) { alert("Enter a food name"); return; }
+    const cals = parseFloat(customFoodForm.calories);
+    if (!Number.isFinite(cals) || cals <= 0) { alert("Enter calories per 100g"); return; }
+    setSavingCustomFood(true);
+    try {
+      const res = await apiFetch(`/foods`, {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          calories: cals,
+          protein_g: parseFloat(customFoodForm.protein) || 0,
+          carbs_g: parseFloat(customFoodForm.carbs) || 0,
+          fat_g: parseFloat(customFoodForm.fat) || 0,
+          serving_size: 100,
+        }),
+      });
+      // Select it in canonical shape so it flows through scaleMacros correctly.
+      const item = {
+        n: name,
+        c: Math.round(cals),
+        p: parseFloat(customFoodForm.protein) || 0,
+        b: parseFloat(customFoodForm.carbs) || 0,
+        f: parseFloat(customFoodForm.fat) || 0,
+        s: [["100g", 100]],
+        source: "user-added",
+        foodId: res?.id || null,
+      };
+      setSelectedFoodItem(item);
+      setShowCustomFoodForm(false);
+      setCustomFoodForm({ name: "", calories: "", protein: "", carbs: "", fat: "" });
+    } catch (e) {
+      alert(e.message || "Could not save food");
+    }
+    setSavingCustomFood(false);
+  };
+
   const selectFromBarcode = () => {
     if (!barcodeResult) return;
+    // barcodeResult uses the barcode shape {cal=calories, c=carbs}. Convert to
+    // the canonical shape {c=calories, b=carbs} that scaleMacros and the rest of
+    // the picker expect, or calories render as carbs ("incorrect Cals").
     const item = {
       n: barcodeResult.n,
-      cal: barcodeResult.cal,
+      c: barcodeResult.cal,
       p: barcodeResult.p,
-      c: barcodeResult.c,
+      b: barcodeResult.c,
       f: barcodeResult.f,
       s: barcodeResult.s,
+      source: barcodeResult.source || "user-added",
     };
     setSelectedFoodItem(item);
     setPickerTab("search");
@@ -7127,6 +7174,8 @@ function WeeklyPlanner({
     setShowManualBarcodeForm(false);
     setManualBarcode("");
     setManualBarcodeForm({ name: "", calories: "", protein: "", carbs: "", fat: "", servingSize: "100" });
+    setShowCustomFoodForm(false);
+    setCustomFoodForm({ name: "", calories: "", protein: "", carbs: "", fat: "" });
   };
 
   // Search the FOOD_DB on input change
@@ -8658,19 +8707,154 @@ function WeeklyPlanner({
                         ))}
                         {!onlineSearching &&
                           onlineResults.length === 0 &&
-                          foodSearchResults.length === 0 && (
+                          foodSearchResults.length === 0 &&
+                          !showCustomFoodForm && (
+                            <div style={{ padding: "8px 2px" }}>
+                              <div
+                                style={{
+                                  fontFamily: "DM Sans",
+                                  fontSize: 12,
+                                  color: T.muted,
+                                  marginBottom: 10,
+                                }}
+                              >
+                                No matches found for "{foodSearch.trim()}".
+                              </div>
+                              <button
+                                onClick={() => {
+                                  setCustomFoodForm((p) => ({ ...p, name: foodSearch.trim() }));
+                                  setShowCustomFoodForm(true);
+                                }}
+                                style={{
+                                  width: "100%",
+                                  padding: "10px",
+                                  background: T.surface,
+                                  border: `1px dashed ${T.accent}`,
+                                  borderRadius: 10,
+                                  color: T.accent,
+                                  fontFamily: "DM Sans",
+                                  fontSize: 13,
+                                  fontWeight: 600,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                + Add "{foodSearch.trim()}" as a custom food
+                              </button>
+                            </div>
+                          )}
+
+                        {showCustomFoodForm && (
+                          <div
+                            style={{
+                              padding: 14,
+                              background: T.surface,
+                              border: `1px solid ${T.border}`,
+                              borderRadius: 12,
+                              marginTop: 4,
+                            }}
+                          >
                             <div
                               style={{
                                 fontFamily: "DM Sans",
-                                fontSize: 12,
-                                color: T.muted,
-                                padding: "8px 2px",
+                                fontSize: 11,
+                                color: T.accent,
+                                fontWeight: 600,
+                                letterSpacing: 1,
+                                textTransform: "uppercase",
+                                marginBottom: 10,
                               }}
                             >
-                              No matches found. Try the barcode scanner or add a
-                              custom food.
+                              New custom food (per 100g)
                             </div>
-                          )}
+                            <input
+                              value={customFoodForm.name}
+                              onChange={(e) => setCustomFoodForm((p) => ({ ...p, name: e.target.value }))}
+                              placeholder="Food name"
+                              style={{
+                                width: "100%",
+                                padding: "9px 10px",
+                                background: T.card,
+                                border: `1px solid ${T.border}`,
+                                borderRadius: 8,
+                                color: T.text,
+                                fontFamily: "DM Sans",
+                                fontSize: 13,
+                                marginBottom: 8,
+                                outline: "none",
+                                boxSizing: "border-box",
+                              }}
+                            />
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6, marginBottom: 12 }}>
+                              {[
+                                { k: "calories", label: "Cals" },
+                                { k: "protein", label: "Protein" },
+                                { k: "carbs", label: "Carbs" },
+                                { k: "fat", label: "Fat" },
+                              ].map((fld) => (
+                                <div key={fld.k}>
+                                  <label style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, letterSpacing: 0.5, textTransform: "uppercase", display: "block", marginBottom: 3 }}>
+                                    {fld.label}
+                                  </label>
+                                  <input
+                                    type="number"
+                                    inputMode="decimal"
+                                    value={customFoodForm[fld.k]}
+                                    onChange={(e) => setCustomFoodForm((p) => ({ ...p, [fld.k]: e.target.value }))}
+                                    placeholder="0"
+                                    style={{
+                                      width: "100%",
+                                      padding: "7px 6px",
+                                      background: T.card,
+                                      border: `1px solid ${T.border}`,
+                                      borderRadius: 8,
+                                      color: T.text,
+                                      fontFamily: "JetBrains Mono",
+                                      fontSize: 13,
+                                      textAlign: "center",
+                                      outline: "none",
+                                      boxSizing: "border-box",
+                                    }}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                            <button
+                              onClick={saveCustomFoodFromSearch}
+                              disabled={savingCustomFood}
+                              style={{
+                                width: "100%",
+                                padding: "11px",
+                                background: T.accent,
+                                border: "none",
+                                borderRadius: 10,
+                                color: T.bg,
+                                fontFamily: "Bebas Neue",
+                                fontSize: 15,
+                                letterSpacing: 1.5,
+                                cursor: savingCustomFood ? "default" : "pointer",
+                                opacity: savingCustomFood ? 0.6 : 1,
+                                marginBottom: 6,
+                              }}
+                            >
+                              {savingCustomFood ? "SAVING…" : "SAVE & SELECT"}
+                            </button>
+                            <button
+                              onClick={() => { setShowCustomFoodForm(false); setCustomFoodForm({ name: "", calories: "", protein: "", carbs: "", fat: "" }); }}
+                              style={{
+                                width: "100%",
+                                padding: "6px",
+                                background: "none",
+                                border: "none",
+                                color: T.muted,
+                                fontFamily: "DM Sans",
+                                fontSize: 12,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                 </div>
