@@ -3504,8 +3504,8 @@ function MiniCalendar({ events, setEvents, profileId }) {
   };
   const openEdit = (ev, e) => {
     e.stopPropagation();
-    // Coach check-ins are read-only: open the invite view instead of the editor.
-    if (ev.type === "coach-checkin" || ev.readOnly) {
+    // Coach check-ins and coach-created events are read-only: open the viewer.
+    if (ev.type === "coach-checkin" || ev.readOnly || ev.coachCreated) {
       setInviteEvent(ev);
       return;
     }
@@ -3514,7 +3514,7 @@ function MiniCalendar({ events, setEvents, profileId }) {
       title: ev.title,
       type: ev.type,
       date: ev.date,
-      note: ev.note || "",
+      note: ev.note || ev.notes || "",
     });
     setShowModal(true);
   };
@@ -3647,9 +3647,9 @@ function MiniCalendar({ events, setEvents, profileId }) {
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-              <span style={{ fontSize: 20 }}>📹</span>
+              <span style={{ fontSize: 20 }}>{inviteEvent.type === "coach-checkin" ? "📹" : "📅"}</span>
               <span style={{ fontFamily: "Bebas Neue", fontSize: 12, letterSpacing: 2, color: T.coachGreen }}>
-                COACH CHECK-IN
+                {inviteEvent.type === "coach-checkin" ? "COACH CHECK-IN" : "FROM YOUR COACH"}
               </span>
             </div>
             <div style={{ fontFamily: "Bebas Neue", fontSize: 22, letterSpacing: 1, color: T.text, marginBottom: 8 }}>
@@ -3657,7 +3657,17 @@ function MiniCalendar({ events, setEvents, profileId }) {
             </div>
             <div style={{ fontFamily: "JetBrains Mono", fontSize: 13, color: T.accent, marginBottom: 14 }}>
               {new Date(inviteEvent.date + "T00:00:00").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}
-              {inviteEvent.time ? ` · ${inviteEvent.time}` : ""}
+              {(() => {
+                if (inviteEvent.time) return ` · ${inviteEvent.time}`;
+                // Derive a time from startISO when present (coach calendar events)
+                try {
+                  if (inviteEvent.startISO && String(inviteEvent.startISO).length > 10) {
+                    const t = new Date(inviteEvent.startISO).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+                    return ` · ${t}`;
+                  }
+                } catch {}
+                return "";
+              })()}
             </div>
             {inviteEvent.notes && (
               <div style={{ fontFamily: "DM Sans", fontSize: 13, color: T.text, lineHeight: 1.6, whiteSpace: "pre-wrap", marginBottom: 16 }}>
@@ -5814,6 +5824,131 @@ function WeightTracker({ onWeightSaved, profileId }) {
 // Shows the most recent coach-logged check-ins so the athlete can scan their
 // history at a glance. Reads the same /checkins/:id the coach writes to — no
 // backend change needed. Full list lives in the Check-ins area.
+/* ── Wellbeing tab: coach-set habits (RAG daily) + weight + mood ─────────── */
+function WellbeingTab({ profile }) {
+  const [habits, setHabits] = useState([]);
+  const [ratings, setRatings] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const fmtD = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  const todayStr = fmtD(new Date());
+  const last7 = [...Array(7)].map((_, i) => { const d = new Date(); d.setDate(d.getDate() - (6 - i)); return fmtD(d); });
+  const ukShort = (iso) => { const [, m, d] = String(iso).split("-"); return `${d}/${m}`; };
+
+  const load = async () => {
+    if (!profile?.id) { setLoading(false); return; }
+    try {
+      let h = [], r = [];
+      try { h = await apiFetch(`/habits/${profile.id}`); } catch {}
+      try { r = await apiFetch(`/habit-ratings/${profile.id}?start=${last7[0]}&end=${last7[6]}`); } catch {}
+      setHabits(Array.isArray(h) ? h : []);
+      setRatings(Array.isArray(r) ? r : []);
+    } catch {}
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, [profile?.id]);
+
+  const ratingMap = {};
+  ratings.forEach((r) => { ratingMap[`${r.habit_id}|${r.date}`] = r.rating; });
+
+  const rate = async (habitId, rating) => {
+    // Optimistic update
+    setRatings((prev) => {
+      const without = prev.filter((r) => !(String(r.habit_id) === String(habitId) && r.date === todayStr));
+      return [...without, { habit_id: habitId, date: todayStr, rating }];
+    });
+    try {
+      await apiFetch(`/habit-ratings/${profile.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ habitId, date: todayStr, rating }),
+      });
+    } catch (e) { /* silent; next load corrects */ }
+  };
+
+  const RAG = [
+    { k: "R", label: "Missed", color: "#ef4444" },
+    { k: "A", label: "Partly", color: "#f59e0b" },
+    { k: "G", label: "On track", color: "#22c55e" },
+  ];
+
+  return (
+    <div>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontFamily: "Bebas Neue", fontSize: 28, letterSpacing: 2, color: T.text }}>WELLBEING</div>
+        <div style={{ fontFamily: "DM Sans", fontSize: 13, color: T.muted, marginTop: 4 }}>
+          Rate today's habits, and log your weight and mood
+        </div>
+      </div>
+
+      {/* Habits */}
+      <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
+        <div style={{ fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 2, color: T.text, marginBottom: 10 }}>TODAY'S HABITS</div>
+        {loading ? (
+          <div style={{ color: T.muted, fontSize: 12 }}>Loading…</div>
+        ) : habits.length === 0 ? (
+          <div style={{ color: T.muted, fontSize: 12, fontFamily: "DM Sans" }}>
+            No habits set yet — your coach will add them here.
+          </div>
+        ) : (
+          habits.map((h) => {
+            const today = ratingMap[`${h.id}|${todayStr}`];
+            return (
+              <div key={h.id} style={{ padding: "10px 0", borderBottom: `1px solid ${T.border}30` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontFamily: "DM Sans", fontSize: 14, color: T.text, flex: 1, minWidth: 140 }}>{h.title}</span>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {RAG.map((r) => (
+                      <button
+                        key={r.k}
+                        onClick={() => rate(h.id, r.k)}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: 8,
+                          border: `1px solid ${today === r.k ? r.color : T.border}`,
+                          background: today === r.k ? `${r.color}22` : "none",
+                          color: today === r.k ? r.color : T.muted,
+                          fontFamily: "DM Sans",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* last 7 days mini history */}
+                <div style={{ display: "flex", gap: 4, marginTop: 7 }}>
+                  {last7.map((d) => {
+                    const rr = ratingMap[`${h.id}|${d}`];
+                    const col = rr === "G" ? "#22c55e" : rr === "A" ? "#f59e0b" : rr === "R" ? "#ef4444" : null;
+                    return (
+                      <div key={d} style={{ textAlign: "center" }}>
+                        <div style={{
+                          width: 14, height: 14, borderRadius: 4,
+                          background: col ? `${col}cc` : T.surface,
+                          border: `1px solid ${col || T.border}`,
+                        }} />
+                        <div style={{ fontSize: 7, color: T.muted, fontFamily: "JetBrains Mono", marginTop: 2 }}>{ukShort(d).slice(0, 2)}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Weight + Mood (moved here from the dashboard) */}
+      <WeightTracker onWeightSaved={() => {}} profileId={profile?.id} />
+      <div style={{ height: 16 }} />
+      <MoodTracker profileId={profile?.id} />
+    </div>
+  );
+}
+
 function RecentCheckIns({ profileId, onNavigate }) {
   const [checkins, setCheckins] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -6629,12 +6764,6 @@ function Dashboard({
           </div>
         </div>
       </div>
-
-      {/* ── Mood Tracker ── */}
-      <MoodTracker profileId={profileId} />
-
-      {/* ── Weight Tracker ── */}
-      <WeightTracker onWeightSaved={onWeightSaved} profileId={profileId} />
 
       {/* ── Coach Videos (full width below) ── */}
       <div
@@ -10668,7 +10797,7 @@ function BottomNav({ tab, setTab, threads, listCount }) {
         <line x1="14" y1="1" x2="14" y2="4" stroke={c} strokeWidth="2" strokeLinecap="round" />
       </svg>
     )},
-    { id: "tracker", label: "MACROS", icon: (c) => (
+    { id: "tracker", label: "WELLBEING", icon: (c) => (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
         <rect x="3" y="10" width="4" height="11" rx="1" stroke={c} strokeWidth="2" />
         <rect x="10" y="5" width="4" height="16" rx="1" stroke={c} strokeWidth="2" />
@@ -11455,7 +11584,15 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
         apiFetch(`/calendar-events/${profile.id}`).catch(() => []),
         apiFetch(`/checkins/${profile.id}`).catch(() => []),
       ]);
-      const base = Array.isArray(rows) ? rows : [];
+      const base = (Array.isArray(rows) ? rows : []).map((r) => ({
+        ...r,
+        // Backend returns `notes`; older client code used `note`. Carry both so
+        // notes written by the coach (or on another device) are always visible.
+        note: r.note ?? r.notes ?? "",
+        notes: r.notes ?? r.note ?? "",
+        // Coach-created events open read-only for the athlete.
+        coachCreated: !!(r.createdBy && profile?.id && String(r.createdBy) !== String(profile.id)),
+      }));
       // Coach check-ins become read-only calendar entries the athlete can open
       // to view the invite (date/time, notes, Google Meet link).
       const checkinEvents = (Array.isArray(checkins) ? checkins : []).map((c) => ({
@@ -11550,7 +11687,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
   const tabs = [
     { id: "dashboard", label: "DASHBOARD" },
     { id: "meals", label: "MEAL PLAN" },
-    { id: "tracker", label: "MACRO TRACKER" },
+    { id: "tracker", label: "WELLBEING" },
     { id: "list", label: "SHOPPING LIST" },
     { id: "inbox", label: "INBOX" },
     { id: "calendar", label: "CALENDAR" },
@@ -11721,12 +11858,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
           />
         )}
         {tab === "tracker" && (
-          <MacroTracker
-            plan={plan}
-            selectedDay={selectedDay}
-            mfpData={mfpData}
-            mfpConnected={mfpConnected}
-          />
+          <WellbeingTab profile={profile} />
         )}
         {tab === "list" && (
           <ShoppingList items={shoppingList} setItems={setShoppingList} athleteId={profile?.id} />
