@@ -6813,6 +6813,51 @@ function WeeklyPlanner({
 }) {
   const [selectedMeal, setSelectedMeal] = useState(null);
   const [showFoodPicker, setShowFoodPicker] = useState(false);
+
+  // ── Coach meal plan (planned_meals, date-based) ─────────────────────────────
+  const [coachPlanByDate, setCoachPlanByDate] = useState({});
+  const [coachPlanOpen, setCoachPlanOpen] = useState(true);
+  const dateForDay = (dayKey) => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const daysSinceMon = (today.getDay() + 6) % 7;
+    const monday = new Date(today); monday.setDate(today.getDate() - daysSinceMon);
+    const idx = DAYS.indexOf(dayKey);
+    const d = new Date(monday); d.setDate(monday.getDate() + (idx < 0 ? 0 : idx));
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  };
+  useEffect(() => {
+    if (!profile?.id) return;
+    (async () => {
+      try {
+        const start = dateForDay("MON");
+        const end = dateForDay("SUN");
+        const rows = await apiFetch(`/planned-meals/${profile.id}?start=${start}&end=${end}`);
+        const map = {};
+        (Array.isArray(rows) ? rows : []).forEach((r) => { map[r.date] = r.meals || {}; });
+        setCoachPlanByDate(map);
+      } catch {}
+    })();
+  }, [profile?.id]);
+  const coachPlanToday = coachPlanByDate[dateForDay(selectedDay)] || null;
+  const coachPlanHasFood = coachPlanToday && Object.values(coachPlanToday).some((arr) => (arr || []).length > 0);
+  const addCoachMealToDay = (slot) => {
+    const items = (coachPlanToday?.[slot] || []).map((i) => ({
+      name: i.name,
+      calories: Number(i.calories || 0),
+      protein: Number(i.protein_g ?? i.protein ?? 0),
+      carbs: Number(i.carbs_g ?? i.carbs ?? 0),
+      fat: Number(i.fat_g ?? i.fat ?? 0),
+      meal: MEALS.includes(slot) ? slot : "Snack",
+    }));
+    if (!items.length) return;
+    setPlan((prev) => {
+      const next = { ...prev, [selectedDay]: { ...prev[selectedDay] } };
+      const target = MEALS.includes(slot) ? slot : "Snack";
+      next[selectedDay][target] = [...(next[selectedDay][target] || []), ...items];
+      return next;
+    });
+  };
+
   const [foodSearch, setFoodSearch] = useState("");
   const [foodSearchResults, setFoodSearchResults] = useState([]);
   const [onlineResults, setOnlineResults] = useState([]); // OpenFoodFacts results
@@ -7544,6 +7589,48 @@ function WeeklyPlanner({
           );
         })}
       </div>
+
+      {/* ── Coach meal plan for this day ── */}
+      {coachPlanHasFood && (
+        <div style={{ background: T.card, border: `1px solid ${T.coachGreen}44`, borderRadius: 14, padding: 14, marginBottom: 14 }}>
+          <button onClick={() => setCoachPlanOpen(!coachPlanOpen)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+            <span style={{ fontFamily: "Bebas Neue", fontSize: 15, letterSpacing: 2, color: T.coachGreen }}>
+              📋 COACH MEAL PLAN
+            </span>
+            <span style={{ color: T.muted, fontSize: 12 }}>{coachPlanOpen ? "▲" : "▼"}</span>
+          </button>
+          {coachPlanOpen && (
+            <div style={{ marginTop: 10 }}>
+              {MEALS.map((slot) => {
+                const items = coachPlanToday?.[slot] || [];
+                if (!items.length) return null;
+                const st = items.reduce((a, i) => ({ cal: a.cal + Number(i.calories || 0), p: a.p + Number(i.protein_g ?? i.protein ?? 0) }), { cal: 0, p: 0 });
+                return (
+                  <div key={slot} style={{ marginBottom: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                      <span style={{ fontFamily: "Bebas Neue", fontSize: 12, letterSpacing: 1.5, color: T.text }}>{slot.toUpperCase()}</span>
+                      <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <span style={{ fontSize: 9, color: T.muted, fontFamily: "JetBrains Mono" }}>{Math.round(st.cal)} kcal</span>
+                        <button onClick={() => addCoachMealToDay(slot)} style={{ background: `${T.coachGreen}22`, border: `1px solid ${T.coachGreen}55`, borderRadius: 7, padding: "3px 10px", color: T.coachGreen, fontSize: 10, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer" }}>
+                          + Add to my day
+                        </button>
+                      </span>
+                    </div>
+                    {items.map((i, idx) => (
+                      <div key={idx} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0 3px 8px", fontSize: 11, borderBottom: `1px solid ${T.border}20` }}>
+                        <span style={{ color: T.text }}>{i.name}</span>
+                        <span style={{ color: T.muted, fontFamily: "JetBrains Mono", fontSize: 10 }}>
+                          {Math.round(i.calories || 0)} · {Math.round(i.protein_g ?? i.protein ?? 0)}p · {Math.round(i.carbs_g ?? i.carbs ?? 0)}c · {Math.round(i.fat_g ?? i.fat ?? 0)}f
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Meal cards — single vertical column for a clean mobile layout */}
       <div
