@@ -225,6 +225,66 @@ function LoginScreen({ onLoggedIn }) {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  // ── Forgot password flow ─────────────────────────────────────────────────
+  // mode: "login" | "forgot" (enter email) | "reset" (enter code + new pass)
+  const [mode, setMode] = useState("login");
+  const [fpCode, setFpCode] = useState("");
+  const [fpNew1, setFpNew1] = useState("");
+  const [fpNew2, setFpNew2] = useState("");
+  const [fpMsg, setFpMsg] = useState("");
+  const [fpLoading, setFpLoading] = useState(false);
+
+  const requestResetCode = async () => {
+    setError(""); setFpMsg("");
+    const em = email.trim().toLowerCase();
+    if (!em || !/^\S+@\S+\.\S+$/.test(em)) { setError("Enter your account email first."); return; }
+    setFpLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/forgot-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: em }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setMode("reset");
+        setFpMsg("If that email has an account, a 6-digit code is on its way. Check your inbox (and spam).");
+      } else {
+        setError(data.error || "Could not send the reset code. Try again shortly.");
+      }
+    } catch {
+      setError("Network problem — check your connection and try again.");
+    }
+    setFpLoading(false);
+  };
+
+  const submitReset = async () => {
+    setError(""); setFpMsg("");
+    if (fpCode.replace(/\D/g, "").length !== 6) { setError("Enter the 6-digit code from the email."); return; }
+    if (fpNew1.length < 8) { setError("New password must be at least 8 characters."); return; }
+    if (fpNew1 !== fpNew2) { setError("Passwords don't match."); return; }
+    setFpLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), code: fpCode.replace(/\D/g, ""), newPassword: fpNew1 }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setMode("login");
+        setPassword("");
+        setFpCode(""); setFpNew1(""); setFpNew2("");
+        setFpMsg("Password updated — sign in with your new password.");
+      } else {
+        setError(data.error || "Could not reset the password.");
+      }
+    } catch {
+      setError("Network problem — check your connection and try again.");
+    }
+    setFpLoading(false);
+  };
+
   const handleLogin = async () => {
     setError("");
     if (!email || !password) {
@@ -362,6 +422,7 @@ function LoginScreen({ onLoggedIn }) {
             />
           </div>
 
+          {mode === "login" && (
           <div style={{ marginBottom: 20 }}>
             <label
               style={{
@@ -413,6 +474,7 @@ function LoginScreen({ onLoggedIn }) {
               </button>
             </div>
           </div>
+          )}
 
           {error && (
             <div
@@ -431,6 +493,66 @@ function LoginScreen({ onLoggedIn }) {
             </div>
           )}
 
+          {fpMsg && (
+            <div
+              style={{
+                background: "#22c55e18",
+                border: "1px solid #22c55e44",
+                borderRadius: 8,
+                padding: "10px 14px",
+                marginBottom: 16,
+                fontFamily: "DM Sans",
+                fontSize: 12,
+                color: "#22c55e",
+              }}
+            >
+              {fpMsg}
+            </div>
+          )}
+
+          {mode === "forgot" && (
+            <div style={{ marginBottom: 16, fontFamily: "DM Sans", fontSize: 12, color: T.muted, lineHeight: 1.6 }}>
+              Enter your account email above, and we'll email you a 6-digit code to set a new password.
+            </div>
+          )}
+
+          {mode === "reset" && (
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+                6-digit code
+              </label>
+              <input
+                value={fpCode}
+                onChange={(e) => setFpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="123456"
+                inputMode="numeric"
+                style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 14px", color: T.text, fontFamily: "JetBrains Mono", fontSize: 18, letterSpacing: 6, textAlign: "center", marginBottom: 12 }}
+              />
+              <label style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+                New password (min 8 characters)
+              </label>
+              <input
+                value={fpNew1}
+                onChange={(e) => setFpNew1(e.target.value)}
+                type="password"
+                placeholder="••••••••"
+                style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 13, marginBottom: 12 }}
+              />
+              <label style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+                Confirm new password
+              </label>
+              <input
+                value={fpNew2}
+                onChange={(e) => setFpNew2(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submitReset()}
+                type="password"
+                placeholder="••••••••"
+                style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 14px", color: T.text, fontFamily: "DM Sans", fontSize: 13 }}
+              />
+            </div>
+          )}
+
+          {mode === "login" && (
           <button
             onClick={handleLogin}
             disabled={loading}
@@ -450,6 +572,27 @@ function LoginScreen({ onLoggedIn }) {
           >
             {loading ? "SIGNING IN…" : "SIGN IN"}
           </button>
+          )}
+
+          {mode === "forgot" && (
+            <button
+              onClick={requestResetCode}
+              disabled={fpLoading}
+              style={{ width: "100%", background: fpLoading ? T.border : T.accent, color: fpLoading ? T.muted : T.bg, border: "none", borderRadius: 12, padding: "14px", fontFamily: "Bebas Neue", fontSize: 18, letterSpacing: 2, cursor: fpLoading ? "default" : "pointer" }}
+            >
+              {fpLoading ? "SENDING…" : "SEND RESET CODE"}
+            </button>
+          )}
+
+          {mode === "reset" && (
+            <button
+              onClick={submitReset}
+              disabled={fpLoading}
+              style={{ width: "100%", background: fpLoading ? T.border : T.accent, color: fpLoading ? T.muted : T.bg, border: "none", borderRadius: 12, padding: "14px", fontFamily: "Bebas Neue", fontSize: 18, letterSpacing: 2, cursor: fpLoading ? "default" : "pointer" }}
+            >
+              {fpLoading ? "UPDATING…" : "SET NEW PASSWORD"}
+            </button>
+          )}
 
           <div style={{ textAlign: "center", marginTop: 16 }}>
             <span
@@ -461,9 +604,24 @@ function LoginScreen({ onLoggedIn }) {
               }}
               onMouseEnter={(e) => (e.target.style.color = T.accent)}
               onMouseLeave={(e) => (e.target.style.color = T.muted)}
+              onClick={() => {
+                setError(""); setFpMsg("");
+                if (mode === "login") setMode("forgot");
+                else { setMode("login"); setFpCode(""); setFpNew1(""); setFpNew2(""); }
+              }}
             >
-              Forgot password?
+              {mode === "login" ? "Forgot password?" : "← Back to sign in"}
             </span>
+            {mode === "reset" && (
+              <div style={{ marginTop: 8 }}>
+                <span
+                  style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, cursor: "pointer", textDecoration: "underline" }}
+                  onClick={requestResetCode}
+                >
+                  Send a new code
+                </span>
+              </div>
+            )}
           </div>
 
           <div style={{ textAlign: "center", marginTop: 20 }}>
@@ -10800,6 +10958,8 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [tab, setTab] = useState("dashboard");
   const [plan, setPlan] = useState(initWeekPlan);
+
+
   // Default to today's day of the week. getDay() is 0=Sun..6=Sat, but our
   // DAYS array is Monday-first, so map accordingly.
   const todayDay = (() => {
