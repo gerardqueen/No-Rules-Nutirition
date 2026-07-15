@@ -10461,8 +10461,28 @@ function CoachThreads({ coachId, coachName, selfId }) {
   const loadThreads = async () => {
     if (!coachId) return;
     try {
-      const rows = await apiFetch(`/messages/threads/${coachId}`);
-      if (Array.isArray(rows)) setThreads(rows);
+      // Threads can exist with anyone who has messaged this athlete — their
+      // coach, but also admins (broadcast announcements). Aggregate them all
+      // so nothing arrives as a push yet is invisible in the inbox.
+      let partners = [];
+      try {
+        const convos = await apiFetch(`/conversations`);
+        partners = (Array.isArray(convos) ? convos : []).map((c) => ({ id: c.otherId, name: c.otherName }));
+      } catch {}
+      if (!partners.some((p) => String(p.id) === String(coachId))) {
+        partners.unshift({ id: coachId, name: coachName || "Coach" });
+      }
+      const all = [];
+      for (const pr of partners) {
+        try {
+          const rows = await apiFetch(`/messages/threads/${pr.id}`);
+          (Array.isArray(rows) ? rows : []).forEach((t) => {
+            all.push({ ...t, otherId: pr.id, otherName: pr.name });
+          });
+        } catch {}
+      }
+      all.sort((a, b) => new Date(b.lastAt || 0) - new Date(a.lastAt || 0));
+      setThreads(all);
     } catch {}
     setLoadingThreads(false);
   };
@@ -10482,7 +10502,7 @@ function CoachThreads({ coachId, coachName, selfId }) {
     setMsgs([]);
     setLoadingMsgs(true);
     try {
-      const rows = await apiFetch(`/messages/thread/${coachId}/${t.threadId}`);
+      const rows = await apiFetch(`/messages/thread/${t.otherId || coachId}/${t.threadId}`);
       if (Array.isArray(rows)) setMsgs(rows);
     } catch { setMsgs([]); }
     setLoadingMsgs(false);
@@ -10494,7 +10514,7 @@ function CoachThreads({ coachId, coachName, selfId }) {
     if (view !== "thread" || !active) return;
     const i = setInterval(async () => {
       try {
-        const rows = await apiFetch(`/messages/thread/${coachId}/${active.threadId}`);
+        const rows = await apiFetch(`/messages/thread/${active.otherId || coachId}/${active.threadId}`);
         if (Array.isArray(rows)) setMsgs(rows);
       } catch {}
     }, 8000);
@@ -10508,7 +10528,7 @@ function CoachThreads({ coachId, coachName, selfId }) {
     if (!input.trim() || sending || !active) return;
     setSending(true);
     try {
-      const msg = await apiFetch(`/messages/${coachId}`, {
+      const msg = await apiFetch(`/messages/${active.otherId || coachId}`, {
         method: "POST",
         body: JSON.stringify({
           content: input.trim(),
@@ -10546,6 +10566,28 @@ function CoachThreads({ coachId, coachName, selfId }) {
     setSending(false);
   };
 
+  const [reactFor, setReactFor] = useState(null); // message id with emoji picker open
+  const REACT_SET = ["\ud83d\udc4d", "\u2764\ufe0f", "\ud83d\udd25", "\ud83d\udcaa", "\ud83d\ude02"];
+
+  const reactTo = async (messageId, emoji) => {
+    setReactFor(null);
+    // Optimistic: replace my reaction locally
+    setMsgs((prev) => prev.map((m) => {
+      if (m.id !== messageId) return m;
+      const others = (m.reactions || []).filter((r) => Number(r.userId) !== Number(selfId));
+      const mineNow = (m.reactions || []).find((r) => Number(r.userId) === Number(selfId));
+      const next = mineNow?.emoji === emoji ? others : [...others, { userId: selfId, emoji }];
+      return { ...m, reactions: next };
+    }));
+    try {
+      const current = msgs.find((m) => m.id === messageId)?.reactions?.find((r) => Number(r.userId) === Number(selfId));
+      await apiFetch(`/messages/${messageId}/reaction`, {
+        method: "PUT",
+        body: JSON.stringify({ emoji: current?.emoji === emoji ? null : emoji }),
+      });
+    } catch {}
+  };
+
   const fmtTime = (ts) => ts ? new Date(ts).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
 
   // ── Thread list view ──
@@ -10575,7 +10617,14 @@ function CoachThreads({ coachId, coachName, selfId }) {
               background: t.unreadCount > 0 ? `${T.accent}0d` : "transparent",
             }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                <div style={{ fontFamily: "DM Sans", fontSize: 14, fontWeight: 700, color: T.text }}>{t.subject || "Conversation"}</div>
+                <div style={{ fontFamily: "DM Sans", fontSize: 14, fontWeight: 700, color: T.text }}>
+                  {t.subject || "Conversation"}
+                  {t.otherId && String(t.otherId) !== String(coachId) && (
+                    <span style={{ fontFamily: "DM Sans", fontSize: 10, fontWeight: 600, color: T.accent, marginLeft: 8 }}>
+                      from {t.otherName || "Team"}
+                    </span>
+                  )}
+                </div>
                 {t.unreadCount > 0 && <div style={{ background: T.danger, borderRadius: 10, padding: "1px 7px", fontSize: 10, color: "#fff", fontWeight: 700 }}>{t.unreadCount}</div>}
               </div>
               <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.lastMessage}</div>
@@ -10630,14 +10679,41 @@ function CoachThreads({ coachId, coachName, selfId }) {
           const mine = Number(m.fromId ?? m.from_id) === Number(selfId);
           return (
             <div key={m.id} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "78%" }}>
-              <div style={{
+              <div
+                onClick={() => setReactFor(reactFor === m.id ? null : m.id)}
+                style={{
                 background: mine ? T.accent : T.surface,
                 color: mine ? T.bg : T.text,
                 border: mine ? "none" : `1px solid ${T.border}`,
                 borderRadius: 14, padding: "10px 14px", fontFamily: "DM Sans", fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap",
+                cursor: "pointer",
               }}>
                 {m.content}
               </div>
+              {(m.reactions || []).length > 0 && (
+                <div style={{ display: "flex", gap: 4, marginTop: 4, justifyContent: mine ? "flex-end" : "flex-start" }}>
+                  {(m.reactions || []).map((r, i) => (
+                    <span
+                      key={i}
+                      onClick={() => Number(r.userId) === Number(selfId) && reactTo(m.id, r.emoji)}
+                      style={{
+                        background: T.surface, border: `1px solid ${Number(r.userId) === Number(selfId) ? T.accent : T.border}`,
+                        borderRadius: 10, padding: "1px 7px", fontSize: 13,
+                        cursor: Number(r.userId) === Number(selfId) ? "pointer" : "default",
+                      }}
+                    >
+                      {r.emoji}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {reactFor === m.id && (
+                <div style={{ display: "flex", gap: 6, marginTop: 6, background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: "6px 10px", justifyContent: mine ? "flex-end" : "flex-start" }}>
+                  {REACT_SET.map((e) => (
+                    <span key={e} onClick={() => reactTo(m.id, e)} style={{ fontSize: 20, cursor: "pointer" }}>{e}</span>
+                  ))}
+                </div>
+              )}
               <div style={{ fontFamily: "JetBrains Mono", fontSize: 9, color: T.muted, marginTop: 3, textAlign: mine ? "right" : "left" }}>
                 {fmtTime(m.created_at)}
               </div>
