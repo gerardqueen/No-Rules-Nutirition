@@ -10684,10 +10684,26 @@ function CoachThreads({ coachId, coachName, selfId }) {
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 18px", borderBottom: `1px solid ${T.border}` }}>
         <button onClick={() => { setView("list"); loadThreads(); }} style={{ background: "none", border: "none", color: T.muted, fontSize: 20, cursor: "pointer" }} type="button">←</button>
-        <div>
+        <div style={{ flex: 1 }}>
           <div style={{ fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 1, color: T.text }}>{active?.subject || "Conversation"}</div>
           <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>with {coachName || "Coach"}</div>
         </div>
+        <button
+          onClick={async () => {
+            if (!active) return;
+            if (!window.confirm("Delete this entire conversation for both you and your coach? This can't be undone.")) return;
+            try {
+              await apiFetch(`/messages/threads/${active.otherId || coachId}/${active.threadId}`, { method: "DELETE" });
+              setView("list");
+              loadThreads();
+            } catch (e) { alert(e.message || "Could not delete the conversation"); }
+          }}
+          style={{ background: "none", border: "none", color: T.muted, fontSize: 17, cursor: "pointer" }}
+          title="Delete conversation for both sides"
+          type="button"
+        >
+          🗑️
+        </button>
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: 18, display: "flex", flexDirection: "column", gap: 12 }}>
         {loadingMsgs ? (
