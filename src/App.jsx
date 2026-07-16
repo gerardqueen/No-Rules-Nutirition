@@ -10569,6 +10569,23 @@ function CoachThreads({ coachId, coachName, selfId }) {
   const [reactFor, setReactFor] = useState(null); // message id with emoji picker open
   const REACT_SET = ["\ud83d\udc4d", "\u2764\ufe0f", "\ud83d\udd25", "\ud83d\udcaa", "\ud83d\ude02"];
 
+  const deleteMsg = async (messageId) => {
+    setReactFor(null);
+    if (!window.confirm("Delete this message for both you and your coach?")) return;
+    setMsgs((prev) => prev.filter((m) => m.id !== messageId));
+    try {
+      await apiFetch(`/messages/${messageId}`, { method: "DELETE" });
+    } catch (e) {
+      alert(e.message || "Could not delete the message");
+      // Re-sync on failure
+      try {
+        const rows = await apiFetch(`/messages/thread/${active?.otherId || coachId}/${active?.threadId}`);
+        if (Array.isArray(rows)) setMsgs(rows);
+      } catch {}
+    }
+    loadThreads();
+  };
+
   const reactTo = async (messageId, emoji) => {
     setReactFor(null);
     // Optimistic: replace my reaction locally
@@ -10708,10 +10725,19 @@ function CoachThreads({ coachId, coachName, selfId }) {
                 </div>
               )}
               {reactFor === m.id && (
-                <div style={{ display: "flex", gap: 6, marginTop: 6, background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: "6px 10px", justifyContent: mine ? "flex-end" : "flex-start" }}>
+                <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center", background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: "6px 10px", justifyContent: mine ? "flex-end" : "flex-start" }}>
                   {REACT_SET.map((e) => (
                     <span key={e} onClick={() => reactTo(m.id, e)} style={{ fontSize: 20, cursor: "pointer" }}>{e}</span>
                   ))}
+                  {mine && (
+                    <span
+                      onClick={() => deleteMsg(m.id)}
+                      style={{ fontSize: 16, cursor: "pointer", marginLeft: 6, paddingLeft: 10, borderLeft: `1px solid ${T.border}` }}
+                      title="Delete for both sides"
+                    >
+                      🗑️
+                    </span>
+                  )}
                 </div>
               )}
               <div style={{ fontFamily: "JetBrains Mono", fontSize: 9, color: T.muted, marginTop: 3, textAlign: mine ? "right" : "left" }}>
