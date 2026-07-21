@@ -2620,6 +2620,7 @@ function MFPPanel({
                   {mfpSyncCount > 0 && (
                     <span style={{ color: T.muted }}>#{mfpSyncCount} sync</span>
                   )}
+
                 </div>
               </>
             )}
@@ -6875,6 +6876,139 @@ function WeeklyPlanner({
   const [savedMeals, setSavedMeals] = useState([]); // localStorage-backed quick-add meals
   const [recentFoods, setRecentFoods] = useState([]); // localStorage-backed recent items
   const [showCopyMeal, setShowCopyMeal] = useState(false); // copy-from-another-day panel
+
+  // ── Full food history (MFP-style): every previous day's foods, from the
+  // server, so Monday isn't a blank slate. Used for (a) copying meals from any
+  // previous day, and (b) ranking previously-added foods first in search.
+  const [historyByDate, setHistoryByDate] = useState({}); // dateISO -> { Meal: [foods] }
+  const [historyFoods, setHistoryFoods] = useState([]);   // deduped by name, latest first
+  useEffect(() => {
+    if (!profile?.id) return;
+    (async () => {
+      try {
+        const fmtD = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+        const end = new Date();
+        const start = new Date(); start.setDate(start.getDate() - 60);
+        const logs = await apiFetch(`/food-logs/${profile.id}?start=${fmtD(start)}&end=${fmtD(end)}`);
+        const byDate = {};
+        const seen = new Set();
+        const dedup = [];
+        (Array.isArray(logs) ? logs : [])
+          .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+          .forEach((dl) => {
+            (dl.foods || []).forEach((f) => {
+              const item = {
+                name: f.name,
+                calories: Math.round(Number(f.calories || 0)),
+                protein: Math.round(Number(f.protein_g ?? f.protein ?? 0)),
+                carbs: Math.round(Number(f.carbs_g ?? f.carbs ?? 0)),
+                fat: Math.round(Number(f.fat_g ?? f.fat ?? 0)),
+              };
+              if (!item.name) return;
+              const slot = MEALS.includes(f.meal) ? f.meal : "Snack";
+              ((byDate[dl.date] = byDate[dl.date] || {})[slot] = byDate[dl.date][slot] || []).push(item);
+              const key = item.name.toLowerCase();
+              if (!seen.has(key)) { seen.add(key); dedup.push(item); }
+            });
+          });
+        setHistoryByDate(byDate);
+        setHistoryFoods(dedup.slice(0, 400));
+      } catch {}
+    })();
+  }, [profile?.id]);
+
+  // ── Week browsing (MFP-style): step back through previous weeks read-only.
+  // Past weeks use SEPARATE state so the live plan (and its write-sync) is
+  // never touched while browsing history.
+  const [weekOffset, setWeekOffset] = useState(0); // 0 = this week, -1 = last…
+  const [pastPlan, setPastPlan] = useState(null);
+  const [pastLoading, setPastLoading] = useState(false);
+  const weekMondayOf = (offset) => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const daysSinceMon = (today.getDay() + 6) % 7;
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - daysSinceMon + offset * 7);
+    return monday;
+  };
+  const fmtISO = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  useEffect(() => {
+    if (weekOffset === 0) { setPastPlan(null); return; }
+    if (!profile?.id) return;
+    let cancelled = false;
+    (async () => {
+      setPastLoading(true);
+      try {
+        const monday = weekMondayOf(weekOffset);
+        const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+        const startStr = fmtISO(monday), endStr = fmtISO(sunday);
+        const next = {};
+        DAYS.forEach((dk) => { next[dk] = {}; MEALS.forEach((m) => { next[dk][m] = []; }); });
+        if (weekOffset < 0) {
+          // Past weeks: what was actually logged (food_logs).
+          const rows = await apiFetch(`/food-logs/${profile.id}?start=${startStr}&end=${endStr}`);
+          (Array.isArray(rows) ? rows : []).forEach((dayLog) => {
+            if (!dayLog?.date || dayLog.date < startStr || dayLog.date > endStr) return;
+            const d = new Date(dayLog.date + "T00:00:00");
+            const dayKey = DAYS[d.getDay() === 0 ? 6 : d.getDay() - 1];
+            (dayLog.foods || []).forEach((f) => {
+              const meal = MEALS.includes(f.meal) ? f.meal : "Snack";
+              next[dayKey][meal].push({
+                name: f.name,
+                calories: Number(f.calories || 0),
+                protein: Number(f.protein_g ?? f.protein ?? 0),
+                carbs: Number(f.carbs_g ?? f.carbs ?? 0),
+                fat: Number(f.fat_g ?? f.fat ?? 0),
+                meal,
+              });
+            });
+          });
+        } else {
+          // Future weeks: the coach's planned meals (planned_meals) — preview.
+          const rows = await apiFetch(`/planned-meals/${profile.id}?start=${startStr}&end=${endStr}`);
+          (Array.isArray(rows) ? rows : []).forEach((r) => {
+            if (!r?.date) return;
+            const d = new Date(r.date + "T00:00:00");
+            const dayKey = DAYS[d.getDay() === 0 ? 6 : d.getDay() - 1];
+            Object.keys(r.meals || {}).forEach((slot) => {
+              const meal = MEALS.includes(slot) ? slot : "Snack";
+              (r.meals[slot] || []).forEach((f) => {
+                next[dayKey][meal].push({
+                  name: f.name,
+                  calories: Number(f.calories || 0),
+                  protein: Number(f.protein_g ?? f.protein ?? 0),
+                  carbs: Number(f.carbs_g ?? f.carbs ?? 0),
+                  fat: Number(f.fat_g ?? f.fat ?? 0),
+                  meal,
+                });
+              });
+            });
+          });
+        }
+        if (!cancelled) setPastPlan(next);
+      } catch { if (!cancelled) setPastPlan(null); }
+      if (!cancelled) setPastLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [weekOffset, profile?.id]);
+  const viewingPast = weekOffset !== 0;
+  const emptyWeek = () => { const e = {}; DAYS.forEach((dk) => { e[dk] = {}; MEALS.forEach((m) => { e[dk][m] = []; }); }); return e; };
+  const viewPlan = viewingPast ? (pastPlan || emptyWeek()) : plan;
+
+  // Copy a whole meal from any previously logged date into the current slot.
+  const copyLoggedMeal = (dateISO, meal) => {
+    const items = historyByDate?.[dateISO]?.[meal] || [];
+    if (!items.length) return;
+    setPlan((prev) => {
+      const next = { ...prev };
+      next[selectedDay] = { ...next[selectedDay] };
+      next[selectedDay][selectedMeal] = [
+        ...next[selectedDay][selectedMeal],
+        ...items.map((i) => ({ ...i })),
+      ];
+      return next;
+    });
+    setShowCopyMeal(false);
+  };
   const offSearchSeq = useRef(0); // stale-query guard for async OFF search
   const [selectedFoodItem, setSelectedFoodItem] = useState(null);
   const [servingGrams, setServingGrams] = useState(100);
@@ -7534,10 +7668,46 @@ function WeeklyPlanner({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* Week navigation (browse previous weeks read-only) */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <button
+          onClick={() => setWeekOffset((o) => Math.max(o - 1, -26))}
+          disabled={weekOffset <= -26}
+          style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 14px", color: T.text, fontSize: 15, cursor: "pointer" }}
+          type="button"
+        >
+          ◀
+        </button>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontFamily: "Bebas Neue", fontSize: 15, letterSpacing: 1.5, color: weekOffset < 0 ? T.accent : weekOffset > 0 ? T.coachGreen : T.text }}>
+            {viewingPast
+              ? `WEEK OF ${fmtISO(weekMondayOf(weekOffset)).split("-").reverse().join("/")}${weekOffset > 0 ? " · COACH PLAN" : ""}`
+              : "THIS WEEK"}
+          </div>
+          {viewingPast && (
+            <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>
+              {pastLoading
+                ? "Loading…"
+                : weekOffset > 0
+                  ? "Coach's planned meals — preview, read only"
+                  : "Viewing history — read only"}
+            </div>
+          )}
+        </div>
+        <button
+          onClick={() => setWeekOffset((o) => Math.min(o + 1, 4))}
+          disabled={weekOffset >= 4}
+          style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 14px", color: weekOffset >= 4 ? T.border : T.text, fontSize: 15, cursor: weekOffset >= 4 ? "default" : "pointer" }}
+          type="button"
+        >
+          ▶
+        </button>
+      </div>
+
       {/* Day tabs */}
       <div style={{ display: "flex", gap: 8 }}>
         {DAYS.map((d) => {
-          const tot = dayTotals(plan[d]);
+          const tot = dayTotals(viewPlan[d]);
           const pct = Math.min(tot.calories / macroGoals.calories, 1);
           return (
             <button
@@ -7601,7 +7771,7 @@ function WeeklyPlanner({
       </div>
 
       {/* ── Coach meal plan for this day ── */}
-      {coachPlanHasFood && (
+      {!viewingPast && coachPlanHasFood && (
         <div style={{ background: T.card, border: `1px solid ${T.coachGreen}44`, borderRadius: 14, padding: 14, marginBottom: 14 }}>
           <button onClick={() => setCoachPlanOpen(!coachPlanOpen)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
             <span style={{ fontFamily: "Bebas Neue", fontSize: 15, letterSpacing: 2, color: T.coachGreen }}>
@@ -7651,7 +7821,7 @@ function WeeklyPlanner({
         }}
       >
         {MEALS.map((meal) => {
-          const foods = plan[selectedDay][meal];
+          const foods = (viewPlan[selectedDay] || {})[meal] || [];
           const tot = sumMacros(foods);
           return (
             <div
@@ -7794,8 +7964,9 @@ function WeeklyPlanner({
                   >
                     + list
                   </button>
+                  {!viewingPast && (
                   <button
-                    onClick={() => removeFood(selectedDay, meal, i)}
+                    onClick={() => !viewingPast && removeFood(selectedDay, meal, i)}
                     style={{
                       background: "none",
                       border: "none",
@@ -7810,8 +7981,10 @@ function WeeklyPlanner({
                   >
                     ×
                   </button>
+                  )}
                 </div>
               ))}
+              {!viewingPast && (
               <button
                 onClick={() => {
                   setSelectedMeal(meal);
@@ -7841,6 +8014,7 @@ function WeeklyPlanner({
               >
                 + Add Food
               </button>
+              )}
             </div>
           );
         })}
@@ -8214,6 +8388,59 @@ function WeeklyPlanner({
                               </div>
                             );
                           })}
+
+                          {/* Previous logged days (beyond this week) */}
+                          {Object.keys(historyByDate).length > 0 && (
+                            <>
+                              <div style={{ fontFamily: "Bebas Neue", fontSize: 11, letterSpacing: 1.5, color: T.accent, margin: "10px 0 6px" }}>
+                                PREVIOUS DAYS
+                              </div>
+                              {Object.keys(historyByDate)
+                                .sort()
+                                .reverse()
+                                .slice(0, 21)
+                                .map((d) => {
+                                  const meals = historyByDate[d] || {};
+                                  const slots = Object.keys(meals).filter((m) => (meals[m] || []).length > 0);
+                                  if (!slots.length) return null;
+                                  const uk = String(d).split("-").reverse().join("/");
+                                  return (
+                                    <div key={d} style={{ marginBottom: 8 }}>
+                                      <div style={{ fontFamily: "JetBrains Mono", fontSize: 10, letterSpacing: 1, color: T.muted, marginBottom: 4 }}>
+                                        {uk}
+                                      </div>
+                                      {slots.map((m) => (
+                                        <button
+                                          key={m}
+                                          onClick={() => copyLoggedMeal(d, m)}
+                                          style={{
+                                            width: "100%",
+                                            textAlign: "left",
+                                            padding: "8px 10px",
+                                            background: T.surface,
+                                            border: `1px solid ${T.border}`,
+                                            borderRadius: 8,
+                                            color: T.text,
+                                            fontFamily: "DM Sans",
+                                            fontSize: 12,
+                                            cursor: "pointer",
+                                            marginBottom: 4,
+                                            display: "flex",
+                                            justifyContent: "space-between",
+                                            gap: 8,
+                                          }}
+                                        >
+                                          <span style={{ textTransform: "capitalize" }}>{m}</span>
+                                          <span style={{ color: T.muted, whiteSpace: "nowrap" }}>
+                                            {meals[m].length} item{meals[m].length === 1 ? "" : "s"} → copy
+                                          </span>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  );
+                                })}
+                            </>
+                          )}
                         </div>
                       )}
 
@@ -8640,11 +8867,12 @@ function WeeklyPlanner({
                             ))}
                           </div>
                           <button
-                            onClick={() =>
+                            onClick={() => {
+                              rememberRecentFood(selectedFoodItem);
                               addFood(
                                 scaleMacros(selectedFoodItem, servingGrams)
-                              )
-                            }
+                              );
+                            }}
                             style={{
                               width: "100%",
                               padding: "11px",
@@ -8726,105 +8954,51 @@ function WeeklyPlanner({
                       </div>
                     )}
                   {/* Search results */}
-                  {foodSearchResults.length > 0 && (
-                    <div>
-                      <div
-                        style={{
-                          fontFamily: "DM Sans",
-                          fontSize: 11,
-                          color: T.muted,
-                          marginBottom: 8,
-                        }}
-                      >
-                        {foodSearchResults.length === 50
-                          ? "TOP 50 RESULTS"
-                          : `${foodSearchResults.length} RESULTS`}
-                      </div>
-                      {foodSearchResults.map((item, i) => (
-                        <button
-                          key={i}
-                          onClick={() => selectFoodItem(item)}
-                          style={{
-                            width: "100%",
-                            textAlign: "left",
-                            padding: "10px 12px",
-                            background:
-                              selectedFoodItem?.n === item.n
-                                ? T.accent + "15"
-                                : T.card,
-                            border: `1px solid ${
-                              selectedFoodItem?.n === item.n
-                                ? T.accent
-                                : T.border
-                            }`,
-                            borderRadius: 10,
-                            marginBottom: 6,
-                            cursor: "pointer",
-                            transition: "all 0.15s",
-                          }}
-                          onMouseEnter={(e) => {
-                            if (selectedFoodItem?.n !== item.n)
-                              e.currentTarget.style.borderColor =
-                                T.accent + "66";
-                          }}
-                          onMouseLeave={(e) => {
-                            if (selectedFoodItem?.n !== item.n)
-                              e.currentTarget.style.borderColor = T.border;
-                          }}
-                        >
-                          <div
+                  {/* Previously added foods — ranked first, MFP-style. One tap
+                      re-adds the same portion. */}
+                  {(() => {
+                    const term = foodSearch.trim().toLowerCase();
+                    if (term.length < 2) return null;
+                    const matches = historyFoods.filter((h) => h.name.toLowerCase().includes(term)).slice(0, 8);
+                    if (!matches.length) return null;
+                    return (
+                      <div style={{ marginBottom: 14 }}>
+                        <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.coachGreen, marginBottom: 8 }}>
+                          PREVIOUSLY ADDED
+                        </div>
+                        {matches.map((h, i) => (
+                          <button
+                            key={`hist-${i}`}
+                            onClick={() => addFood({ ...h })}
                             style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              alignItems: "flex-start",
-                              gap: 8,
+                              width: "100%",
+                              textAlign: "left",
+                              padding: "10px 12px",
+                              background: T.card,
+                              border: `1px solid ${T.coachGreen}44`,
+                              borderRadius: 10,
+                              marginBottom: 6,
+                              cursor: "pointer",
                             }}
                           >
-                            <span
-                              style={{
-                                fontFamily: "DM Sans",
-                                fontSize: 12,
-                                color: T.text,
-                                fontWeight: 500,
-                                lineHeight: 1.3,
-                                flex: 1,
-                              }}
-                            >
-                              {item.n}
-                            </span>
-                            <span
-                              style={{
-                                fontFamily: "JetBrains Mono",
-                                fontSize: 11,
-                                color: T.accent,
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {item.c} kcal
-                            </span>
-                          </div>
-                          <div
-                            style={{
-                              fontFamily: "JetBrains Mono",
-                              fontSize: 10,
-                              color: T.muted,
-                              marginTop: 3,
-                            }}
-                          >
-                            P:{item.p}g · C:{item.b}g · F:{item.f}g{" "}
-                            <span style={{ color: T.border }}>per 100g</span>
-                            {item.s && item.s[0] && (
-                              <span style={{ marginLeft: 8, color: T.border }}>
-                                · {item.s[0][0]} = {item.s[0][1]}g
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                              <span style={{ fontFamily: "DM Sans", fontSize: 12, color: T.text, fontWeight: 500, lineHeight: 1.3, flex: 1 }}>
+                                {h.name}
                               </span>
-                            )}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                              <span style={{ fontFamily: "JetBrains Mono", fontSize: 11, color: T.coachGreen, whiteSpace: "nowrap" }}>
+                                + {h.calories} kcal
+                              </span>
+                            </div>
+                            <div style={{ fontFamily: "JetBrains Mono", fontSize: 10, color: T.muted, marginTop: 3 }}>
+                              P:{h.protein}g · C:{h.carbs}g · F:{h.fat}g <span style={{ color: T.border }}>tap to add same as before</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
 
-                  {/* Online results from OpenFoodFacts (appended under local) */}
+                  {/* Online results from OpenFoodFacts (second) */}
                   <style>{`@keyframes nrnspin { to { transform: rotate(360deg); } }`}</style>
                   {foodSearch.trim().length >= 2 &&
                     (onlineSearching || onlineResults.length > 0) && (
@@ -8931,10 +9105,115 @@ function WeeklyPlanner({
                             </div>
                           </button>
                         ))}
-                        {!onlineSearching &&
-                          onlineResults.length === 0 &&
-                          foodSearchResults.length === 0 &&
-                          !showCustomFoodForm && (
+
+                      </div>
+                    )}
+
+                  {foodSearchResults.length > 0 && (
+                    <div>
+                      <div
+                        style={{
+                          fontFamily: "DM Sans",
+                          fontSize: 11,
+                          color: T.muted,
+                          marginBottom: 8,
+                        }}
+                      >
+                        FOOD DATABASE ({foodSearchResults.length === 50 ? "50+" : foodSearchResults.length})
+                      </div>
+                      {foodSearchResults.map((item, i) => (
+                        <button
+                          key={i}
+                          onClick={() => selectFoodItem(item)}
+                          style={{
+                            width: "100%",
+                            textAlign: "left",
+                            padding: "10px 12px",
+                            background:
+                              selectedFoodItem?.n === item.n
+                                ? T.accent + "15"
+                                : T.card,
+                            border: `1px solid ${
+                              selectedFoodItem?.n === item.n
+                                ? T.accent
+                                : T.border
+                            }`,
+                            borderRadius: 10,
+                            marginBottom: 6,
+                            cursor: "pointer",
+                            transition: "all 0.15s",
+                          }}
+                          onMouseEnter={(e) => {
+                            if (selectedFoodItem?.n !== item.n)
+                              e.currentTarget.style.borderColor =
+                                T.accent + "66";
+                          }}
+                          onMouseLeave={(e) => {
+                            if (selectedFoodItem?.n !== item.n)
+                              e.currentTarget.style.borderColor = T.border;
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "flex-start",
+                              gap: 8,
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontFamily: "DM Sans",
+                                fontSize: 12,
+                                color: T.text,
+                                fontWeight: 500,
+                                lineHeight: 1.3,
+                                flex: 1,
+                              }}
+                            >
+                              {item.n}
+                            </span>
+                            <span
+                              style={{
+                                fontFamily: "JetBrains Mono",
+                                fontSize: 11,
+                                color: T.accent,
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {item.c} kcal
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              fontFamily: "JetBrains Mono",
+                              fontSize: 10,
+                              color: T.muted,
+                              marginTop: 3,
+                            }}
+                          >
+                            P:{item.p}g · C:{item.b}g · F:{item.f}g{" "}
+                            <span style={{ color: T.border }}>per 100g</span>
+                            {item.s && item.s[0] && (
+                              <span style={{ marginLeft: 8, color: T.border }}>
+                                · {item.s[0][0]} = {item.s[0][1]}g
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* No source found anything → offer custom food (own block so
+                      it stays visible when the OFF section hides itself) */}
+                  {foodSearch.trim().length >= 2 && (
+                    <>
+                  {!onlineSearching &&
+                    onlineResults.length === 0 &&
+                    foodSearchResults.length === 0 &&
+                    historyFoods.filter((h) => h.name.toLowerCase().includes(foodSearch.trim().toLowerCase())).length === 0 &&
+                    !showCustomFoodForm && (
                             <div style={{ padding: "8px 2px" }}>
                               <div
                                 style={{
@@ -8969,7 +9248,7 @@ function WeeklyPlanner({
                             </div>
                           )}
 
-                        {showCustomFoodForm && (
+                  {showCustomFoodForm && (
                           <div
                             style={{
                               padding: 14,
@@ -9081,8 +9360,8 @@ function WeeklyPlanner({
                             </button>
                           </div>
                         )}
-                      </div>
-                    )}
+                    </>
+                  )}
                 </div>
               </>
             )}
