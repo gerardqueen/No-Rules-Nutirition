@@ -4744,7 +4744,7 @@ const MOODS = [
 ];
 
 // ── Reusable SVG date-based line chart for Dashboard ────────────────────────
-function DashLineChart({ data, color, yMin, yMax, yUnit, formatY, height = 100 }) {
+function DashLineChart({ data, color, yMin, yMax, yUnit, formatY, height = 100, trend = false }) {
   if (!data || data.length === 0) return (
     <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "DM Sans", fontSize: 12, color: T.muted }}>
       No data for this period
@@ -4775,6 +4775,29 @@ function DashLineChart({ data, color, yMin, yMax, yUnit, formatY, height = 100 }
       ))}
       {/* Area fill */}
       <polygon points={area} fill={`${color}15`} />
+      {/* Trend line (least-squares over the visible window, dotted) */}
+      {trend && data.length >= 3 && (() => {
+        const n = data.length;
+        const xs = data.map((_, i) => i);
+        const ys = data.map((d) => d.value);
+        const mx = xs.reduce((a, b) => a + b, 0) / n;
+        const my = ys.reduce((a, b) => a + b, 0) / n;
+        let num = 0, den = 0;
+        for (let i = 0; i < n; i++) { num += (xs[i] - mx) * (ys[i] - my); den += (xs[i] - mx) ** 2; }
+        const slope = den ? num / den : 0;
+        const intercept = my - slope * mx;
+        const clamp = (v) => Math.max(lo, Math.min(hi, v));
+        const y0 = toY(clamp(intercept));
+        const y1 = toY(clamp(intercept + slope * (n - 1)));
+        return (
+          <line
+            x1={`${toX(0)}%`} y1={y0}
+            x2={`${toX(n - 1)}%`} y2={y1}
+            stroke={color} strokeWidth={1.5} strokeDasharray="2 6"
+            strokeLinecap="round" opacity={0.8}
+          />
+        );
+      })()}
       {/* Line */}
       <polyline points={polyline} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
       {/* Dots */}
@@ -5828,7 +5851,7 @@ function WeightTracker({ onWeightSaved, profileId }) {
       </div>
 
       {/* Chart */}
-      <DashLineChart data={chartData} color={T.accent} yUnit=" kg" height={120} />
+      <DashLineChart data={chartData} color={T.accent} yUnit=" kg" height={120} trend />
     </div>
   );
 }
@@ -5838,6 +5861,204 @@ function WeightTracker({ onWeightSaved, profileId }) {
 // Shows the most recent coach-logged check-ins so the athlete can scan their
 // history at a glance. Reads the same /checkins/:id the coach writes to — no
 // backend change needed. Full list lives in the Check-ins area.
+/* ── Apple Health (HealthKit) card for the Wellbeing hub ──────────────────
+   Reads steps, sleep and active energy via @perfood/capacitor-healthkit when
+   running in the iOS app. On web (or before the plugin ships in a build) it
+   shows a friendly note instead. Google Health Connect can slot in later
+   behind the same card. */
+function HealthCard({ profileId }) {
+  const isNative = typeof window !== "undefined" && window.Capacitor?.isNativePlatform?.();
+  const HK = typeof window !== "undefined"
+    ? (window.Capacitor?.Plugins?.CapacitorHealth || window.Capacitor?.Plugins?.Health || null)
+    : null;
+  const [connected, setConnected] = useState(() => localStorage.getItem(`nrn_hk_connected_u${profileId}`) === "1");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const [today, setToday] = useState({ steps: null, sleepH: null, kcal: null });
+  const [weekSteps, setWeekSteps] = useState([]); // [{date, value}]
+
+  const iso = (d) => d.toISOString();
+  const dayStart = (offset = 0) => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + offset); return d; };
+
+  const loadData = async () => {
+    if (!HK) return;
+    setLoading(true);
+    setErr("");
+    try {
+      const now = new Date();
+      const weekAgo = dayStart(-6); // start of 6 days ago -> 7 buckets incl. today
+
+      // Steps per day for the last 7 days in one aggregated query.
+      let stepsByDay = [];
+      try {
+        const r = await HK.queryAggregated({
+          dataType: "steps",
+          startDate: iso(weekAgo),
+          endDate: iso(now),
+          bucket: "day",
+          aggregation: "sum",
+        });
+        const byKey = {};
+        (r?.samples || []).forEach((x) => {
+          const d = new Date(x.startDate);
+          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+          byKey[key] = Math.round(Number(x.value || 0));
+        });
+        for (let i = 6; i >= 0; i--) {
+          const d = dayStart(-i);
+          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+          stepsByDay.push({ date: key, value: byKey[key] || 0 });
+        }
+      } catch {}
+      setWeekSteps(stepsByDay);
+
+      // Last-night sleep: samples in the past 24h; value is MINUTES. Count only
+      // actual sleep states (not inBed/awake) when states are provided.
+      let sleepH = null;
+      try {
+        const r = await HK.readSamples({
+          dataType: "sleep",
+          startDate: iso(new Date(Date.now() - 24 * 3600 * 1000)),
+          endDate: iso(now),
+          limit: 200,
+        });
+        const asleepStates = ["asleep", "rem", "deep", "light"];
+        const mins = (r?.samples || []).reduce((a, x) => {
+          if (x.sleepState && !asleepStates.includes(x.sleepState)) return a;
+          return a + Number(x.value || 0);
+        }, 0);
+        if (mins > 0) sleepH = Math.round((mins / 60) * 10) / 10;
+      } catch {}
+
+      // Active energy today (kilocalories)
+      let kcal = null;
+      try {
+        const r = await HK.queryAggregated({
+          dataType: "calories",
+          startDate: iso(dayStart(0)),
+          endDate: iso(now),
+          bucket: "day",
+          aggregation: "sum",
+        });
+        const total = (r?.samples || []).reduce((a, x) => a + Number(x.value || 0), 0);
+        if (total > 0) kcal = Math.round(total);
+      } catch {}
+
+      setToday({ steps: stepsByDay[6]?.value ?? null, sleepH, kcal });
+    } catch (e) {
+      setErr("Couldn't read Apple Health data.");
+    }
+    setLoading(false);
+  };
+
+  const connect = async () => {
+    if (!HK) return;
+    setLoading(true);
+    setErr("");
+    try {
+      try {
+        const avail = await HK.isAvailable();
+        if (avail && avail.available === false) {
+          setErr("Health data isn't available on this device.");
+          setLoading(false);
+          return;
+        }
+      } catch {}
+      await HK.requestAuthorization({ read: ["steps", "calories", "sleep"], write: [] });
+      localStorage.setItem(`nrn_hk_connected_u${profileId}`, "1");
+      setConnected(true);
+      await loadData();
+    } catch (e) {
+      setErr("Health permission was not granted.");
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { if (connected && HK) loadData(); }, [connected]);
+
+  // Web / plugin not present: friendly note, no broken UI.
+  if (!isNative || !HK) {
+    return (
+      <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
+        <div style={{ fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 2, color: T.text, marginBottom: 6 }}>
+          ❤️ APPLE HEALTH
+        </div>
+        <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, lineHeight: 1.6 }}>
+          Steps, sleep and activity sync is available in the iOS app.
+          {isNative ? " Update to the latest version to connect." : ""}
+        </div>
+      </div>
+    );
+  }
+
+  const maxWeek = Math.max(...weekSteps.map((d) => d.value), 1);
+
+  return (
+    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <div style={{ fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 2, color: T.text }}>❤️ APPLE HEALTH</div>
+        {connected && (
+          <button onClick={loadData} disabled={loading} style={{ background: "none", border: "none", color: T.muted, fontSize: 13, cursor: "pointer" }} type="button" title="Refresh">
+            {loading ? "…" : "↻"}
+          </button>
+        )}
+      </div>
+
+      {!connected ? (
+        <>
+          <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, lineHeight: 1.6, marginBottom: 12 }}>
+            Connect Apple Health to see your steps, sleep and activity here alongside your habits, weight and mood.
+          </div>
+          <button
+            onClick={connect}
+            disabled={loading}
+            style={{ width: "100%", padding: "12px", background: T.accent, color: T.bg, border: "none", borderRadius: 10, fontFamily: "Bebas Neue", fontSize: 15, letterSpacing: 1.5, cursor: "pointer", opacity: loading ? 0.6 : 1 }}
+            type="button"
+          >
+            {loading ? "CONNECTING…" : "CONNECT APPLE HEALTH"}
+          </button>
+          {err && <div style={{ fontFamily: "DM Sans", fontSize: 11, color: "#ef4444", marginTop: 8 }}>{err}</div>}
+        </>
+      ) : (
+        <>
+          {/* Today stats */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 14 }}>
+            {[
+              { label: "STEPS TODAY", val: today.steps != null ? today.steps.toLocaleString() : "—", icon: "👟" },
+              { label: "SLEEP", val: today.sleepH != null ? `${today.sleepH}h` : "—", icon: "😴" },
+              { label: "ACTIVE KCAL", val: today.kcal != null ? today.kcal : "—", icon: "🔥" },
+            ].map((c) => (
+              <div key={c.label} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
+                <div style={{ fontSize: 16 }}>{c.icon}</div>
+                <div style={{ fontFamily: "Bebas Neue", fontSize: 18, color: T.accent, lineHeight: 1.2 }}>{c.val}</div>
+                <div style={{ fontFamily: "DM Sans", fontSize: 8, letterSpacing: 0.5, color: T.muted }}>{c.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* 7-day steps mini bars */}
+          <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, marginBottom: 6 }}>STEPS — LAST 7 DAYS</div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 46 }}>
+            {weekSteps.map((d, i) => (
+              <div key={i} style={{ flex: 1, textAlign: "center" }}>
+                <div style={{
+                  height: Math.max((d.value / maxWeek) * 40, 2),
+                  background: i === 6 ? T.accent : `${T.accent}55`,
+                  borderRadius: 3,
+                }} title={`${d.value.toLocaleString()} steps`} />
+                <div style={{ fontFamily: "JetBrains Mono", fontSize: 7, color: T.muted, marginTop: 2 }}>
+                  {d.date ? d.date.slice(8, 10) + "/" + d.date.slice(5, 7) : ""}
+                </div>
+              </div>
+            ))}
+          </div>
+          {err && <div style={{ fontFamily: "DM Sans", fontSize: 11, color: "#ef4444", marginTop: 8 }}>{err}</div>}
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ── Wellbeing tab: coach-set habits (RAG daily) + weight + mood ─────────── */
 function WellbeingTab({ profile }) {
   const [habits, setHabits] = useState([]);
@@ -5954,6 +6175,9 @@ function WellbeingTab({ profile }) {
           })
         )}
       </div>
+
+      {/* Apple Health (steps, sleep, activity) */}
+      <HealthCard profileId={profile?.id} />
 
       {/* Weight + Mood (moved here from the dashboard) */}
       <WeightTracker onWeightSaved={() => {}} profileId={profile?.id} />
