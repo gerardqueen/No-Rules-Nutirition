@@ -5983,6 +5983,14 @@ function HealthCard({ profileId }) {
         if (lastNight) sleepH = lastNight.hours;
       } catch {}
       setSleepNights(nights);
+      // Sync nightly summaries so the coach's Wellbeing view can show them.
+      try {
+        const payload = nights.filter((n) => !n.empty).map((n) => ({
+          date: n.date, bed: n.bed, wake: n.wake, hours: n.hours,
+          segments: (n.segments || []).map((g) => ({ leftPct: Math.round(g.leftPct * 10) / 10, widthPct: Math.round(g.widthPct * 10) / 10, stage: g.stage })),
+        }));
+        if (payload.length) apiFetch(`/sleep-logs/${profileId}`, { method: "PUT", body: JSON.stringify({ nights: payload }) });
+      } catch {}
 
       // Active energy today (kilocalories)
       let kcal = null;
