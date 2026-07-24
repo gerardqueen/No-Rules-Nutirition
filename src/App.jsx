@@ -5876,6 +5876,17 @@ function HealthCard({ profileId }) {
   const [err, setErr] = useState("");
   const [today, setToday] = useState({ steps: null, sleepH: null, kcal: null });
   const [weekSteps, setWeekSteps] = useState([]); // [{date, value}]
+  const [sleepNights, setSleepNights] = useState([]); // per-night pattern rows
+  const [stepTarget, setStepTarget] = useState(null); // coach-set daily step goal
+  useEffect(() => {
+    if (!profileId) return;
+    (async () => {
+      try {
+        const r = await apiFetch(`/step-target/${profileId}`);
+        setStepTarget(r?.steps ?? null);
+      } catch {}
+    })();
+  }, [profileId]);
 
   const iso = (d) => d.toISOString();
   const dayStart = (offset = 0) => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + offset); return d; };
@@ -5911,24 +5922,67 @@ function HealthCard({ profileId }) {
         }
       } catch {}
       setWeekSteps(stepsByDay);
+      // Sync to the server so the coach's Wellbeing view can show the same data.
+      try {
+        const days = stepsByDay.filter((d) => d.date && d.value > 0).map((d) => ({ date: d.date, steps: d.value }));
+        if (days.length) apiFetch(`/step-logs/${profileId}`, { method: "PUT", body: JSON.stringify({ days }) });
+      } catch {}
 
-      // Last-night sleep: samples in the past 24h; value is MINUTES. Count only
-      // actual sleep states (not inBed/awake) when states are provided.
+      // Sleep: one fetch covering the last 8 days, then group into nights.
+      // A "night" for day D spans D-1 18:00 → D 12:00 (covers late bedtimes
+      // and lie-ins). Stage-level segments when the device provides them.
       let sleepH = null;
+      const nights = [];
       try {
         const r = await HK.readSamples({
           dataType: "sleep",
-          startDate: iso(new Date(Date.now() - 24 * 3600 * 1000)),
+          startDate: iso(new Date(Date.now() - 8 * 24 * 3600 * 1000)),
           endDate: iso(now),
-          limit: 200,
+          limit: 500,
+          ascending: true,
         });
+        const samples = r?.samples || [];
         const asleepStates = ["asleep", "rem", "deep", "light"];
-        const mins = (r?.samples || []).reduce((a, x) => {
-          if (x.sleepState && !asleepStates.includes(x.sleepState)) return a;
-          return a + Number(x.value || 0);
-        }, 0);
-        if (mins > 0) sleepH = Math.round((mins / 60) * 10) / 10;
+        // Flatten to segments: prefer per-sample stage arrays when present.
+        const segs = [];
+        samples.forEach((x) => {
+          if (Array.isArray(x.stages) && x.stages.length) {
+            x.stages.forEach((st) => {
+              segs.push({ start: new Date(st.startDate).getTime(), end: new Date(st.endDate).getTime(), stage: st.stage || "asleep" });
+            });
+          } else {
+            segs.push({ start: new Date(x.startDate).getTime(), end: new Date(x.endDate).getTime(), stage: x.sleepState || "asleep" });
+          }
+        });
+        for (let i = 6; i >= 0; i--) {
+          const day = dayStart(-i);
+          const nightEnd = day.getTime() + 12 * 3600 * 1000;      // noon of day
+          const nightStart = nightEnd - 18 * 3600 * 1000;         // 18:00 prev day
+          const inNight = segs.filter((g) => g.end > nightStart && g.start < nightEnd && g.stage !== "inBed");
+          const key = `${day.getFullYear()}-${String(day.getMonth()+1).padStart(2,"0")}-${String(day.getDate()).padStart(2,"0")}`;
+          if (!inNight.length) { nights.push({ date: key, empty: true }); continue; }
+          const bed = Math.min(...inNight.map((g) => g.start));
+          const wake = Math.max(...inNight.map((g) => g.end));
+          const span = Math.max(wake - bed, 1);
+          const asleepMins = inNight.reduce((a, g) => a + (asleepStates.includes(g.stage) ? (g.end - g.start) / 60000 : 0), 0);
+          const fmtT = (t) => { const d = new Date(t); return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; };
+          nights.push({
+            date: key,
+            empty: false,
+            bed: fmtT(bed),
+            wake: fmtT(wake),
+            hours: Math.round((asleepMins / 60) * 10) / 10,
+            segments: inNight.map((g) => ({
+              leftPct: ((Math.max(g.start, nightStart) - bed) / span) * 100,
+              widthPct: (Math.max(g.end - Math.max(g.start, nightStart), 60000) / span) * 100,
+              stage: g.stage,
+            })),
+          });
+        }
+        const lastNight = [...nights].reverse().find((n) => !n.empty);
+        if (lastNight) sleepH = lastNight.hours;
       } catch {}
+      setSleepNights(nights);
 
       // Active energy today (kilocalories)
       let kcal = null;
@@ -6036,21 +6090,118 @@ function HealthCard({ profileId }) {
             ))}
           </div>
 
-          {/* 7-day steps mini bars */}
-          <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, marginBottom: 6 }}>STEPS — LAST 7 DAYS</div>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 46 }}>
-            {weekSteps.map((d, i) => (
-              <div key={i} style={{ flex: 1, textAlign: "center" }}>
-                <div style={{
-                  height: Math.max((d.value / maxWeek) * 40, 2),
-                  background: i === 6 ? T.accent : `${T.accent}55`,
-                  borderRadius: 3,
-                }} title={`${d.value.toLocaleString()} steps`} />
-                <div style={{ fontFamily: "JetBrains Mono", fontSize: 7, color: T.muted, marginTop: 2 }}>
-                  {d.date ? d.date.slice(8, 10) + "/" + d.date.slice(5, 7) : ""}
+          {/* ── STEPS graph ── */}
+          <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, marginBottom: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+              <span style={{ fontFamily: "Bebas Neue", fontSize: 13, letterSpacing: 1.5, color: T.text }}>👟 STEPS — LAST 7 DAYS</span>
+              {stepTarget > 0 && (
+                <span style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: T.coachGreen }}>
+                  target {stepTarget.toLocaleString()}/day
+                </span>
+              )}
+            </div>
+            {(() => {
+              const chartMax = Math.max(maxWeek, stepTarget || 0) * 1.05;
+              // Same %s as macro adherence: ≥90% green, ≥75% amber, else red.
+              // One-sided for steps — beating the target is a good thing.
+              const ragColor = (v) => {
+                if (!stepTarget || stepTarget <= 0) return null;
+                const pct = (v / stepTarget) * 100;
+                if (pct >= 90) return "#22c55e";
+                if (pct >= 75) return "#f59e0b";
+                return "#ef4444";
+              };
+              const targetPct = stepTarget > 0 ? (stepTarget / chartMax) * 100 : null;
+              return (
+                <div style={{ position: "relative" }}>
+                  {targetPct != null && (
+                    <div style={{
+                      position: "absolute", left: 0, right: 0,
+                      bottom: `${14 + targetPct * 0.46}px`,
+                      borderTop: "2px dotted #22c55e99", zIndex: 2, pointerEvents: "none",
+                    }} />
+                  )}
+                  <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 66 }}>
+                    {weekSteps.map((d, i) => {
+                      const rag = d.value > 0 ? ragColor(d.value) : null;
+                      const base = rag || (i === 6 ? T.accent : `${T.accent}55`);
+                      return (
+                        <div key={i} style={{ flex: 1, textAlign: "center" }}>
+                          <div style={{ fontFamily: "JetBrains Mono", fontSize: 7, color: T.muted, marginBottom: 2 }}>
+                            {d.value > 0 ? (d.value >= 1000 ? `${Math.round(d.value / 100) / 10}k` : d.value) : ""}
+                          </div>
+                          <div style={{
+                            height: Math.max((d.value / chartMax) * 46, 2),
+                            background: rag ? `${base}${i === 6 ? "" : "aa"}` : base,
+                            borderRadius: 3,
+                          }} title={`${d.value.toLocaleString()} steps`} />
+                          <div style={{ fontFamily: "JetBrains Mono", fontSize: 7, color: T.muted, marginTop: 2 }}>
+                            {d.date ? d.date.slice(8, 10) + "/" + d.date.slice(5, 7) : ""}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })()}
+          </div>
+
+          {/* ── SLEEP graph: per-night timeline, colour-coded by stage ── */}
+          <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12 }}>
+            <div style={{ fontFamily: "Bebas Neue", fontSize: 13, letterSpacing: 1.5, color: T.text, marginBottom: 8 }}>😴 SLEEP — LAST 7 NIGHTS</div>
+            {(() => {
+              const STAGE_COLOR = { awake: "#fb923c", rem: "#38bdf8", light: "#3b82f6", deep: "#4f46e5", asleep: "#3b82f6" };
+              const STAGE_LABEL = { awake: "Awake", rem: "REM", light: "Core", deep: "Deep", asleep: "Asleep" };
+              const anyStages = sleepNights.some((n) => !n.empty && (n.segments || []).some((g) => ["awake", "rem", "deep", "light"].includes(g.stage)));
+              const anyData = sleepNights.some((n) => !n.empty);
+              if (!anyData) {
+                return <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted }}>No sleep data recorded yet — sleep tracked by your iPhone or Watch will appear here.</div>;
+              }
+              return (
+                <>
+                  {sleepNights.map((n) => (
+                    <div key={n.date} style={{ marginBottom: 9 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
+                        <span style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: T.muted }}>
+                          {n.date.slice(8, 10)}/{n.date.slice(5, 7)}
+                        </span>
+                        {!n.empty && (
+                          <span style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: T.muted }}>
+                            🛏 {n.bed} → ⏰ {n.wake} · <span style={{ color: T.accent }}>{n.hours}h</span>
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ position: "relative", height: 12, background: T.card, border: `1px solid ${T.border}40`, borderRadius: 6, overflow: "hidden" }}>
+                        {n.empty ? (
+                          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "JetBrains Mono", fontSize: 7, color: T.border }}>—</div>
+                        ) : (
+                          (n.segments || []).map((g, i) => (
+                            <div key={i} style={{
+                              position: "absolute",
+                              left: `${g.leftPct}%`,
+                              width: `${Math.max(g.widthPct, 0.6)}%`,
+                              top: 0, bottom: 0,
+                              background: STAGE_COLOR[g.stage] || STAGE_COLOR.asleep,
+                            }} title={STAGE_LABEL[g.stage] || "Asleep"} />
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {/* Legend */}
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
+                    {(anyStages ? ["deep", "light", "rem", "awake"] : ["asleep"]).map((k) => (
+                      <span key={k} style={{ fontFamily: "DM Sans", fontSize: 8, color: T.muted }}>
+                        <span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 3, background: STAGE_COLOR[k], marginRight: 4, verticalAlign: "middle" }} />
+                        {STAGE_LABEL[k]}
+                      </span>
+                    ))}
+                    <span style={{ fontFamily: "DM Sans", fontSize: 8, color: T.border }}>gaps = out of bed</span>
+                  </div>
+                </>
+              );
+            })()}
           </div>
           {err && <div style={{ fontFamily: "DM Sans", fontSize: 11, color: "#ef4444", marginTop: 8 }}>{err}</div>}
         </>
