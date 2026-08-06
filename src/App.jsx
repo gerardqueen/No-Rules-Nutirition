@@ -7420,7 +7420,12 @@ function WeeklyPlanner({
   };
   const [pickerTab, setPickerTab] = useState("search"); // "search" | "barcode"
   const [showCustomFoodForm, setShowCustomFoodForm] = useState(false);
-  const [customFoodForm, setCustomFoodForm] = useState({ name: "", calories: "", protein: "", carbs: "", fat: "" });
+  const [customFoodForm, setCustomFoodForm] = useState({
+    name: "", calories: "", protein: "", carbs: "", fat: "",
+    // Optional serving definition, e.g. 1 "slice" = 36 g. Macros above are
+    // always per 100g/100ml; this just adds a portion chip.
+    servingLabel: "", servingSize: "", servingUnit: "g",
+  });
   const [savingCustomFood, setSavingCustomFood] = useState(false);
   const [barcodeInput, setBarcodeInput] = useState("");
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -7725,23 +7730,32 @@ function WeeklyPlanner({
     // 2) Try the app's own foods database (community foods previously saved)
     try {
       const dbRes = await apiFetch(`/foods/barcode/${clean}`);
-      if (dbRes && dbRes.found) {
-        const f = dbRes.food || dbRes;
-        const grams = Number(f.serving_size_g) || 100;
+      const f = dbRes && (dbRes.food || dbRes);
+      if (f && f.id) {
+        const unit = f.serving_unit === "ml" ? "ml" : "g";
+        const servSize = Number(f.serving_size) || 0;
+        const servings = [];
+        if (servSize > 0 && servSize !== 100) {
+          servings.push([f.serving_label || "1 serving", Math.round(servSize)]);
+        }
+        servings.push([`100${unit}`, 100]);
         const item = {
           n: f.name || "Product",
-          cal: Number(f.calories_per_100g) || 0,
-          p: Number(f.protein_per_100g) || 0,
-          c: Number(f.carbs_per_100g) || 0,
-          f: Number(f.fat_per_100g) || 0,
-          s: [[`${grams}g`, grams]],
+          cal: Number(f.calories) || 0,
+          p: Number(f.protein_g) || 0,
+          c: Number(f.carbs_g) || 0,
+          f: Number(f.fat_g) || 0,
+          s: servings,
+          u: unit,
           source: "community",
           barcode: clean,
           foodId: f.id,
         };
         setBarcodeResult(item);
-        setServingGrams(grams);
-        setServingLabel(`${grams}g`);
+        setServingGrams(servings[0][1]);
+        setServingLabel(String(servings[0][0]));
+        setBaseServing({ label: String(servings[0][0]), grams: Number(servings[0][1]) });
+        setServingQty(1);
         setScanning(false);
         return;
       }
@@ -7799,23 +7813,30 @@ function WeeklyPlanner({
           carbs_g: parseFloat(manualBarcodeForm.carbs) || 0,
           fat_g: parseFloat(manualBarcodeForm.fat) || 0,
           serving_size: parseFloat(manualBarcodeForm.servingSize) || 100,
+          serving_unit: "g",
         }),
       });
       // After successful save, populate barcodeResult so user can adjust grams + add to meal
       const grams = parseFloat(manualBarcodeForm.servingSize) || 100;
+      const mServings = [];
+      if (grams > 0 && grams !== 100) mServings.push(["1 serving", Math.round(grams)]);
+      mServings.push(["100g", 100]);
       setBarcodeResult({
         n: manualBarcodeForm.name.trim(),
         cal: cals,
         p: parseFloat(manualBarcodeForm.protein) || 0,
         c: parseFloat(manualBarcodeForm.carbs) || 0,
         f: parseFloat(manualBarcodeForm.fat) || 0,
-        s: [[`${grams}g`, grams]],
+        s: mServings,
+        u: "g",
         source: "user-added",
         barcode: manualBarcode,
         foodId: res?.id || null,
       });
-      setServingGrams(grams);
-      setServingLabel(`${grams}g`);
+      setServingGrams(mServings[0][1]);
+      setServingLabel(String(mServings[0][0]));
+      setBaseServing({ label: String(mServings[0][0]), grams: Number(mServings[0][1]) });
+      setServingQty(1);
       setShowManualBarcodeForm(false);
       setBarcodeError("");
       setManualBarcodeForm({ name: "", calories: "", protein: "", carbs: "", fat: "", servingSize: "100" });
@@ -7842,23 +7863,34 @@ function WeeklyPlanner({
           protein_g: parseFloat(customFoodForm.protein) || 0,
           carbs_g: parseFloat(customFoodForm.carbs) || 0,
           fat_g: parseFloat(customFoodForm.fat) || 0,
-          serving_size: 100,
+          serving_size: parseFloat(customFoodForm.servingSize) || 100,
+          serving_unit: customFoodForm.servingUnit === "ml" ? "ml" : "g",
+          serving_label: customFoodForm.servingLabel.trim() || null,
         }),
       });
       // Select it in canonical shape so it flows through scaleMacros correctly.
+      const unit = customFoodForm.servingUnit === "ml" ? "ml" : "g";
+      const servSize = parseFloat(customFoodForm.servingSize) || 0;
+      const servLabel = customFoodForm.servingLabel.trim();
+      const servings = [];
+      if (servSize > 0 && servSize !== 100) {
+        servings.push([servLabel || "1 serving", Math.round(servSize)]);
+      }
+      servings.push([`100${unit}`, 100]);
       const item = {
         n: name,
         c: Math.round(cals),
         p: parseFloat(customFoodForm.protein) || 0,
         b: parseFloat(customFoodForm.carbs) || 0,
         f: parseFloat(customFoodForm.fat) || 0,
-        s: [["100g", 100]],
+        s: servings,
+        u: unit,
         source: "user-added",
         foodId: res?.id || null,
       };
       selectFoodItem(item);
       setShowCustomFoodForm(false);
-      setCustomFoodForm({ name: "", calories: "", protein: "", carbs: "", fat: "" });
+      setCustomFoodForm({ name: "", calories: "", protein: "", carbs: "", fat: "", servingLabel: "", servingSize: "", servingUnit: "g" });
     } catch (e) {
       alert(e.message || "Could not save food");
     }
@@ -9819,6 +9851,56 @@ function WeeklyPlanner({
                                 </div>
                               ))}
                             </div>
+
+                            {/* Optional serving definition — gives this food the
+                                same portion chips + x-servings stepper as
+                                OpenFoodFacts products. */}
+                            <div style={{ marginTop: 10, padding: "10px", background: T.card, border: `1px solid ${T.border}`, borderRadius: 10 }}>
+                              <div style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>
+                                Serving size (optional)
+                              </div>
+                              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                <input
+                                  value={customFoodForm.servingLabel}
+                                  onChange={(e) => setCustomFoodForm((p) => ({ ...p, servingLabel: e.target.value }))}
+                                  placeholder="1 slice"
+                                  style={{
+                                    flex: 1, minWidth: 0, padding: "7px 8px", background: T.surface,
+                                    border: `1px solid ${T.border}`, borderRadius: 8, color: T.text,
+                                    fontFamily: "DM Sans", fontSize: 12, outline: "none", boxSizing: "border-box",
+                                  }}
+                                />
+                                <span style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted }}>=</span>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  value={customFoodForm.servingSize}
+                                  onChange={(e) => setCustomFoodForm((p) => ({ ...p, servingSize: e.target.value }))}
+                                  placeholder="36"
+                                  style={{
+                                    width: 62, padding: "7px 6px", background: T.surface,
+                                    border: `1px solid ${T.border}`, borderRadius: 8, color: T.text,
+                                    fontFamily: "JetBrains Mono", fontSize: 13, textAlign: "center",
+                                    outline: "none", boxSizing: "border-box",
+                                  }}
+                                />
+                                <select
+                                  value={customFoodForm.servingUnit}
+                                  onChange={(e) => setCustomFoodForm((p) => ({ ...p, servingUnit: e.target.value }))}
+                                  style={{
+                                    padding: "7px 4px", background: T.surface, border: `1px solid ${T.border}`,
+                                    borderRadius: 8, color: T.text, fontFamily: "DM Sans", fontSize: 12, outline: "none",
+                                  }}
+                                >
+                                  <option value="g">g</option>
+                                  <option value="ml">ml</option>
+                                </select>
+                              </div>
+                              <div style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, marginTop: 5, lineHeight: 1.5 }}>
+                                Macros above are per 100{customFoodForm.servingUnit === "ml" ? "ml" : "g"}. Add a serving to log by the slice, pot or scoop.
+                              </div>
+                            </div>
+
                             <button
                               onClick={saveCustomFoodFromSearch}
                               disabled={savingCustomFood}
