@@ -174,11 +174,14 @@ function dateToISO(d) {
 /* FOOD_DB moved to src/foodDb.js */
 
 // Helper: get macros for a food item at a given gram weight
-function scaleMacros(item, grams) {
+function scaleMacros(item, grams, portionLabel) {
   const r = grams / 100;
   const u = item.u === "ml" ? "ml" : "g";
+  // When a named portion is in play ("2 x 1 slice"), show it alongside the
+  // weight so the log reads naturally and still records the exact amount.
+  const suffix = portionLabel ? ` (${portionLabel} · ${grams}${u})` : ` (${grams}${u})`;
   return {
-    name: item.n + ` (${grams}${u})`,
+    name: item.n + suffix,
     calories: Math.round(item.c * r),
     protein: Math.round(item.p * r),
     carbs: Math.round(item.b * r),
@@ -7397,6 +7400,24 @@ function WeeklyPlanner({
   const [selectedFoodItem, setSelectedFoodItem] = useState(null);
   const [servingGrams, setServingGrams] = useState(100);
   const [servingLabel, setServingLabel] = useState("100g");
+  // Named-portion mode: { label, grams } when a serving chip is chosen, plus
+  // how many of them. null = raw grams/ml typed by hand.
+  const [baseServing, setBaseServing] = useState(null);
+  const [servingQty, setServingQty] = useState(1);
+
+  // Human label for the current portion, e.g. "2 x 1 slice" (null in raw mode).
+  const portionLabel = baseServing
+    ? (servingQty === 1 ? baseServing.label : `${servingQty} x ${baseServing.label}`)
+    : null;
+
+  const applyServingQty = (qty) => {
+    if (!baseServing) return;
+    const q = Math.max(0.5, Math.min(20, qty));
+    setServingQty(q);
+    const grams = Math.round(baseServing.grams * q);
+    setServingGrams(grams);
+    setServingLabel(q === 1 ? baseServing.label : `${q} x ${baseServing.label}`);
+  };
   const [pickerTab, setPickerTab] = useState("search"); // "search" | "barcode"
   const [showCustomFoodForm, setShowCustomFoodForm] = useState(false);
   const [customFoodForm, setCustomFoodForm] = useState({ name: "", calories: "", protein: "", carbs: "", fat: "" });
@@ -7907,12 +7928,15 @@ function WeeklyPlanner({
     // unit for products with no serving information.
     const unit = item.u === "ml" ? "ml" : "g";
     const first = Array.isArray(item.s) && item.s.length ? item.s[0] : null;
+    setServingQty(1);
     if (first && Number(first[1]) > 0) {
       setServingGrams(Number(first[1]));
       setServingLabel(String(first[0]));
+      setBaseServing({ label: String(first[0]), grams: Number(first[1]) });
     } else {
       setServingGrams(100);
       setServingLabel(`100${unit}`);
+      setBaseServing({ label: `100${unit}`, grams: 100 });
     }
   };
 
@@ -9023,7 +9047,8 @@ function WeeklyPlanner({
                     (() => {
                       const preview = scaleMacros(
                         selectedFoodItem,
-                        servingGrams
+                        servingGrams,
+                        portionLabel
                       );
                       return (
                         <div
@@ -9085,6 +9110,8 @@ function WeeklyPlanner({
                                         onClick={() => {
                                           setServingGrams(grams);
                                           setServingLabel(label);
+                                          setBaseServing({ label, grams });
+                                          setServingQty(1);
                                         }}
                                         style={{
                                           padding: "4px 10px",
@@ -9115,8 +9142,11 @@ function WeeklyPlanner({
                                   {!selectedFoodItem.s.some(([, g]) => g === 100) && (
                                   <button
                                     onClick={() => {
+                                      const bl = selectedFoodItem.u === "ml" ? "100ml" : "100g";
                                       setServingGrams(100);
-                                      setServingLabel(selectedFoodItem.u === "ml" ? "100ml" : "100g");
+                                      setServingLabel(bl);
+                                      setBaseServing({ label: bl, grams: 100 });
+                                      setServingQty(1);
                                     }}
                                     style={{
                                       padding: "4px 10px",
@@ -9149,6 +9179,67 @@ function WeeklyPlanner({
                                 </div>
                               </div>
                             )}
+
+                          {/* Number of servings — e.g. 2 x 1 slice */}
+                          {baseServing && (
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 10,
+                                marginBottom: 12,
+                                background: T.surface,
+                                border: `1px solid ${T.border}`,
+                                borderRadius: 10,
+                                padding: "8px 10px",
+                              }}
+                            >
+                              <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, minWidth: 60 }}>
+                                SERVINGS:
+                              </div>
+                              <button
+                                onClick={() => applyServingQty(servingQty <= 1 ? servingQty - 0.5 : servingQty - 1)}
+                                disabled={servingQty <= 0.5}
+                                style={{
+                                  width: 32, height: 32, borderRadius: 8,
+                                  border: `1px solid ${T.border}`,
+                                  background: T.card,
+                                  color: servingQty <= 0.5 ? T.border : T.text,
+                                  fontSize: 18, lineHeight: 1,
+                                  cursor: servingQty <= 0.5 ? "default" : "pointer",
+                                }}
+                                type="button"
+                              >
+                                −
+                              </button>
+                              <div style={{ minWidth: 34, textAlign: "center", fontFamily: "JetBrains Mono", fontSize: 15, color: T.accent }}>
+                                {servingQty % 1 === 0 ? servingQty : servingQty.toFixed(1)}
+                              </div>
+                              <button
+                                onClick={() => applyServingQty(servingQty < 1 ? servingQty + 0.5 : servingQty + 1)}
+                                disabled={servingQty >= 20}
+                                style={{
+                                  width: 32, height: 32, borderRadius: 8,
+                                  border: `1px solid ${T.border}`,
+                                  background: T.card,
+                                  color: servingQty >= 20 ? T.border : T.text,
+                                  fontSize: 18, lineHeight: 1,
+                                  cursor: servingQty >= 20 ? "default" : "pointer",
+                                }}
+                                type="button"
+                              >
+                                +
+                              </button>
+                              <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, flex: 1, textAlign: "right" }}>
+                                × {baseServing.label} ={" "}
+                                <span style={{ color: T.text, fontFamily: "JetBrains Mono" }}>
+                                  {servingGrams}
+                                  {selectedFoodItem.u === "ml" ? "ml" : "g"}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
                           <div
                             style={{
                               display: "flex",
@@ -9179,6 +9270,8 @@ function WeeklyPlanner({
                                 );
                                 setServingGrams(v);
                                 setServingLabel(`${v}${selectedFoodItem.u === "ml" ? "ml" : "g"}`);
+                                setBaseServing(null);
+                                setServingQty(1);
                               }}
                               style={{
                                 width: 80,
@@ -9269,7 +9362,7 @@ function WeeklyPlanner({
                             onClick={() => {
                               rememberRecentFood(selectedFoodItem);
                               addFood(
-                                scaleMacros(selectedFoodItem, servingGrams)
+                                scaleMacros(selectedFoodItem, servingGrams, portionLabel)
                               );
                             }}
                             style={{
@@ -10226,6 +10319,8 @@ function WeeklyPlanner({
                                 const v = Math.max(1, servingGrams - 10);
                                 setServingGrams(v);
                                 setServingLabel(`${v}${selectedFoodItem.u === "ml" ? "ml" : "g"}`);
+                                setBaseServing(null);
+                                setServingQty(1);
                               }}
                               style={{
                                 width: 36, height: 36, borderRadius: 8,
@@ -10244,6 +10339,8 @@ function WeeklyPlanner({
                                 const v = Math.max(1, parseInt(e.target.value) || 1);
                                 setServingGrams(v);
                                 setServingLabel(`${v}${selectedFoodItem.u === "ml" ? "ml" : "g"}`);
+                                setBaseServing(null);
+                                setServingQty(1);
                               }}
                               style={{
                                 flex: 1, padding: "8px 12px",
@@ -10259,6 +10356,8 @@ function WeeklyPlanner({
                                 const v = Math.min(2000, servingGrams + 10);
                                 setServingGrams(v);
                                 setServingLabel(`${v}${selectedFoodItem.u === "ml" ? "ml" : "g"}`);
+                                setBaseServing(null);
+                                setServingQty(1);
                               }}
                               style={{
                                 width: 36, height: 36, borderRadius: 8,
