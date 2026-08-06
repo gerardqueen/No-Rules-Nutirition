@@ -7768,6 +7768,8 @@ function WeeklyPlanner({
         setBarcodeResult(item);
         setServingGrams(item.s[0][1]);
         setServingLabel(item.s[0][0]);
+        setBaseServing({ label: String(item.s[0][0]), grams: Number(item.s[0][1]) });
+        setServingQty(1);
         setScanning(false);
         return;
       }
@@ -10280,6 +10282,8 @@ function WeeklyPlanner({
                                   onClick={() => {
                                     setServingGrams(grams);
                                     setServingLabel(label);
+                                    setBaseServing({ label, grams });
+                                    setServingQty(1);
                                   }}
                                   style={{
                                     padding: "5px 12px",
@@ -10303,12 +10307,61 @@ function WeeklyPlanner({
                                     transition: "all 0.15s",
                                   }}
                                 >
-                                  {label} ({grams}g)
+                                  {label} ({grams}{barcodeResult.u === "ml" ? "ml" : "g"})
                                 </button>
                               ))}
                             </div>
                           </div>
                         )}
+
+                        {/* Number of servings — e.g. 2 x 1 pot */}
+                        {baseServing && (
+                          <div
+                            style={{
+                              display: "flex", alignItems: "center", gap: 10,
+                              marginBottom: 12, background: T.surface,
+                              border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px",
+                            }}
+                          >
+                            <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, minWidth: 60 }}>
+                              SERVINGS:
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => applyServingQty(servingQty <= 1 ? servingQty - 0.5 : servingQty - 1)}
+                              disabled={servingQty <= 0.5}
+                              style={{
+                                width: 32, height: 32, borderRadius: 8, border: `1px solid ${T.border}`,
+                                background: T.card, color: servingQty <= 0.5 ? T.border : T.text,
+                                fontSize: 18, lineHeight: 1, cursor: servingQty <= 0.5 ? "default" : "pointer",
+                              }}
+                            >
+                              −
+                            </button>
+                            <div style={{ minWidth: 34, textAlign: "center", fontFamily: "JetBrains Mono", fontSize: 15, color: T.coachGreen }}>
+                              {servingQty % 1 === 0 ? servingQty : servingQty.toFixed(1)}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => applyServingQty(servingQty < 1 ? servingQty + 0.5 : servingQty + 1)}
+                              disabled={servingQty >= 20}
+                              style={{
+                                width: 32, height: 32, borderRadius: 8, border: `1px solid ${T.border}`,
+                                background: T.card, color: servingQty >= 20 ? T.border : T.text,
+                                fontSize: 18, lineHeight: 1, cursor: servingQty >= 20 ? "default" : "pointer",
+                              }}
+                            >
+                              +
+                            </button>
+                            <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, flex: 1, textAlign: "right" }}>
+                              × {baseServing.label} ={" "}
+                              <span style={{ color: T.text, fontFamily: "JetBrains Mono" }}>
+                                {servingGrams}{barcodeResult.u === "ml" ? "ml" : "g"}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+
                         {/* Custom gram input — ALWAYS visible (mobile + desktop) */}
                         <div style={{ marginBottom: 12 }}>
                           <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, marginBottom: 6 }}>
@@ -10320,7 +10373,7 @@ function WeeklyPlanner({
                               onClick={() => {
                                 const v = Math.max(1, servingGrams - 10);
                                 setServingGrams(v);
-                                setServingLabel(`${v}${selectedFoodItem.u === "ml" ? "ml" : "g"}`);
+                                setServingLabel(`${v}${barcodeResult.u === "ml" ? "ml" : "g"}`);
                                 setBaseServing(null);
                                 setServingQty(1);
                               }}
@@ -10340,7 +10393,7 @@ function WeeklyPlanner({
                               onChange={(e) => {
                                 const v = Math.max(1, parseInt(e.target.value) || 1);
                                 setServingGrams(v);
-                                setServingLabel(`${v}${selectedFoodItem.u === "ml" ? "ml" : "g"}`);
+                                setServingLabel(`${v}${barcodeResult.u === "ml" ? "ml" : "g"}`);
                                 setBaseServing(null);
                                 setServingQty(1);
                               }}
@@ -10357,7 +10410,7 @@ function WeeklyPlanner({
                               onClick={() => {
                                 const v = Math.min(2000, servingGrams + 10);
                                 setServingGrams(v);
-                                setServingLabel(`${v}${selectedFoodItem.u === "ml" ? "ml" : "g"}`);
+                                setServingLabel(`${v}${barcodeResult.u === "ml" ? "ml" : "g"}`);
                                 setBaseServing(null);
                                 setServingQty(1);
                               }}
@@ -10441,14 +10494,18 @@ function WeeklyPlanner({
                             marginBottom: 12,
                           }}
                         >
-                          Per {servingGrams}g · {barcodeResult.cal} kcal per
-                          100g
+                          Per {servingGrams}{barcodeResult.u === "ml" ? "ml" : "g"} · {barcodeResult.cal} kcal per
+                          100{barcodeResult.u === "ml" ? "ml" : "g"}
                         </div>
                         <button
                           onClick={() => {
                             const r = servingGrams / 100;
                             const food = {
-                              name: barcodeResult.n + ` (${servingGrams}g)`,
+                              name:
+                                barcodeResult.n +
+                                (baseServing
+                                  ? ` (${servingQty === 1 ? baseServing.label : `${servingQty} x ${baseServing.label}`} · ${servingGrams}${barcodeResult.u === "ml" ? "ml" : "g"})`
+                                  : ` (${servingGrams}${barcodeResult.u === "ml" ? "ml" : "g"})`),
                               calories: Math.round(barcodeResult.cal * r),
                               protein: Math.round((barcodeResult.p || 0) * r * 10) / 10,
                               carbs: Math.round((barcodeResult.c || 0) * r * 10) / 10,
