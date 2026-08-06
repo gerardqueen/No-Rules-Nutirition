@@ -176,8 +176,9 @@ function dateToISO(d) {
 // Helper: get macros for a food item at a given gram weight
 function scaleMacros(item, grams) {
   const r = grams / 100;
+  const u = item.u === "ml" ? "ml" : "g";
   return {
-    name: item.n + (grams !== 100 ? ` (${grams}g)` : " (100g)"),
+    name: item.n + ` (${grams}${u})`,
     calories: Math.round(item.c * r),
     protein: Math.round(item.p * r),
     carbs: Math.round(item.b * r),
@@ -7739,6 +7740,7 @@ function WeeklyPlanner({
           c: Math.round((Number(p.carbs) || 0) * 10) / 10,
           f: Math.round((Number(p.fat) || 0) * 10) / 10,
           s: Array.isArray(p.servings) && p.servings.length > 0 ? p.servings : [["100g", 100]],
+          u: p.unit === "ml" ? "ml" : "g",
           source: "openfoodfacts",
           barcode: clean,
         };
@@ -7852,6 +7854,7 @@ function WeeklyPlanner({
       b: barcodeResult.c,
       f: barcodeResult.f,
       s: barcodeResult.s,
+      u: barcodeResult.u || "g",
       source: barcodeResult.source || "user-added",
     };
     setSelectedFoodItem(item);
@@ -7899,8 +7902,18 @@ function WeeklyPlanner({
 
   const selectFoodItem = (item) => {
     setSelectedFoodItem(item);
-    setServingGrams(100);
-    setServingLabel("100g");
+    // Default to the product's OWN serving when it has one (e.g. "1 slice",
+    // "1 can") — much more useful than a blanket 100g. Falls back to the base
+    // unit for products with no serving information.
+    const unit = item.u === "ml" ? "ml" : "g";
+    const first = Array.isArray(item.s) && item.s.length ? item.s[0] : null;
+    if (first && Number(first[1]) > 0) {
+      setServingGrams(Number(first[1]));
+      setServingLabel(String(first[0]));
+    } else {
+      setServingGrams(100);
+      setServingLabel(`100${unit}`);
+    }
   };
 
   // ── Saved meals + recent foods (localStorage, per-athlete) ──────────────────
@@ -8003,6 +8016,7 @@ function WeeklyPlanner({
             b: Math.round((Number(p.carbs) || 0) * 10) / 10,
             f: Math.round((Number(p.fat) || 0) * 10) / 10,
             s: Array.isArray(p.servings) && p.servings.length ? p.servings : [["100g", 100]],
+            u: p.unit === "ml" ? "ml" : "g",
             source: "openfoodfacts",
           }));
         // Drop online items whose name already appears in local results.
@@ -9094,14 +9108,15 @@ function WeeklyPlanner({
                                           transition: "all 0.15s",
                                         }}
                                       >
-                                        {label} ({grams}g)
+                                        {label} ({grams}{selectedFoodItem.u === "ml" ? "ml" : "g"})
                                       </button>
                                     )
                                   )}
+                                  {!selectedFoodItem.s.some(([, g]) => g === 100) && (
                                   <button
                                     onClick={() => {
                                       setServingGrams(100);
-                                      setServingLabel("100g");
+                                      setServingLabel(selectedFoodItem.u === "ml" ? "100ml" : "100g");
                                     }}
                                     style={{
                                       padding: "4px 10px",
@@ -9128,8 +9143,9 @@ function WeeklyPlanner({
                                       transition: "all 0.15s",
                                     }}
                                   >
-                                    100g
+                                    {selectedFoodItem.u === "ml" ? "100ml" : "100g"}
                                   </button>
+                                  )}
                                 </div>
                               </div>
                             )}
@@ -9162,7 +9178,7 @@ function WeeklyPlanner({
                                   parseInt(e.target.value) || 1
                                 );
                                 setServingGrams(v);
-                                setServingLabel(`${v}g`);
+                                setServingLabel(`${v}${selectedFoodItem.u === "ml" ? "ml" : "g"}`);
                               }}
                               style={{
                                 width: 80,
@@ -9184,7 +9200,7 @@ function WeeklyPlanner({
                                 color: T.muted,
                               }}
                             >
-                              grams
+                              {selectedFoodItem.u === "ml" ? "ml" : "grams"}
                             </span>
                           </div>
                           <div
@@ -10209,7 +10225,7 @@ function WeeklyPlanner({
                               onClick={() => {
                                 const v = Math.max(1, servingGrams - 10);
                                 setServingGrams(v);
-                                setServingLabel(`${v}g`);
+                                setServingLabel(`${v}${selectedFoodItem.u === "ml" ? "ml" : "g"}`);
                               }}
                               style={{
                                 width: 36, height: 36, borderRadius: 8,
@@ -10227,7 +10243,7 @@ function WeeklyPlanner({
                               onChange={(e) => {
                                 const v = Math.max(1, parseInt(e.target.value) || 1);
                                 setServingGrams(v);
-                                setServingLabel(`${v}g`);
+                                setServingLabel(`${v}${selectedFoodItem.u === "ml" ? "ml" : "g"}`);
                               }}
                               style={{
                                 flex: 1, padding: "8px 12px",
@@ -10242,7 +10258,7 @@ function WeeklyPlanner({
                               onClick={() => {
                                 const v = Math.min(2000, servingGrams + 10);
                                 setServingGrams(v);
-                                setServingLabel(`${v}g`);
+                                setServingLabel(`${v}${selectedFoodItem.u === "ml" ? "ml" : "g"}`);
                               }}
                               style={{
                                 width: 36, height: 36, borderRadius: 8,
