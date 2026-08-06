@@ -7854,7 +7854,7 @@ function WeeklyPlanner({
         source: "user-added",
         foodId: res?.id || null,
       };
-      setSelectedFoodItem(item);
+      selectFoodItem(item);
       setShowCustomFoodForm(false);
       setCustomFoodForm({ name: "", calories: "", protein: "", carbs: "", fat: "" });
     } catch (e) {
@@ -7878,7 +7878,9 @@ function WeeklyPlanner({
       u: barcodeResult.u || "g",
       source: barcodeResult.source || "user-added",
     };
-    setSelectedFoodItem(item);
+    // Use selectFoodItem (not setSelectedFoodItem) so the portion state —
+    // default serving, base serving and the x-servings stepper — initialises.
+    selectFoodItem(item);
     setPickerTab("search");
     setBarcodeResult(null);
     setBarcodeInput("");
