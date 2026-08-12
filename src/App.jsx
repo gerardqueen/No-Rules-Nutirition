@@ -5881,6 +5881,7 @@ function HealthCard({ profileId }) {
   const [today, setToday] = useState({ steps: null, sleepH: null, kcal: null });
   const [weekSteps, setWeekSteps] = useState([]); // [{date, value}]
   const [sleepNights, setSleepNights] = useState([]); // per-night pattern rows
+  const [workouts, setWorkouts] = useState([]); // recent workouts from Health
   const [stepTarget, setStepTarget] = useState(null); // coach-set daily step goal
   useEffect(() => {
     if (!profileId) return;
@@ -6010,6 +6011,35 @@ function HealthCard({ profileId }) {
         if (total > 0) kcal = Math.round(total);
       } catch {}
 
+      // Workouts (runs, rides, gym sessions…) from the last 14 days.
+      try {
+        const wr = await HK.queryWorkouts({
+          startDate: iso(new Date(Date.now() - 14 * 24 * 3600 * 1000)),
+          endDate: iso(now),
+          limit: 50,
+        });
+        const list = (wr?.workouts || []).map((w) => {
+          const st = new Date(w.startDate);
+          const en = new Date(w.endDate || w.startDate);
+          const mins = Number(w.duration ? w.duration / 60 : (en - st) / 60000);
+          const pad = (n) => String(n).padStart(2, "0");
+          return {
+            externalId: String(w.id || w.uuid || `${w.startDate}-${w.workoutType || w.type || "w"}`),
+            date: `${st.getFullYear()}-${pad(st.getMonth() + 1)}-${pad(st.getDate())}`,
+            type: String(w.workoutType || w.type || w.activityType || "Workout"),
+            startTime: `${pad(st.getHours())}:${pad(st.getMinutes())}`,
+            minutes: Math.round(mins),
+            calories: Math.round(Number(w.calories ?? w.totalEnergyBurned ?? 0)),
+            distanceKm: Math.round((Number(w.distance ?? w.totalDistance ?? 0) / 1000) * 100) / 100,
+            avgHr: Math.round(Number(w.averageHeartRate ?? 0)),
+          };
+        }).filter((w) => w.minutes > 0);
+        setWorkouts(list);
+        if (list.length) {
+          apiFetch(`/workout-logs/${profileId}`, { method: "PUT", body: JSON.stringify({ workouts: list }) });
+        }
+      } catch {}
+
       setToday({ steps: stepsByDay[6]?.value ?? null, sleepH, kcal });
     } catch (e) {
       setErr("Couldn't read Apple Health data.");
@@ -6030,7 +6060,7 @@ function HealthCard({ profileId }) {
           return;
         }
       } catch {}
-      await HK.requestAuthorization({ read: ["steps", "calories", "sleep"], write: [] });
+      await HK.requestAuthorization({ read: ["steps", "calories", "sleep", "workouts", "distance", "heartRate"], write: [] });
       localStorage.setItem(`nrn_hk_connected_u${profileId}`, "1");
       setConnected(true);
       await loadData();
@@ -6215,6 +6245,39 @@ function HealthCard({ profileId }) {
               );
             })()}
           </div>
+          {/* ── WORKOUTS ── */}
+          <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, marginTop: 12 }}>
+            <div style={{ fontFamily: "Bebas Neue", fontSize: 13, letterSpacing: 1.5, color: T.text, marginBottom: 8 }}>
+              🏃 WORKOUTS — LAST 14 DAYS
+            </div>
+            {workouts.length === 0 ? (
+              <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted }}>
+                No workouts recorded yet — runs, rides and gym sessions tracked by your phone or watch appear here.
+              </div>
+            ) : (
+              <>
+                {workouts.slice(0, 10).map((w, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: `1px solid ${T.border}30` }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.text }}>{w.type}</div>
+                      <div style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: T.muted, marginTop: 1 }}>
+                        {w.date.slice(8, 10)}/{w.date.slice(5, 7)} · {w.startTime}
+                      </div>
+                    </div>
+                    <div style={{ fontFamily: "JetBrains Mono", fontSize: 10, color: T.accent, textAlign: "right", whiteSpace: "nowrap" }}>
+                      {w.minutes}min{w.distanceKm > 0 ? ` · ${w.distanceKm}km` : ""}
+                      {w.calories > 0 ? <div style={{ color: T.muted, fontSize: 8 }}>{w.calories} kcal{w.avgHr > 0 ? ` · ${w.avgHr}bpm` : ""}</div> : null}
+                    </div>
+                  </div>
+                ))}
+                <div style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, marginTop: 6 }}>
+                  {workouts.length} session{workouts.length === 1 ? "" : "s"} ·{" "}
+                  {Math.round(workouts.reduce((a, w) => a + w.minutes, 0))} active minutes total
+                </div>
+              </>
+            )}
+          </div>
+
           {err && <div style={{ fontFamily: "DM Sans", fontSize: 11, color: "#ef4444", marginTop: 8 }}>{err}</div>}
         </>
       )}
