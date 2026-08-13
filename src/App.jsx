@@ -5882,6 +5882,7 @@ function HealthCard({ profileId }) {
   const [weekSteps, setWeekSteps] = useState([]); // [{date, value}]
   const [sleepNights, setSleepNights] = useState([]); // per-night pattern rows
   const [workouts, setWorkouts] = useState([]); // recent workouts from Health
+  const [workoutDebug, setWorkoutDebug] = useState(""); // why the list may be empty
   const [stepTarget, setStepTarget] = useState(null); // coach-set daily step goal
   useEffect(() => {
     if (!profileId) return;
@@ -6012,33 +6013,65 @@ function HealthCard({ profileId }) {
       } catch {}
 
       // Workouts (runs, rides, gym sessions…) from the last 14 days.
+      // NOTE: field names differ between HealthKit / Health Connect and plugin
+      // versions, so read defensively and surface why nothing came back.
       try {
         const wr = await HK.queryWorkouts({
           startDate: iso(new Date(Date.now() - 14 * 24 * 3600 * 1000)),
           endDate: iso(now),
           limit: 50,
         });
-        const list = (wr?.workouts || []).map((w) => {
-          const st = new Date(w.startDate);
-          const en = new Date(w.endDate || w.startDate);
-          const mins = Number(w.duration ? w.duration / 60 : (en - st) / 60000);
-          const pad = (n) => String(n).padStart(2, "0");
+        // The payload may be {workouts:[…]}, {samples:[…]}, {data:[…]} or a bare array.
+        const raw = Array.isArray(wr) ? wr
+          : (wr?.workouts || wr?.samples || wr?.data || wr?.result || []);
+        setWorkoutDebug(
+          `queryWorkouts returned ${Array.isArray(raw) ? raw.length : 0} item(s)` +
+          (raw && raw[0] ? ` · keys: ${Object.keys(raw[0]).slice(0, 8).join(", ")}` : "")
+        );
+
+        const pad = (n) => String(n).padStart(2, "0");
+        const num = (...vals) => {
+          for (const v of vals) {
+            const n2 = Number(v);
+            if (Number.isFinite(n2) && n2 > 0) return n2;
+          }
+          return 0;
+        };
+        const list = (Array.isArray(raw) ? raw : []).map((w) => {
+          const startRaw = w.startDate ?? w.startTime ?? w.start ?? w.from;
+          const endRaw = w.endDate ?? w.endTime ?? w.end ?? w.to;
+          const st = new Date(startRaw);
+          if (isNaN(st.getTime())) return null;
+          const en = new Date(endRaw ?? startRaw);
+          // duration may be seconds, or already minutes, or absent
+          let mins = 0;
+          const durRaw = num(w.duration, w.durationSeconds, w.totalDuration);
+          if (durRaw > 0) mins = durRaw > 600 ? durRaw / 60 : durRaw; // >600 ⇒ seconds
+          if (!mins && !isNaN(en.getTime())) mins = (en - st) / 60000;
+
+          // distance may be metres or kilometres depending on source
+          const distRaw = num(w.distance, w.totalDistance, w.distanceMeters);
+          const km = distRaw > 500 ? distRaw / 1000 : distRaw;
+
           return {
-            externalId: String(w.id || w.uuid || `${w.startDate}-${w.workoutType || w.type || "w"}`),
+            externalId: String(w.id ?? w.uuid ?? w.identifier ?? `${startRaw}-${w.workoutType ?? w.type ?? "w"}`),
             date: `${st.getFullYear()}-${pad(st.getMonth() + 1)}-${pad(st.getDate())}`,
-            type: String(w.workoutType || w.type || w.activityType || "Workout"),
+            type: String(w.workoutType ?? w.type ?? w.activityType ?? w.activity ?? w.name ?? "Workout"),
             startTime: `${pad(st.getHours())}:${pad(st.getMinutes())}`,
             minutes: Math.round(mins),
-            calories: Math.round(Number(w.calories ?? w.totalEnergyBurned ?? 0)),
-            distanceKm: Math.round((Number(w.distance ?? w.totalDistance ?? 0) / 1000) * 100) / 100,
-            avgHr: Math.round(Number(w.averageHeartRate ?? 0)),
+            calories: Math.round(num(w.calories, w.totalEnergyBurned, w.energyBurned, w.activeEnergy)),
+            distanceKm: Math.round(km * 100) / 100,
+            avgHr: Math.round(num(w.averageHeartRate, w.avgHeartRate, w.heartRateAvg)),
           };
-        }).filter((w) => w.minutes > 0);
+        }).filter((w) => w && w.minutes > 0);
+
         setWorkouts(list);
         if (list.length) {
           apiFetch(`/workout-logs/${profileId}`, { method: "PUT", body: JSON.stringify({ workouts: list }) });
         }
-      } catch {}
+      } catch (e) {
+        setWorkoutDebug(`queryWorkouts failed: ${e?.message || e}`);
+      }
 
       setToday({ steps: stepsByDay[6]?.value ?? null, sleepH, kcal });
     } catch (e) {
@@ -6253,6 +6286,11 @@ function HealthCard({ profileId }) {
             {workouts.length === 0 ? (
               <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted }}>
                 No workouts recorded yet — runs, rides and gym sessions tracked by your phone or watch appear here.
+                {workoutDebug ? (
+                  <div style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: T.border, marginTop: 6, wordBreak: "break-all" }}>
+                    {workoutDebug}
+                  </div>
+                ) : null}
               </div>
             ) : (
               <>
