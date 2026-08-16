@@ -5872,10 +5872,30 @@ function WeightTracker({ onWeightSaved, profileId }) {
    behind the same card. */
 function HealthCard({ profileId }) {
   const isNative = typeof window !== "undefined" && window.Capacitor?.isNativePlatform?.();
-  const HK = typeof window !== "undefined"
-    ? (window.Capacitor?.Plugins?.CapacitorHealth || window.Capacitor?.Plugins?.Health || null)
-    : null;
-  const [connected, setConnected] = useState(() => localStorage.getItem(`nrn_hk_connected_u${profileId}`) === "1");
+  // Find the health plugin whatever it registered itself as. Different plugin
+  // versions expose different names, so match by capability rather than guess.
+  const { HK, HKName } = (() => {
+    if (typeof window === "undefined") return { HK: null, HKName: "" };
+    const plugins = window.Capacitor?.Plugins || {};
+    const direct = plugins.CapacitorHealth || plugins.Health || plugins.HealthPlugin || plugins.CapgoHealth;
+    if (direct) {
+      const nm = Object.keys(plugins).find((k) => plugins[k] === direct) || "direct";
+      return { HK: direct, HKName: nm };
+    }
+    const key = Object.keys(plugins).find((k) => {
+      const pl = plugins[k];
+      return pl && (typeof pl.queryAggregated === "function" || typeof pl.queryWorkouts === "function" || typeof pl.requestAuthorization === "function") && /health/i.test(k);
+    });
+    return key ? { HK: plugins[key], HKName: key } : { HK: null, HKName: "" };
+  })();
+  const [connected, setConnected] = useState(false);
+  // profileId arrives asynchronously, so re-read the stored flag when it lands.
+  // (A useState initialiser only runs on the first render, when profileId is
+  // still undefined — that left the card stuck in its disconnected state.)
+  useEffect(() => {
+    if (!profileId) return;
+    if (localStorage.getItem(`nrn_hk_connected_u${profileId}`) === "1") setConnected(true);
+  }, [profileId]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [today, setToday] = useState({ steps: null, sleepH: null, kcal: null });
@@ -6105,6 +6125,24 @@ function HealthCard({ profileId }) {
 
   useEffect(() => { if (connected && HK) loadData(); }, [connected]);
 
+  // If iOS already granted access in a previous session, show the connected
+  // view even when the local flag is missing (e.g. after a reinstall).
+  useEffect(() => {
+    if (!HK || connected || !profileId) return;
+    (async () => {
+      try {
+        const st = await HK.checkAuthorization({ read: ["steps", "calories", "sleep", "workouts"], write: [] });
+        const vals = st && typeof st === "object" ? Object.values(st).flat() : [];
+        const granted = JSON.stringify(st || "").includes("granted") ||
+          vals.some((v) => v === true || v === "granted" || v === "authorized");
+        if (granted) {
+          localStorage.setItem(`nrn_hk_connected_u${profileId}`, "1");
+          setConnected(true);
+        }
+      } catch {}
+    })();
+  }, [HK, profileId, connected]);
+
   // Web / plugin not present: friendly note, no broken UI.
   if (!isNative || !HK) {
     return (
@@ -6116,6 +6154,11 @@ function HealthCard({ profileId }) {
           Steps, sleep and activity sync is available in the iOS app.
           {isNative ? " Update to the latest version to connect." : ""}
         </div>
+        {isNative && (
+          <div style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: T.border, marginTop: 8, wordBreak: "break-all" }}>
+            plugins: {(() => { try { return Object.keys(window.Capacitor?.Plugins || {}).join(", ") || "none"; } catch { return "n/a"; } })()}
+          </div>
+        )}
       </div>
     );
   }
@@ -6126,10 +6169,15 @@ function HealthCard({ profileId }) {
     <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
         <div style={{ fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 2, color: T.text }}>❤️ APPLE HEALTH</div>
-        {connected && (
-          <button onClick={loadData} disabled={loading} style={{ background: "none", border: "none", color: T.muted, fontSize: 13, cursor: "pointer" }} type="button" title="Refresh">
-            {loading ? "…" : "↻"}
-          </button>
+        {true && (
+          <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <button onClick={connect} disabled={loading} style={{ background: connected ? "none" : `${T.accent}22`, border: `1px solid ${connected ? T.border : T.accent}`, borderRadius: 7, padding: "3px 8px", color: connected ? T.muted : T.accent, fontFamily: "DM Sans", fontSize: 9, cursor: "pointer" }} type="button" title="Grant or re-request Health permissions (needed after new data types are added)">
+              {connected ? "PERMISSIONS" : "CONNECT"}
+            </button>
+            <button onClick={loadData} disabled={loading} style={{ background: "none", border: "none", color: T.muted, fontSize: 13, cursor: "pointer" }} type="button" title="Refresh">
+              {loading ? "…" : "↻"}
+            </button>
+          </span>
         )}
       </div>
 
@@ -6146,6 +6194,10 @@ function HealthCard({ profileId }) {
           >
             {loading ? "CONNECTING…" : "CONNECT APPLE HEALTH"}
           </button>
+          <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, marginTop: 8, lineHeight: 1.5 }}>
+            Already connected before? Tap again to refresh permissions — new data
+            types (like Workouts) need re-granting after an app update.
+          </div>
           {err && <div style={{ fontFamily: "DM Sans", fontSize: 11, color: "#ef4444", marginTop: 8 }}>{err}</div>}
         </>
       ) : (
