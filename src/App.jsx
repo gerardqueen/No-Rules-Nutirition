@@ -3510,6 +3510,7 @@ function MiniCalendar({ events, setEvents, profileId }) {
   const [editEvent, setEditEvent] = useState(null);
   const [inviteEvent, setInviteEvent] = useState(null); // read-only coach check-in invite view
   const [selectedDate, setSelectedDate] = useState(null);
+  const [dayView, setDayView] = useState(null); // ISO date whose contents are shown
   const [form, setForm] = useState({
     title: "",
     type: "checkin",
@@ -3678,6 +3679,115 @@ function MiniCalendar({ events, setEvents, profileId }) {
   return (
     <>
       {/* ── Coach Check-in Invite (read-only) ── */}
+      {/* ── Day view: everything on the tapped day ─────────────────────── */}
+      {dayView && (
+        <div
+          onClick={() => setDayView(null)}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,.6)",
+            display: "flex", alignItems: "flex-end", justifyContent: "center",
+            zIndex: 1200, padding: 0,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%", maxWidth: 520, maxHeight: "80vh", overflowY: "auto",
+              background: T.card, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+              border: `1px solid ${T.border}`, padding: 18,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <div style={{ fontFamily: "Bebas Neue", fontSize: 20, letterSpacing: 1, color: T.text }}>
+                {new Date(dayView + "T00:00:00").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}
+              </div>
+              <button onClick={() => setDayView(null)} style={{ background: "none", border: "none", color: T.muted, fontSize: 22, cursor: "pointer", lineHeight: 1 }} type="button">×</button>
+            </div>
+
+            {(() => {
+              const items = events
+                .filter((ev) => ev.date === dayView)
+                .sort((a, b) => String(a.time || a.startISO || "").localeCompare(String(b.time || b.startISO || "")));
+              if (items.length === 0) {
+                return (
+                  <div style={{ fontFamily: "DM Sans", fontSize: 13, color: T.muted, padding: "18px 0" }}>
+                    Nothing scheduled on this day.
+                  </div>
+                );
+              }
+              return (
+                <div style={{ marginTop: 10 }}>
+                  {items.map((ev) => {
+                    const t = getType(ev.type);
+                    const isCoach = ev.type === "coach-checkin" || ev.readOnly || ev.coachCreated;
+                    const note = ev.note || ev.notes || "";
+                    return (
+                      <button
+                        key={ev.id}
+                        onClick={() => {
+                          setDayView(null);
+                          if (isCoach) setInviteEvent(ev);
+                          else {
+                            setEditEvent(ev);
+                            setForm({ title: ev.title, type: ev.type, date: ev.date, note });
+                            setShowModal(true);
+                          }
+                        }}
+                        style={{
+                          width: "100%", textAlign: "left", display: "block",
+                          background: T.surface, border: `1px solid ${isCoach ? T.coachGreen + "55" : T.border}`,
+                          borderRadius: 12, padding: "12px 14px", marginBottom: 8, cursor: "pointer",
+                        }}
+                        type="button"
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ width: 8, height: 8, borderRadius: "50%", background: t?.color || T.accent, flexShrink: 0 }} />
+                          <span style={{ fontFamily: "DM Sans", fontSize: 14, color: T.text, fontWeight: 600, flex: 1 }}>
+                            {ev.title}
+                          </span>
+                          {isCoach && (
+                            <span style={{ fontFamily: "DM Sans", fontSize: 8, color: T.coachGreen, border: `1px solid ${T.coachGreen}55`, borderRadius: 5, padding: "1px 5px" }}>
+                              COACH
+                            </span>
+                          )}
+                        </div>
+                        {(ev.time || ev.startISO) && (
+                          <div style={{ fontFamily: "JetBrains Mono", fontSize: 10, color: T.accent, marginTop: 4, marginLeft: 16 }}>
+                            {ev.time || (() => { try { return new Date(ev.startISO).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }); } catch { return ""; } })()}
+                          </div>
+                        )}
+                        {note && (
+                          <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, marginTop: 6, marginLeft: 16, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+                            {note.length > 220 ? note.slice(0, 220) + "…" : note}
+                          </div>
+                        )}
+                        {ev.linkUrl && (
+                          <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.coachGreen, marginTop: 6, marginLeft: 16 }}>
+                            📹 Video link — tap to open
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            <button
+              onClick={() => { const d = dayView; setDayView(null); openNew(d); }}
+              style={{
+                width: "100%", marginTop: 6, padding: "13px",
+                background: T.accent, color: T.bg, border: "none", borderRadius: 12,
+                fontFamily: "Bebas Neue", fontSize: 15, letterSpacing: 1.5, cursor: "pointer",
+              }}
+              type="button"
+            >
+              + ADD EVENT ON THIS DAY
+            </button>
+          </div>
+        </div>
+      )}
+
       {inviteEvent && (
         <div
           onClick={() => setInviteEvent(null)}
@@ -4195,7 +4305,7 @@ function MiniCalendar({ events, setEvents, profileId }) {
                 key={d}
                 onClick={() => {
                   setSelectedDate(ds);
-                  openNew(ds);
+                  setDayView(ds); // show what's on this day; create is a button inside
                 }}
                 style={{
                   minHeight: 36,
@@ -6544,6 +6654,7 @@ function WellbeingTab({ profile }) {
 
 function RecentCheckIns({ profileId, onNavigate }) {
   const [checkins, setCheckins] = useState([]);
+  const [openCheckin, setOpenCheckin] = useState(null); // full detail view
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
 
@@ -6593,25 +6704,92 @@ function RecentCheckIns({ profileId, onNavigate }) {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {shown.map((c) => (
-            <div key={c.id} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14 }}>
+            <button
+              key={c.id}
+              onClick={() => setOpenCheckin(c)}
+              style={{ width: "100%", textAlign: "left", display: "block", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14, cursor: "pointer" }}
+              type="button"
+            >
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: c.notes ? 8 : 0 }}>
                 <span style={{ background: `${T.coachGreen}22`, border: `1px solid ${T.coachGreen}44`, borderRadius: 6, padding: "3px 10px", fontFamily: "JetBrains Mono", fontSize: 10, color: T.coachGreen, fontWeight: 600 }}>
-                  {c.date || (c.created_at ? new Date(c.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "")}
+                  {c.date ? String(c.date).split("-").reverse().join("/") : (c.created_at ? new Date(c.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "")}
                 </span>
-                <span style={{ fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1, color: T.text }}>{c.title || "Check-in"}</span>
+                {c.time && (
+                  <span style={{ fontFamily: "JetBrains Mono", fontSize: 10, color: T.accent }}>{c.time}</span>
+                )}
+                <span style={{ fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1, color: T.text, flex: 1 }}>{c.title || "Check-in"}</span>
+                <span style={{ color: T.muted, fontSize: 14 }}>›</span>
               </div>
               {c.notes && (
-                <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.text, lineHeight: 1.6, whiteSpace: "pre-wrap", marginBottom: c.linkUrl ? 8 : 0 }}>
-                  {c.notes}
+                <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                  {String(c.notes).length > 120 ? String(c.notes).slice(0, 120) + "…" : c.notes}
                 </div>
               )}
               {c.linkUrl && (
-                <a href={c.linkUrl} target="_blank" rel="noopener noreferrer" style={{ fontFamily: "DM Sans", fontSize: 11, color: T.accent, textDecoration: "none" }}>
-                  🔗 View link
-                </a>
+                <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.coachGreen, marginTop: 6 }}>📹 Video link</div>
               )}
-            </div>
+            </button>
           ))}
+        </div>
+      )}
+
+      {/* Full check-in detail */}
+      {openCheckin && (
+        <div
+          onClick={() => setOpenCheckin(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1300, padding: 18 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: "100%", maxWidth: 460, maxHeight: "82vh", overflowY: "auto", background: T.card, border: `1px solid ${T.border}`, borderRadius: 18, padding: 20 }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 6 }}>
+              <span style={{ fontFamily: "Bebas Neue", fontSize: 12, letterSpacing: 2, color: T.coachGreen }}>
+                📋 COACH CHECK-IN
+              </span>
+              <button onClick={() => setOpenCheckin(null)} style={{ background: "none", border: "none", color: T.muted, fontSize: 22, cursor: "pointer", lineHeight: 1 }} type="button">×</button>
+            </div>
+
+            <div style={{ fontFamily: "Bebas Neue", fontSize: 22, letterSpacing: 1, color: T.text, marginBottom: 6 }}>
+              {openCheckin.title || "Check-in"}
+            </div>
+
+            <div style={{ fontFamily: "JetBrains Mono", fontSize: 12, color: T.accent, marginBottom: 14 }}>
+              {openCheckin.date
+                ? new Date(openCheckin.date + "T00:00:00").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
+                : ""}
+              {openCheckin.time ? ` · ${openCheckin.time}` : ""}
+            </div>
+
+            {openCheckin.notes ? (
+              <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14, fontFamily: "DM Sans", fontSize: 13, color: T.text, lineHeight: 1.7, whiteSpace: "pre-wrap", marginBottom: 14 }}>
+                {openCheckin.notes}
+              </div>
+            ) : (
+              <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, marginBottom: 14 }}>
+                No notes on this check-in.
+              </div>
+            )}
+
+            {openCheckin.linkUrl && (
+              <a
+                href={openCheckin.linkUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: "block", textAlign: "center", background: T.coachGreen, color: "#06210f", padding: "13px", borderRadius: 12, fontFamily: "Bebas Neue", fontSize: 15, letterSpacing: 1.5, textDecoration: "none", marginBottom: 10 }}
+              >
+                📹 JOIN VIDEO CALL
+              </a>
+            )}
+
+            <button
+              onClick={() => { setOpenCheckin(null); onNavigate?.("messages"); }}
+              style={{ width: "100%", padding: "12px", background: "none", border: `1px solid ${T.border}`, borderRadius: 12, color: T.text, fontFamily: "DM Sans", fontSize: 13, cursor: "pointer" }}
+              type="button"
+            >
+              💬 Message your coach about this
+            </button>
+          </div>
         </div>
       )}
     </div>
