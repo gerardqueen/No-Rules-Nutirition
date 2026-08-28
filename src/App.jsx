@@ -3169,6 +3169,17 @@ function BarcodeCameraScanner({ onDetected, onClose }) {
   const [error, setError] = useState("");
   const [isNative, setIsNative] = useState(false);
   const [diag, setDiag] = useState(""); // temporary on-screen diagnostic
+  const [stuck, setStuck] = useState(false); // watchdog: overlay outlived its scan
+
+  // Safety net: if the native scanner has handed back control but this overlay
+  // is somehow still mounted, surface a way out instead of a blank screen.
+  useEffect(() => {
+    if (!isNative) return;
+    const t = setTimeout(() => {
+      if (!detectedRef.current) setStuck(true);
+    }, 12000);
+    return () => clearTimeout(t);
+  }, [isNative]);
 
   // ── NATIVE PATH (Capacitor app): use ML Kit's native scanner ────────────────
   // On a real device we use @capacitor-mlkit/barcode-scanning, which is
@@ -3228,30 +3239,41 @@ function BarcodeCameraScanner({ onDetected, onClose }) {
 
         // Open the native full-screen scanner UI and wait for a result.
         const { barcodes } = await BarcodeScanner.scan();
-        if (cancelled) return;
 
+        // NOTE: deliberately NOT gated on `cancelled` here. The native scanner
+        // has already returned a real result, and if this effect instance was
+        // superseded by a re-render, bailing out would leave the overlay
+        // mounted over an empty view with no way forward but Cancel.
+        // detectedRef guards against handling the same scan twice.
         const raw = barcodes && barcodes.length ? barcodes[0].rawValue : "";
         const clean = String(raw || "").replace(/\D/g, "");
+        if (detectedRef.current) return;
         if (clean.length >= 8) {
           detectedRef.current = true;
           onDetected(clean);
         } else {
           // User closed the native scanner without scanning, or scanned a
           // non-product code — just close back to the picker.
+          detectedRef.current = true;
           onClose();
         }
       } catch (e) {
-        if (cancelled) return;
         const msg = (e && e.message) || String(e);
+        if (detectedRef.current) return;
         if (/cancel/i.test(msg)) {
+          detectedRef.current = true;
           onClose(); // user backed out of the native scanner
-        } else {
+        } else if (!cancelled) {
           setError("Could not start the scanner. Please try again.");
           setStatus("error");
+        } else {
+          // Superseded instance that errored — close rather than hang.
+          onClose();
         }
       }
     })();
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Load html5-qrcode from CDN if not already loaded
@@ -3429,6 +3451,19 @@ function BarcodeCameraScanner({ onDetected, onClose }) {
               justifyContent: "center", color: T.muted, fontFamily: "DM Sans", fontSize: 13,
             }}>Starting camera…</div>
           )}
+          {stuck && (
+            <button
+              onClick={() => { detectedRef.current = true; onClose(); }}
+              style={{
+                width: "100%", padding: "14px", marginBottom: 10,
+                background: T.accent, color: T.bg, border: "none", borderRadius: 12,
+                fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 2, cursor: "pointer",
+              }}
+              type="button"
+            >
+              DONE
+            </button>
+          )}
           {status === "error" && (
             <div style={{
               position: "absolute", inset: 0, display: "flex", flexDirection: "column",
@@ -3442,7 +3477,11 @@ function BarcodeCameraScanner({ onDetected, onClose }) {
         </div>
         <div style={{ padding: "12px 18px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
           <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, flex: 1 }}>
-            {status === "scanning" ? "Centre the barcode in the frame" : status === "loading" ? "" : ""}
+            {stuck
+              ? "Scan finished — tap Done to see the result."
+              : status === "scanning"
+                ? "Centre the barcode in the frame"
+                : ""}
           </div>
           <button
             onClick={onClose}
