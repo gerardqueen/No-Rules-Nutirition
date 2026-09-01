@@ -7150,8 +7150,11 @@ function Dashboard({
           {/* Macro overview cards */}
           <div className="nrn-macro-grid">
             {macroCards.map((m) => {
+              // TODAY only — the ring, the numbers and the bar all reflect the
+              // current day against the daily goal (weekly totals live in their
+              // own section further down the dashboard).
               const todayPct = Math.min((m.today / m.goal) * 100, 100);
-              const weekPct = Math.min((m.week / m.weekGoal) * 100, 100);
+              const leftVal = m.goal - m.today;
               const r = 32;
               const circ = 2 * Math.PI * r;
               return (
@@ -7162,147 +7165,77 @@ function Dashboard({
                     border: `1px solid ${T.border}`,
                     borderRadius: 16,
                     padding: 20,
-                    display: "flex",
-                    gap: 16,
-                    alignItems: "center",
                   }}
                 >
-                  {/* Ring */}
-                  <div style={{ position: "relative", flexShrink: 0 }}>
-                    <svg
-                      width={80}
-                      height={80}
-                      style={{ transform: "rotate(-90deg)" }}
-                    >
-                      <circle
-                        cx={40}
-                        cy={40}
-                        r={r}
-                        fill="none"
-                        stroke={T.border}
-                        strokeWidth={7}
-                      />
-                      <circle
-                        cx={40}
-                        cy={40}
-                        r={r}
-                        fill="none"
-                        stroke={m.color}
-                        strokeWidth={7}
-                        strokeDasharray={`${(todayPct / 100) * circ} ${circ}`}
-                        strokeLinecap="round"
-                        style={{ transition: "stroke-dasharray 0.8s ease" }}
-                      />
-                    </svg>
-                    <div
-                      style={{
-                        position: "absolute",
-                        inset: 0,
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontFamily: "JetBrains Mono",
-                          fontSize: 13,
-                          color: m.color,
-                          fontWeight: 600,
-                          lineHeight: 1,
-                        }}
-                      >
-                        {Math.round(todayPct)}%
-                      </span>
-                    </div>
+                  {/* Header: macro name + explicit TODAY framing */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
+                    <span style={{ fontFamily: "Bebas Neue", fontSize: 15, letterSpacing: 2, color: T.text }}>
+                      {m.label}
+                    </span>
+                    <span style={{ fontFamily: "DM Sans", fontSize: 9, letterSpacing: 1, color: T.muted }}>
+                      TODAY
+                    </span>
                   </div>
 
-                  {/* Stats */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontFamily: "Bebas Neue",
-                        fontSize: 13,
-                        letterSpacing: 2,
-                        color: T.muted,
-                        marginBottom: 6,
-                      }}
-                    >
-                      {m.label}
-                    </div>
-                    <div
-                      style={{
-                        fontFamily: "Bebas Neue",
-                        fontSize: 30,
-                        color: m.color,
-                        lineHeight: 1,
-                      }}
-                    >
-                      {m.today}
-                      <span style={{ fontSize: 14, color: T.muted }}>
-                        {" "}
-                        {m.unit}
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        fontFamily: "DM Sans",
-                        fontSize: 10,
-                        color: T.muted,
-                        marginTop: 3,
-                      }}
-                    >
-                      Goal: {m.goal}
-                      {m.unit} ·{" "}
-                      {m.goal - m.today > 0
-                        ? `${m.goal - m.today}${m.unit} left`
-                        : "✓ Hit!"}
-                    </div>
-                    {/* Week progress bar */}
-                    <div style={{ marginTop: 8 }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          marginBottom: 3,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontFamily: "DM Sans",
-                            fontSize: 9,
-                            color: T.muted,
-                          }}
-                        >
-                          THIS WEEK
-                        </span>
-                        <span
-                          style={{
-                            fontFamily: "JetBrains Mono",
-                            fontSize: 9,
-                            color: T.muted,
-                          }}
-                        >
-                          {Math.round(weekPct)}%
-                        </span>
+                  <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+                    {/* GOAL / LEFT — large, to the left of the amount used */}
+                    <div style={{ flex: 1, minWidth: 0, display: "flex", gap: 18 }}>
+                      <div>
+                        <div style={{ fontFamily: "DM Sans", fontSize: 9, letterSpacing: 1, color: T.muted, marginBottom: 2 }}>
+                          GOAL
+                        </div>
+                        <div style={{ fontFamily: "Bebas Neue", fontSize: 26, color: T.text, lineHeight: 1 }}>
+                          {m.goal}
+                          <span style={{ fontSize: 12, color: T.muted }}> {m.unit}</span>
+                        </div>
                       </div>
-                      <div
-                        style={{
-                          height: 3,
-                          background: T.border,
-                          borderRadius: 99,
-                        }}
-                      >
-                        <div
-                          style={{
-                            height: "100%",
-                            width: `${weekPct}%`,
-                            background: `${m.color}88`,
-                            borderRadius: 99,
-                            transition: "width 0.5s",
-                          }}
+                      <div>
+                        <div style={{ fontFamily: "DM Sans", fontSize: 9, letterSpacing: 1, color: T.muted, marginBottom: 2 }}>
+                          {leftVal > 0 ? "LEFT" : "OVER"}
+                        </div>
+                        <div style={{
+                          fontFamily: "Bebas Neue", fontSize: 26, lineHeight: 1,
+                          color: leftVal > 0 ? m.color : T.danger,
+                        }}>
+                          {leftVal > 0 ? leftVal : Math.abs(leftVal)}
+                          <span style={{ fontSize: 12, color: T.muted }}> {m.unit}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Amount used so far + ring */}
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div style={{ fontFamily: "DM Sans", fontSize: 9, letterSpacing: 1, color: T.muted, marginBottom: 2 }}>
+                        USED
+                      </div>
+                      <div style={{ fontFamily: "Bebas Neue", fontSize: 30, color: m.color, lineHeight: 1 }}>
+                        {m.today}
+                        <span style={{ fontSize: 13, color: T.muted }}> {m.unit}</span>
+                      </div>
+                    </div>
+
+                    <div style={{ position: "relative", flexShrink: 0 }}>
+                      <svg width={80} height={80} style={{ transform: "rotate(-90deg)" }}>
+                        <circle cx={40} cy={40} r={r} fill="none" stroke={T.border} strokeWidth={7} />
+                        <circle
+                          cx={40}
+                          cy={40}
+                          r={r}
+                          fill="none"
+                          stroke={m.color}
+                          strokeWidth={7}
+                          strokeDasharray={`${(todayPct / 100) * circ} ${circ}`}
+                          strokeLinecap="round"
+                          style={{ transition: "stroke-dasharray 0.8s ease" }}
                         />
+                      </svg>
+                      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                        <span style={{ fontFamily: "JetBrains Mono", fontSize: 14, color: m.color, fontWeight: 600, lineHeight: 1 }}>
+                          {Math.round(todayPct)}%
+                        </span>
+                        <span style={{ fontFamily: "DM Sans", fontSize: 7, color: T.muted, marginTop: 2 }}>
+                          OF DAY
+                        </span>
                       </div>
                     </div>
                   </div>
