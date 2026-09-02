@@ -3684,17 +3684,17 @@ function MiniCalendar({ events, setEvents, profileId }) {
         <div
           onClick={() => setDayView(null)}
           style={{
-            position: "fixed", inset: 0, background: "rgba(0,0,0,.6)",
-            display: "flex", alignItems: "flex-end", justifyContent: "center",
-            zIndex: 1200, padding: 0,
+            position: "fixed", inset: 0, background: "rgba(0,0,0,.65)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 1200, padding: 18,
           }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              width: "100%", maxWidth: 520, maxHeight: "80vh", overflowY: "auto",
-              background: T.card, borderTopLeftRadius: 20, borderTopRightRadius: 20,
-              border: `1px solid ${T.border}`, padding: 18,
+              width: "100%", maxWidth: 460, maxHeight: "82vh", overflowY: "auto",
+              background: T.card, borderRadius: 18,
+              border: `1px solid ${T.border}`, padding: 20,
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
@@ -8911,11 +8911,13 @@ function WeeklyPlanner({
             position: "fixed",
             inset: 0,
             background: "#000000dd",
-            zIndex: 100,
+            zIndex: 1100,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             padding: 16,
+            paddingTop: "calc(env(safe-area-inset-top, 0px) + 16px)",
+            paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)",
           }}
           onClick={() => resetPicker()}
         >
@@ -8971,13 +8973,21 @@ function WeeklyPlanner({
                 </div>
                 <button
                   onClick={() => resetPicker()}
+                  aria-label="Close"
                   style={{
-                    background: "none",
-                    border: "none",
-                    color: T.muted,
-                    fontSize: 20,
+                    background: T.card,
+                    border: `1px solid ${T.border}`,
+                    borderRadius: 10,
+                    color: T.text,
+                    fontSize: 18,
+                    lineHeight: 1,
                     cursor: "pointer",
-                    padding: 4,
+                    width: 40,
+                    height: 40,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
                   }}
                 >
                   ✕
@@ -10922,80 +10932,6 @@ function WeeklyPlanner({
                     );
                   })()}
 
-                {/* Demo barcodes */}
-                {!barcodeResult && (
-                  <div>
-                    <div
-                      style={{
-                        fontFamily: "DM Sans",
-                        fontSize: 10,
-                        color: T.muted,
-                        letterSpacing: 1,
-                        textTransform: "uppercase",
-                        marginBottom: 10,
-                      }}
-                    >
-                      Demo barcodes to try:
-                    </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 6,
-                      }}
-                    >
-                      {Object.entries(BARCODE_DB)
-                        .slice(0, 6)
-                        .map(([code, product]) => (
-                          <button
-                            key={code}
-                            onClick={() => {
-                              setBarcodeInput(code);
-                              lookupBarcode(code);
-                            }}
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              alignItems: "center",
-                              background: T.card,
-                              border: `1px solid ${T.border}`,
-                              borderRadius: 10,
-                              padding: "9px 14px",
-                              cursor: "pointer",
-                              transition: "all 0.15s",
-                              textAlign: "left",
-                            }}
-                            onMouseEnter={(e) =>
-                              (e.currentTarget.style.borderColor =
-                                T.accent + "66")
-                            }
-                            onMouseLeave={(e) =>
-                              (e.currentTarget.style.borderColor = T.border)
-                            }
-                          >
-                            <span
-                              style={{
-                                fontFamily: "DM Sans",
-                                fontSize: 12,
-                                color: T.text,
-                              }}
-                            >
-                              {product.n}
-                            </span>
-                            <span
-                              style={{
-                                fontFamily: "JetBrains Mono",
-                                fontSize: 9,
-                                color: T.muted,
-                              }}
-                            >
-                              {code}
-                            </span>
-                          </button>
-                        ))}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </div>
