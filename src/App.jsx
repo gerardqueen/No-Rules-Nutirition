@@ -8805,12 +8805,16 @@ function WeeklyPlanner({
             position: "fixed",
             inset: 0,
             background: "#000000ee",
-            zIndex: 200,
+            // Must exceed the food picker's z-index (1100) or the camera opens
+            // behind it and appears not to launch at all.
+            zIndex: 1500,
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
             padding: 16,
+            paddingTop: "calc(env(safe-area-inset-top, 0px) + 16px)",
+            paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)",
           }}
         >
           <div
