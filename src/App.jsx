@@ -6524,6 +6524,150 @@ function HealthCard({ profileId }) {
   );
 }
 
+/* ── Body measurements (waist, hips, chest…) ─────────────────────────────── */
+const MEASURE_SITES = [
+  { k: "waist", label: "Waist" },
+  { k: "hips", label: "Hips" },
+  { k: "chest", label: "Chest" },
+  { k: "thigh", label: "Thigh" },
+  { k: "arm", label: "Arm" },
+  { k: "neck", label: "Neck" },
+];
+
+function MeasurementsTracker({ profileId }) {
+  const [rows, setRows] = useState([]);
+  const [draft, setDraft] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const todayISO = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; })();
+  const [date, setDate] = useState(todayISO);
+
+  useEffect(() => {
+    if (!profileId) return;
+    (async () => {
+      try {
+        const r = await apiFetch(`/measurements/${profileId}`);
+        setRows(Array.isArray(r) ? r : []);
+      } catch {}
+    })();
+  }, [profileId]);
+
+  // Latest value per site, plus change vs the previous entry for that site.
+  const summary = MEASURE_SITES.map((s) => {
+    const mine = rows.filter((r) => r.site === s.k).sort((a, b) => a.date.localeCompare(b.date));
+    const latest = mine[mine.length - 1];
+    const prev = mine[mine.length - 2];
+    return {
+      ...s,
+      latest: latest ? Number(latest.cm) : null,
+      date: latest?.date || null,
+      change: latest && prev ? Math.round((Number(latest.cm) - Number(prev.cm)) * 10) / 10 : null,
+    };
+  });
+
+  const save = async () => {
+    const entries = {};
+    Object.entries(draft).forEach(([k, v]) => {
+      const n = parseFloat(v);
+      if (Number.isFinite(n) && n > 0) entries[k] = n;
+    });
+    if (Object.keys(entries).length === 0) { setMsg("Enter at least one measurement."); return; }
+    setSaving(true); setMsg("");
+    try {
+      const r = await apiFetch(`/measurements/${profileId}`, {
+        method: "POST",
+        body: JSON.stringify({ date, entries }),
+      });
+      if (Array.isArray(r?.measurements)) setRows(r.measurements);
+      setDraft({});
+      setMsg(`Saved ${Object.keys(entries).length} measurement(s).`);
+      setTimeout(() => setMsg(""), 2500);
+    } catch (e) { setMsg(e.message || "Could not save"); }
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer" }}
+        type="button"
+      >
+        <span style={{ fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 2, color: T.text }}>📏 MEASUREMENTS</span>
+        <span style={{ color: T.muted, fontSize: 12 }}>{open ? "▲" : "▼"}</span>
+      </button>
+
+      {/* Latest values — always visible so progress is glanceable */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 12 }}>
+        {summary.map((s) => (
+          <div key={s.k} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 6px", textAlign: "center" }}>
+            <div style={{ fontFamily: "DM Sans", fontSize: 8, letterSpacing: 0.5, color: T.muted }}>{s.label.toUpperCase()}</div>
+            <div style={{ fontFamily: "Bebas Neue", fontSize: 19, color: s.latest != null ? T.accent : T.border, lineHeight: 1.2 }}>
+              {s.latest != null ? `${s.latest}` : "—"}
+              {s.latest != null && <span style={{ fontSize: 10, color: T.muted }}> cm</span>}
+            </div>
+            {s.change != null && s.change !== 0 && (
+              <div style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: s.change < 0 ? "#22c55e" : "#f59e0b" }}>
+                {s.change > 0 ? "+" : ""}{s.change}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {open && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, marginBottom: 6 }}>
+            DATE
+          </div>
+          <input
+            type="date"
+            value={date}
+            max={todayISO}
+            onChange={(e) => setDate(e.target.value)}
+            style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 12px", color: T.text, fontFamily: "DM Sans", fontSize: 13, marginBottom: 12 }}
+          />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
+            {MEASURE_SITES.map((s) => (
+              <div key={s.k}>
+                <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, marginBottom: 4 }}>{s.label} (cm)</div>
+                <input
+                  type="number"
+                  step="0.1"
+                  inputMode="decimal"
+                  value={draft[s.k] ?? ""}
+                  onChange={(e) => setDraft((p) => ({ ...p, [s.k]: e.target.value }))}
+                  placeholder="—"
+                  style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 12px", color: T.text, fontFamily: "JetBrains Mono", fontSize: 14, textAlign: "center" }}
+                />
+              </div>
+            ))}
+          </div>
+          <button
+            onClick={save}
+            disabled={saving}
+            style={{ width: "100%", marginTop: 12, padding: "12px", background: T.accent, color: T.bg, border: "none", borderRadius: 10, fontFamily: "Bebas Neue", fontSize: 15, letterSpacing: 1.5, cursor: "pointer", opacity: saving ? 0.6 : 1 }}
+            type="button"
+          >
+            {saving ? "SAVING…" : "SAVE MEASUREMENTS"}
+          </button>
+          {msg && (
+            <div style={{ fontFamily: "DM Sans", fontSize: 11, color: msg.startsWith("Saved") ? "#22c55e" : T.danger, marginTop: 8, textAlign: "center" }}>
+              {msg}
+            </div>
+          )}
+          <div style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, marginTop: 8, lineHeight: 1.5 }}>
+            Leave any blank — only the ones you fill in are saved. Measure at the same
+            point and time of day for consistency.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Wellbeing tab: coach-set habits (RAG daily) + weight + mood ─────────── */
 function WellbeingTab({ profile }) {
   const [habits, setHabits] = useState([]);
@@ -6647,6 +6791,7 @@ function WellbeingTab({ profile }) {
       {/* Weight + Mood (moved here from the dashboard) */}
       <WeightTracker onWeightSaved={() => {}} profileId={profile?.id} />
       <div style={{ height: 16 }} />
+      <MeasurementsTracker profileId={profile?.id} />
       <MoodTracker profileId={profile?.id} />
     </div>
   );
@@ -7566,6 +7711,8 @@ function WeeklyPlanner({
   const [savedMeals, setSavedMeals] = useState([]); // localStorage-backed quick-add meals
   const [recentFoods, setRecentFoods] = useState([]); // localStorage-backed recent items
   const [showCopyMeal, setShowCopyMeal] = useState(false); // copy-from-another-day panel
+  const [justAdded, setJustAdded] = useState(null); // confirmation banner in the picker
+  const pickerScrollRef = useRef(null); // so selecting a food scrolls its card into view
 
   // ── Full food history (MFP-style): every previous day's foods, from the
   // server, so Monday isn't a blank slate. Used for (a) copying meals from any
@@ -8262,6 +8409,13 @@ function WeeklyPlanner({
 
   const selectFoodItem = (item) => {
     setSelectedFoodItem(item);
+    // Bring the portion card into view immediately — otherwise, after scrolling
+    // through results, the card appears above the fold and looks like nothing
+    // happened.
+    if (pickerScrollRef.current) {
+      try { pickerScrollRef.current.scrollTo({ top: 0, behavior: "smooth" }); }
+      catch { pickerScrollRef.current.scrollTop = 0; }
+    }
     // Default to the product's OWN serving when it has one (e.g. "1 slice",
     // "1 can") — much more useful than a blanket 100g. Falls back to the base
     // unit for products with no serving information.
@@ -8310,6 +8464,64 @@ function WeeklyPlanner({
     persistRecentFoods(next);
   };
 
+  // ── Food pairings ────────────────────────────────────────────────────────
+  // Learns which foods you tend to log in the same meal (e.g. mince + kidney
+  // beans) and offers the partner as a one-tap suggestion. Stored per athlete.
+  const PAIRS_KEY = `nrn_pairs_${athleteKey}`;
+  const [pairCounts, setPairCounts] = useState({}); // "a||b" -> count
+  useEffect(() => {
+    try { setPairCounts(JSON.parse(localStorage.getItem(PAIRS_KEY) || "{}")); } catch { setPairCounts({}); }
+  }, [PAIRS_KEY]);
+
+  const persistPairs = (next) => {
+    setPairCounts(next);
+    try { localStorage.setItem(PAIRS_KEY, JSON.stringify(next)); } catch {}
+  };
+
+  // Strip the portion suffix so "Mince (175g)" and "Mince (200g)" pair alike.
+  const pairKeyOf = (name) => String(name || "").replace(/\s*\([^)]*\)\s*$/, "").trim().toLowerCase();
+
+  // When a food is added, record it against everything already in that meal.
+  const rememberPairing = (food) => {
+    const nameKey = pairKeyOf(food?.name);
+    if (!nameKey) return;
+    const existing = ((plan?.[selectedDay]?.[selectedMeal]) || []).map((f) => pairKeyOf(f.name)).filter((n) => n && n !== nameKey);
+    if (existing.length === 0) return;
+    const next = { ...pairCounts };
+    existing.forEach((other) => {
+      const k = [nameKey, other].sort().join("||");
+      next[k] = (next[k] || 0) + 1;
+    });
+    persistPairs(next);
+  };
+
+  // Suggestions for what's currently in the meal: partners seen together 2+ times.
+  const pairingSuggestions = (() => {
+    const inMeal = ((plan?.[selectedDay]?.[selectedMeal]) || []).map((f) => pairKeyOf(f.name)).filter(Boolean);
+    if (inMeal.length === 0) return [];
+    const scores = {};
+    Object.entries(pairCounts).forEach(([k, count]) => {
+      if (count < 2) return; // only suggest genuine habits
+      const [a, b] = k.split("||");
+      const partner = inMeal.includes(a) ? b : inMeal.includes(b) ? a : null;
+      if (!partner || inMeal.includes(partner)) return; // already added
+      scores[partner] = Math.max(scores[partner] || 0, count);
+    });
+    // Map partner keys back to a real food we can add, using recents/history.
+    const pool = [
+      ...recentFoods.map((f) => ({ name: f.n, item: f, from: "recent" })),
+      ...historyFoods.map((f) => ({ name: f.name, item: f, from: "history" })),
+    ];
+    return Object.entries(scores)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([key, count]) => {
+        const match = pool.find((p) => pairKeyOf(p.name) === key);
+        return match ? { key, count, ...match } : null;
+      })
+      .filter(Boolean);
+  })();
+
   // Save the CURRENT meal slot's foods as a named quick-add meal.
   const saveCurrentMeal = (name) => {
     const items = (plan?.[selectedDay]?.[selectedMeal]) || [];
@@ -8322,6 +8534,28 @@ function WeeklyPlanner({
 
   const deleteSavedMeal = (name) => {
     persistSavedMeals(savedMeals.filter((m) => m.name !== name));
+  };
+
+  // Rename a saved meal, keeping its contents.
+  const renameSavedMeal = (oldName, newName) => {
+    const clean = String(newName || "").trim().slice(0, 60);
+    if (!clean) return;
+    persistSavedMeals(
+      savedMeals.map((m) => (m.name === oldName ? { ...m, name: clean } : m))
+    );
+  };
+
+  // Replace a saved meal's contents with whatever is in the current slot —
+  // for when a regular meal changes (swapped a food, new portion, etc.).
+  const updateSavedMeal = (name) => {
+    const items = (plan?.[selectedDay]?.[selectedMeal]) || [];
+    if (items.length === 0) return false;
+    persistSavedMeals(
+      savedMeals.map((m) =>
+        m.name === name ? { ...m, items: items.map((it) => ({ ...it })) } : m
+      )
+    );
+    return true;
   };
 
   // Quick-add a whole saved meal into the current slot.
@@ -8397,6 +8631,7 @@ function WeeklyPlanner({
 
   const addFood = (food) => {
     rememberRecentFood(food);
+    rememberPairing(food);
     setPlan((prev) => {
       const next = { ...prev };
       next[selectedDay] = { ...next[selectedDay] };
@@ -8406,7 +8641,21 @@ function WeeklyPlanner({
       ];
       return next;
     });
-    resetPicker();
+    // Stay in the picker so more foods can be added without reopening it.
+    // Only the current selection and search are cleared.
+    setJustAdded(food?.name || "Food");
+    setSelectedFoodItem(null);
+    setBaseServing(null);
+    setServingQty(1);
+    setFoodSearch("");
+    setFoodSearchResults([]);
+    setOnlineResults([]);
+    setBarcodeResult(null);
+    setBarcodeInput("");
+    setBarcodeError("");
+    setShowManualBarcodeForm(false);
+    if (pickerScrollRef.current) pickerScrollRef.current.scrollTop = 0;
+    setTimeout(() => setJustAdded(null), 2600);
   };
 
   const removeFood = (day, meal, idx) => {
@@ -9079,12 +9328,68 @@ function WeeklyPlanner({
                   </div>
                 </div>
                 <div
+                  ref={pickerScrollRef}
                   style={{
                     flex: 1,
                     overflowY: "auto",
                     padding: "12px 24px 20px",
                   }}
                 >
+                  {/* "Added" confirmation + pairing suggestions, so several
+                      foods can be logged without leaving the picker. */}
+                  {justAdded && (
+                    <div style={{ background: `${T.coachGreen}18`, border: `1px solid ${T.coachGreen}55`, borderRadius: 12, padding: "10px 12px", marginBottom: 12 }}>
+                      <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.coachGreen, fontWeight: 600 }}>
+                        ✓ Added {justAdded}
+                      </div>
+                      <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, marginTop: 2 }}>
+                        Add another, or close when you're done.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Foods you usually log alongside what's already in this meal */}
+                  {foodSearch.trim().length < 2 && !selectedFoodItem && pairingSuggestions.length > 0 && (
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.accent, marginBottom: 8 }}>
+                        🔗 YOU USUALLY ADD THESE TOGETHER
+                      </div>
+                      {pairingSuggestions.map((sug, i) => {
+                        const isHistory = sug.from === "history";
+                        return (
+                          <button
+                            key={`pair-${i}`}
+                            onClick={() => {
+                              if (isHistory) addFood({ ...sug.item });
+                              else selectFoodItem(sug.item);
+                            }}
+                            style={{
+                              width: "100%",
+                              textAlign: "left",
+                              padding: "10px 12px",
+                              background: T.card,
+                              border: `1px solid ${T.accent}44`,
+                              borderRadius: 10,
+                              marginBottom: 6,
+                              cursor: "pointer",
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              gap: 8,
+                            }}
+                          >
+                            <span style={{ fontFamily: "DM Sans", fontSize: 12, color: T.text, flex: 1, minWidth: 0 }}>
+                              {sug.name}
+                            </span>
+                            <span style={{ fontFamily: "JetBrains Mono", fontSize: 9, color: T.muted, whiteSpace: "nowrap" }}>
+                              {isHistory ? "tap to add" : "tap to size"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {/* ── Quick-add zone: shown when not actively searching ── */}
                   {foodSearch.trim().length < 2 && !selectedFoodItem && (
                     <div>
@@ -9218,32 +9523,44 @@ function WeeklyPlanner({
                         </div>
                       )}
 
-                      {/* Save current slot as a meal */}
-                      {((plan?.[selectedDay]?.[selectedMeal]) || []).length > 0 && (
-                        <button
-                          onClick={() => {
-                            const name = window.prompt(
-                              "Name this meal (so you can quick-add it later):",
-                              ""
-                            );
-                            if (name && name.trim()) saveCurrentMeal(name);
-                          }}
-                          style={{
-                            width: "100%",
-                            padding: "10px 12px",
-                            background: T.accent + "15",
-                            border: `1px solid ${T.accent}`,
-                            borderRadius: 10,
-                            color: T.accent,
-                            fontFamily: "DM Sans",
-                            fontSize: 12,
-                            cursor: "pointer",
-                            marginBottom: 14,
-                          }}
-                        >
-                          💾 Save current {selectedMeal} as a quick-add meal
-                        </button>
-                      )}
+                      {/* Save current slot as a meal — always shown so the
+                          feature is discoverable; disabled until there's
+                          something in the slot to save. */}
+                      {(() => {
+                        const slotItems = (plan?.[selectedDay]?.[selectedMeal]) || [];
+                        const canSave = slotItems.length > 0;
+                        return (
+                          <button
+                            onClick={() => {
+                              if (!canSave) return;
+                              const name = window.prompt(
+                                "Name this meal (so you can quick-add it later):",
+                                ""
+                              );
+                              if (name && name.trim()) saveCurrentMeal(name);
+                            }}
+                            disabled={!canSave}
+                            style={{
+                              width: "100%",
+                              padding: "10px 12px",
+                              background: canSave ? T.accent + "15" : "none",
+                              border: `1px solid ${canSave ? T.accent : T.border}`,
+                              borderRadius: 10,
+                              color: canSave ? T.accent : T.muted,
+                              fontFamily: "DM Sans",
+                              fontSize: 12,
+                              cursor: canSave ? "pointer" : "default",
+                              marginBottom: 14,
+                              textAlign: "center",
+                              lineHeight: 1.4,
+                            }}
+                          >
+                            {canSave
+                              ? `💾 Save current ${selectedMeal} as a quick-add meal`
+                              : `💾 Save as quick-add meal — add foods to this ${selectedMeal} first`}
+                          </button>
+                        );
+                      })()}
 
                       {/* Saved meals */}
                       {savedMeals.length > 0 && (
@@ -9257,6 +9574,9 @@ function WeeklyPlanner({
                             }}
                           >
                             SAVED MEALS
+                            <span style={{ color: T.border, marginLeft: 6, fontSize: 10 }}>
+                              tap to add · ✏️ rename · ⟳ update · ✕ delete
+                            </span>
                           </div>
                           {savedMeals.map((meal) => {
                             const tot = (meal.items || []).reduce(
@@ -9301,16 +9621,60 @@ function WeeklyPlanner({
                                   </span>
                                 </button>
                                 <button
-                                  onClick={() => deleteSavedMeal(meal.name)}
-                                  title="Delete saved meal"
+                                  onClick={() => {
+                                    const nn = window.prompt("Rename this saved meal:", meal.name);
+                                    if (nn && nn.trim() && nn.trim() !== meal.name) renameSavedMeal(meal.name, nn);
+                                  }}
+                                  title="Rename saved meal"
                                   style={{
-                                    padding: "0 10px",
+                                    padding: "0 9px",
                                     background: "none",
                                     border: `1px solid ${T.border}`,
                                     borderRadius: 10,
                                     color: T.muted,
                                     cursor: "pointer",
-                                    fontSize: 14,
+                                    fontSize: 13,
+                                  }}
+                                >
+                                  ✏️
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    const slotItems = (plan?.[selectedDay]?.[selectedMeal]) || [];
+                                    if (slotItems.length === 0) {
+                                      window.alert(`Add the foods you want to this ${selectedMeal} first, then tap ⟳ to update "${meal.name}" to match.`);
+                                      return;
+                                    }
+                                    if (window.confirm(`Replace "${meal.name}" with the ${slotItems.length} item(s) currently in this ${selectedMeal}?`)) {
+                                      updateSavedMeal(meal.name);
+                                    }
+                                  }}
+                                  title="Update this saved meal to match the current meal"
+                                  style={{
+                                    padding: "0 9px",
+                                    background: "none",
+                                    border: `1px solid ${T.border}`,
+                                    borderRadius: 10,
+                                    color: T.muted,
+                                    cursor: "pointer",
+                                    fontSize: 13,
+                                  }}
+                                >
+                                  ⟳
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (window.confirm(`Delete the saved meal "${meal.name}"?`)) deleteSavedMeal(meal.name);
+                                  }}
+                                  title="Delete saved meal"
+                                  style={{
+                                    padding: "0 9px",
+                                    background: "none",
+                                    border: `1px solid ${T.border}`,
+                                    borderRadius: 10,
+                                    color: T.muted,
+                                    cursor: "pointer",
+                                    fontSize: 13,
                                   }}
                                 >
                                   ✕
