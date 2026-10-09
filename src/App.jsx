@@ -201,6 +201,110 @@ function dateToISO(d) {
 /* FOOD_DB moved to src/foodDb.js */
 
 // Helper: get macros for a food item at a given gram weight
+/* ─────────────────────────────────────────────────────────────────────────────
+   BENCHMARKS — shared helpers (kept identical in App.jsx and CoachCMS.jsx)
+
+   Values are stored as plain numbers, except time-based tests which are stored
+   as SECONDS. So a 2k row of 7:12 is 432, and a back squat of 142.5kg is 142.5.
+
+   Percentage programming: a coach writes a token in the session body and it
+   resolves against that athlete's current best when it's displayed —
+
+       5 x 3 @ {80% Back Squat 1RM}
+    →  5 x 3 @ 80% Back Squat 1RM (115kg)
+
+   The name match is forgiving: exact first, then prefix, then substring, so
+   "{80% Back Squat}" finds "Back Squat 1RM". Percentages of a time are a
+   percentage of the time itself, which is how row intervals get prescribed —
+   {105% 2k Row} off a 7:04 best gives 7:25, i.e. 5% slower than 2k pace.
+   Loads in kg/lb round to the nearest 2.5 so the number is loadable.
+────────────────────────────────────────────────────────────────────────────── */
+const BENCH_UNITS = [
+  { key: "kg", label: "kg (weight)" },
+  { key: "lb", label: "lb (weight)" },
+  { key: "time", label: "time (m:ss)" },
+  { key: "reps", label: "reps" },
+  { key: "m", label: "metres" },
+  { key: "cm", label: "cm" },
+  { key: "watts", label: "watts" },
+];
+
+// 432 → "7:12".  Hours appear only when the result needs them.
+function fmtBenchValue(value, unit) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  if (unit === "time") {
+    const total = Math.round(n);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    return h > 0
+      ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+      : `${m}:${String(s).padStart(2, "0")}`;
+  }
+  const r = Math.round(n * 10) / 10;
+  const txt = Number.isInteger(r) ? String(r) : r.toFixed(1);
+  return unit === "reps" ? txt : `${txt}${unit}`;
+}
+
+// "7:12" → 432. Also accepts "7.12", "432", and "1:02:30".
+function parseBenchValue(input, unit) {
+  const raw = String(input ?? "").trim();
+  if (!raw) return NaN;
+  if (unit !== "time") return parseFloat(raw.replace(/[^\d.]/g, ""));
+  const parts = raw.replace(/\./g, ":").split(":").map((p) => parseInt(p, 10));
+  if (parts.some((p) => !Number.isFinite(p))) return NaN;
+  if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return parts[0] * 3600 + parts[1] * 60 + parts[2];
+}
+
+const BENCH_PCT_TOKEN = /\{\s*(\d{1,3}(?:\.\d+)?)\s*%\s*([^}]+?)\s*\}/g;
+
+// Expand every {N% Benchmark} token in a programming body.
+// `bests` is the map returned by GET /benchmarks/:athleteId.
+function resolveBenchTokens(text, bests) {
+  if (!text) return text || "";
+  const list = Object.values(bests || {});
+  return String(text).replace(BENCH_PCT_TOKEN, (_full, pctStr, nameRaw) => {
+    const pct = parseFloat(pctStr);
+    const want = nameRaw.trim().toLowerCase();
+    const hit =
+      list.find((b) => String(b.name).toLowerCase() === want) ||
+      list.find((b) => String(b.name).toLowerCase().startsWith(want)) ||
+      list.find((b) => String(b.name).toLowerCase().includes(want));
+    if (!hit || !Number.isFinite(Number(hit.best))) {
+      return `${pctStr}% ${nameRaw.trim()} (no result logged yet)`;
+    }
+    let v = Number(hit.best) * (pct / 100);
+    if (hit.unit === "kg" || hit.unit === "lb") v = Math.round(v / 2.5) * 2.5;
+    else if (hit.unit === "time") v = Math.round(v);
+    else v = Math.round(v * 10) / 10;
+    return `${pctStr}% ${hit.name} (${fmtBenchValue(v, hit.unit)})`;
+  });
+}
+
+// Does this text contain any percentage token at all?
+function hasBenchTokens(text) {
+  return !!text && /\{\s*\d{1,3}(?:\.\d+)?\s*%[^}]+\}/.test(String(text));
+}
+
+// Fetch an athlete's benchmark bests once, for resolving percentage tokens.
+// Returns {} until loaded, which resolveBenchTokens handles gracefully by
+// showing "no result logged yet" rather than a broken token.
+function useBenchmarkBests(profileId) {
+  const [bests, setBests] = useState({});
+  useEffect(() => {
+    if (!profileId) { setBests({}); return; }
+    let cancelled = false;
+    apiFetch(`/benchmarks/${profileId}`)
+      .then((d) => { if (!cancelled) setBests(d?.bests || {}); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [profileId]);
+  return bests;
+}
+
 function scaleMacros(item, grams, portionLabel) {
   const r = grams / 100;
   const u = item.u === "ml" ? "ml" : "g";
@@ -3812,6 +3916,8 @@ function BarcodeCameraScanner({ onDetected, onClose }) {
 
 // ── Mini Calendar ─────────────────────────────────────────────────────────────
 function MiniCalendar({ events, setEvents, profileId }) {
+  // Percentage-based loading resolves against this athlete's current bests.
+  const benchBests = useBenchmarkBests(profileId);
   const today = new Date();
   const todayStr = _ds(today.getFullYear(), today.getMonth(), today.getDate());
 
@@ -4053,7 +4159,7 @@ function MiniCalendar({ events, setEvents, profileId }) {
                       {sx.time && <span style={{ fontFamily: "JetBrains Mono", fontSize: 11, color: T.accent }}>{sx.time}</span>}
                     </div>
                     <div style={{ fontFamily: "JetBrains Mono", fontSize: 12, color: T.text, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
-                      {sx.body}
+                      {resolveBenchTokens(sx.body, benchBests)}
                     </div>
                   </div>
                 ))}
@@ -7008,7 +7114,11 @@ function MeasurementsTracker({ profileId, profileSex, onSexChange }) {
         method: "POST",
         body: JSON.stringify({ date, entries }),
       });
-      if (Array.isArray(r?.measurements)) setRows(r.measurements);
+      // The endpoint returns the full measurement list as a bare array. The
+      // old check looked for r.measurements, which never matched, so the
+      // summary silently kept showing stale values until a reload.
+      if (Array.isArray(r)) setRows(r);
+      else if (Array.isArray(r?.measurements)) setRows(r.measurements);
       setDraft({});
       setMsg(`Saved ${Object.keys(entries).length} measurement(s).`);
       setTimeout(() => setMsg(""), 2500);
@@ -7139,6 +7249,7 @@ function MeasurementsTracker({ profileId, profileSex, onSexChange }) {
 
 /* ── Today's programming (only for clients the coach has enabled it for) ──── */
 function ProgrammingCard({ profileId, enabled }) {
+  const benchBests = useBenchmarkBests(profileId);
   const [today, setToday] = useState(null);
   const [upcoming, setUpcoming] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -7198,7 +7309,7 @@ function ProgrammingCard({ profileId, enabled }) {
                 whiteSpace: "pre-wrap", background: T.surface, border: `1px solid ${T.border}`,
                 borderRadius: 12, padding: 14,
               }}>
-                {sx.body}
+                {resolveBenchTokens(sx.body, benchBests)}
               </div>
             </div>
           ))}
@@ -7224,7 +7335,7 @@ function ProgrammingCard({ profileId, enabled }) {
                 whiteSpace: "pre-wrap", background: T.surface, border: `1px solid ${T.border}`,
                 borderRadius: 12, padding: 12,
               }}>
-                {sx.body}
+                {resolveBenchTokens(sx.body, benchBests)}
               </div>
             </div>
           ))}
@@ -7358,7 +7469,244 @@ function WellbeingTab({ profile }) {
       <WeightTracker onWeightSaved={() => {}} profileId={profile?.id} />
       <div style={{ height: 16 }} />
       <MeasurementsTracker profileId={profile?.id} profileSex={profile?.sex || ""} />
+      <BenchmarksCard profileId={profile?.id} />
       <MoodTracker profileId={profile?.id} />
+    </div>
+  );
+}
+
+/* ── Benchmarks: PBs and tests, with progress over time ───────────────────────
+   Athletes can log their own results; the coach sees the same history. These
+   bests are what percentage-based programming resolves against, so a 1RM
+   logged here changes what "{80% Back Squat}" shows in a session.
+────────────────────────────────────────────────────────────────────────────── */
+function BenchmarksCard({ profileId }) {
+  const [types, setTypes] = useState([]);
+  const [results, setResults] = useState([]);
+  const [bests, setBests] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [sel, setSel] = useState(null);
+  const [val, setVal] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const todayISO = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const [date, setDate] = useState(todayISO);
+  const uk = (iso) => String(iso).split("-").reverse().join("/");
+
+  const load = async () => {
+    if (!profileId) { setLoading(false); return; }
+    try {
+      const d = await apiFetch(`/benchmarks/${profileId}`);
+      setTypes(Array.isArray(d?.types) ? d.types : []);
+      setResults(Array.isArray(d?.results) ? d.results : []);
+      setBests(d?.bests || {});
+    } catch {}
+    setLoading(false);
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [profileId]);
+
+  const selType = types.find((t) => t.id === sel) || null;
+
+  const save = async () => {
+    if (!selType) { setMsg("Pick a test first."); return; }
+    const parsed = parseBenchValue(val, selType.unit);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setMsg(selType.unit === "time" ? "Enter a time like 7:12." : "Enter a number.");
+      return;
+    }
+    setSaving(true); setMsg("");
+    try {
+      await apiFetch(`/benchmarks/${profileId}`, {
+        method: "POST",
+        body: JSON.stringify({ benchmarkId: sel, value: parsed, date }),
+      });
+      setVal("");
+      await load();
+      setMsg(`Logged ${fmtBenchValue(parsed, selType.unit)}.`);
+      setTimeout(() => setMsg(""), 2500);
+    } catch (e) { setMsg(e.message || "Could not save"); }
+    setSaving(false);
+  };
+
+  if (loading) return null;
+
+  const tested = Object.values(bests).sort((a, b) => a.name.localeCompare(b.name));
+
+  // A sparkline for the selected test, drawn the same way as the weight trend.
+  const hist = sel
+    ? results.filter((r) => r.benchmarkId === sel).sort((a, b) => a.date.localeCompare(b.date))
+    : [];
+  const spark = (() => {
+    if (hist.length < 2 || !selType) return null;
+    const w = 280, h = 54, pad = 4;
+    const vals = hist.map((r) => r.value);
+    const min = Math.min(...vals), max = Math.max(...vals);
+    const range = max - min || 1;
+    const pts = hist.map((r, i) => {
+      const x = pad + (i / (hist.length - 1)) * (w - pad * 2);
+      // Draw raw values; for a time-based test a downward line is an improvement.
+      const y = pad + (1 - (r.value - min) / range) * (h - pad * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    return { w, h, line: pts.join(" "), dots: pts };
+  })();
+
+  return (
+    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
+      <div
+        onClick={() => setOpen((v) => !v)}
+        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
+      >
+        <span style={{ fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 2, color: T.text }}>
+          🏅 BENCHMARKS
+        </span>
+        <span style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted }}>
+          {tested.length ? `${tested.length} tested` : "none yet"} {open ? "▲" : "▼"}
+        </span>
+      </div>
+
+      {/* Always-visible bests strip */}
+      {tested.length > 0 && (
+        <div style={{ display: "flex", gap: 8, overflowX: "auto", marginTop: 12, paddingBottom: 4 }}>
+          {tested.map((b) => (
+            <button
+              key={b.benchmarkId}
+              type="button"
+              onClick={() => { setSel(b.benchmarkId); setOpen(true); }}
+              style={{
+                minWidth: 104, flexShrink: 0, textAlign: "left",
+                background: sel === b.benchmarkId ? `${T.accent}18` : T.surface,
+                border: `1px solid ${sel === b.benchmarkId ? T.accent : T.border}`,
+                borderRadius: 12, padding: "9px 11px", cursor: "pointer",
+              }}
+            >
+              <div style={{ fontFamily: "DM Sans", fontSize: 9, color: T.muted, textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {b.name}
+              </div>
+              <div style={{ fontFamily: "Bebas Neue", fontSize: 20, color: T.text, letterSpacing: 1, lineHeight: 1.25 }}>
+                {fmtBenchValue(b.best, b.unit)}
+              </div>
+              <div style={{ fontFamily: "JetBrains Mono", fontSize: 8, color: T.muted }}>{uk(b.bestDate)}</div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {open && (
+        <div style={{ marginTop: 14 }}>
+          {/* Test picker */}
+          <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>
+            Log a result
+          </div>
+          <select
+            value={sel || ""}
+            onChange={(e) => { setSel(Number(e.target.value) || null); setVal(""); setMsg(""); }}
+            style={{
+              width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10,
+              padding: "11px 12px", color: T.text, fontFamily: "DM Sans", fontSize: 13, marginBottom: 8, outline: "none",
+            }}
+          >
+            <option value="">Choose a test…</option>
+            {Object.entries(
+              types.reduce((acc, t) => { (acc[t.category || "General"] = acc[t.category || "General"] || []).push(t); return acc; }, {})
+            ).sort().map(([cat, list]) => (
+              <optgroup key={cat} label={cat}>
+                {list.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </optgroup>
+            ))}
+          </select>
+
+          {selType && (
+            <>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <input
+                  value={val}
+                  onChange={(e) => setVal(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && save()}
+                  placeholder={selType.unit === "time" ? "7:12" : selType.unit === "reps" ? "22" : `100${selType.unit}`}
+                  inputMode={selType.unit === "time" ? "text" : "decimal"}
+                  style={{
+                    flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10,
+                    padding: "11px 12px", color: T.text, fontFamily: "JetBrains Mono", fontSize: 15, outline: "none",
+                  }}
+                />
+                <input
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  style={{
+                    background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10,
+                    padding: "11px 10px", color: T.text, fontFamily: "DM Sans", fontSize: 12, outline: "none",
+                  }}
+                />
+                <button
+                  onClick={save}
+                  disabled={saving}
+                  type="button"
+                  style={{
+                    background: T.accent, color: T.bg, border: "none", borderRadius: 10,
+                    padding: "11px 18px", fontFamily: "Bebas Neue", fontSize: 15, letterSpacing: 1.5,
+                    cursor: saving ? "default" : "pointer",
+                  }}
+                >
+                  {saving ? "…" : "LOG"}
+                </button>
+              </div>
+              <div style={{ fontFamily: "DM Sans", fontSize: 10.5, color: T.muted, lineHeight: 1.6, marginBottom: 10 }}>
+                {selType.unit === "time"
+                  ? "Enter as minutes:seconds — a faster time counts as the new best."
+                  : "A higher number counts as the new best."}
+              </div>
+            </>
+          )}
+
+          {msg && (
+            <div style={{ fontFamily: "DM Sans", fontSize: 11, color: msg.startsWith("Logged") ? "#22c55e" : T.danger, marginBottom: 10 }}>
+              {msg}
+            </div>
+          )}
+
+          {/* Progress for the selected test */}
+          {selType && hist.length > 0 && (
+            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12 }}>
+              <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>
+                {selType.name} · {hist.length} result{hist.length === 1 ? "" : "s"}
+              </div>
+              {spark && (
+                <svg viewBox={`0 0 ${spark.w} ${spark.h}`} style={{ width: "100%", height: 54, display: "block", marginBottom: 8 }}>
+                  <polyline points={spark.line} fill="none" stroke={T.accent} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+                  {spark.dots.map((pt, i) => {
+                    const [x, y] = pt.split(",");
+                    return <circle key={i} cx={x} cy={y} r={2.5} fill={T.accent} />;
+                  })}
+                </svg>
+              )}
+              {hist.slice().reverse().slice(0, 6).map((r) => {
+                const isBest = bests[String(sel)] && r.value === bests[String(sel)].best;
+                return (
+                  <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "3px 0" }}>
+                    <span style={{ fontFamily: "JetBrains Mono", fontSize: 12, color: isBest ? "#22c55e" : T.text }}>
+                      {fmtBenchValue(r.value, selType.unit)}{isBest ? "  PB" : ""}
+                    </span>
+                    <span style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted }}>{uk(r.date)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {tested.length === 0 && !selType && (
+            <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, lineHeight: 1.6 }}>
+              Log a 1RM or a row time and your coach can programme off percentages of it.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
