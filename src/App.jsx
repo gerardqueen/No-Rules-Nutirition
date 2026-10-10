@@ -8863,6 +8863,7 @@ function WeeklyPlanner({
   const [showCopyMeal, setShowCopyMeal] = useState(false); // copy-from-another-day panel
   const [justAdded, setJustAdded] = useState(null); // confirmation banner in the picker
   const pickerScrollRef = useRef(null); // so selecting a food scrolls its card into view
+  const barcodeScrollRef = useRef(null); // so a scanned product's card is visible without scrolling
 
   // ── Full food history (MFP-style): every previous day's foods, from the
   // server, so Monday isn't a blank slate. Used for (a) copying meals from any
@@ -9032,6 +9033,9 @@ function WeeklyPlanner({
   const [scannerError, setScannerError] = useState("");
   const scannerRef = useRef(null);
   const scannerInstanceRef = useRef(null);
+  // Guards against one scan being handled twice (the decoder can report the
+  // same barcode on consecutive frames before the camera has stopped).
+  const scanHandledRef = useRef(false);
   const [barcodeResult, setBarcodeResult] = useState(null);
   const [barcodeError, setBarcodeError] = useState("");
   const [showManualBarcodeForm, setShowManualBarcodeForm] = useState(false);
@@ -9222,6 +9226,7 @@ function WeeklyPlanner({
 
   const openScanner = async () => {
     setScannerError("");
+    scanHandledRef.current = false;
 
     // The native ML Kit plugin requires CocoaPods on iOS, but this project uses
     // Swift Package Manager — so we use the web-based scanner (html5-qrcode),
@@ -9239,16 +9244,30 @@ function WeeklyPlanner({
       if (!el) throw new Error("Scanner area not ready");
       const inst = new Html5Qrcode(elemId, /* verbose */ false);
       scannerInstanceRef.current = inst;
-      const onSuccess = async (decodedText) => {
+      const onSuccess = (decodedText) => {
         const clean = String(decodedText || "").replace(/\D/g, "");
-        if (clean.length < 8) return; // ignore garbage reads
-        // Stop scanner immediately to prevent multiple triggers
-        try { await inst.stop(); inst.clear(); } catch {}
+        if (clean.length < 8) return;        // ignore garbage reads
+        if (scanHandledRef.current) return;  // a frame can fire twice
+        scanHandledRef.current = true;
+
+        // Close the overlay and hand the code on FIRST, then tear the camera
+        // down in the background. The old order awaited inst.stop() before
+        // closing, so a stop() that never resolves — which some WebViews do —
+        // left the camera card sitting over the result the user was waiting
+        // for. Nothing here needs to wait for the camera to shut down.
+        const inst2 = scannerInstanceRef.current;
         scannerInstanceRef.current = null;
         setScannerOpen(false);
         setBarcodeInput(clean);
-        // Trigger lookup with the scanned code
         lookupBarcode(clean);
+
+        try {
+          if (inst2) {
+            Promise.resolve(inst2.stop())
+              .then(() => { try { inst2.clear(); } catch {} })
+              .catch(() => {});
+          }
+        } catch {}
       };
       const onError = () => { /* per-frame failures are noisy; ignore */ };
       // Wide, responsive scan box that fills most of the view width — this is
@@ -9285,14 +9304,22 @@ function WeeklyPlanner({
     }
   };
 
-  const closeScanner = async () => {
+  const closeScanner = () => {
+    // Same ordering rule as onSuccess: drop the overlay first, then shut the
+    // camera down in the background. Awaiting stop() here meant a stop() that
+    // hangs kept the overlay up even when the user tapped the X — and it would
+    // have defeated the safety net below, which closes through this function.
     const inst = scannerInstanceRef.current;
-    if (inst) {
-      try { await inst.stop(); inst.clear(); } catch {}
-    }
     scannerInstanceRef.current = null;
     setScannerOpen(false);
     setScannerError("");
+    try {
+      if (inst) {
+        Promise.resolve(inst.stop())
+          .then(() => { try { inst.clear(); } catch {} })
+          .catch(() => {});
+      }
+    } catch {}
   };
 
   // Cleanup if the component unmounts while scanner is running
@@ -9305,6 +9332,26 @@ function WeeklyPlanner({
       }
     };
   }, []);
+
+  // Belt and braces: once a product has been found the camera overlay must not
+  // still be covering it, whichever path the scan came in by. This catches any
+  // route that fails to close itself rather than leaving the user stuck.
+  useEffect(() => {
+    if (barcodeResult && scannerOpen) closeScanner();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [barcodeResult]);
+
+  // Put the found product at the top of the panel, so its serving-size chips
+  // are there to confirm without anyone having to scroll up to find them.
+  useEffect(() => {
+    if (!barcodeResult) return;
+    const el = barcodeScrollRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      try { el.scrollTo({ top: 0, behavior: "smooth" }); }
+      catch { el.scrollTop = 0; }
+    });
+  }, [barcodeResult]);
 
   const lookupBarcode = async (code) => {
     const clean = code.replace(/\D/g, "");
@@ -11777,7 +11824,14 @@ function WeeklyPlanner({
 
             {/* ── BARCODE TAB ── */}
             {pickerTab === "barcode" && (
-              <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+              <div ref={barcodeScrollRef} style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+                {/* Scanner viewfinder — decorative, and only while there's no
+                    result. Once a product is found this 180px panel plus the
+                    scan button and input pushed the result card (and its
+                    serving-size chips) below the fold, which read as the
+                    scanner card refusing to go away. */}
+                {!barcodeResult && (
+                <>
                 {/* Scanner viewfinder */}
                 <div
                   style={{
@@ -11909,6 +11963,8 @@ function WeeklyPlanner({
                     )}
                   </div>
                 </div>
+                </>
+                )}
 
                 {/* Camera scan button */}
                 <button
