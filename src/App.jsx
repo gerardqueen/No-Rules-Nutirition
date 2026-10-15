@@ -7479,10 +7479,17 @@ function ProgrammingCard({ profileId, enabled }) {
 }
 
 /* ── Wellbeing tab: coach-set habits (RAG daily) + weight + mood ─────────── */
-function WellbeingTab({ profile }) {
+function WellbeingTab({ profile, onTargetsSaved }) {
   const [habits, setHabits] = useState([]);
   const [ratings, setRatings] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Own habits. A coach's habits and the athlete's own live in the same list;
+  // each row records who added it, and only its author can remove it.
+  const [showAddHabit, setShowAddHabit] = useState(false);
+  const [newHabit, setNewHabit] = useState("");
+  const [addingHabit, setAddingHabit] = useState(false);
+  const [habitMsg, setHabitMsg] = useState("");
 
   const fmtD = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
   const todayStr = fmtD(new Date());
@@ -7525,23 +7532,138 @@ function WellbeingTab({ profile }) {
     { k: "G", label: "On track", color: "#22c55e" },
   ];
 
+  const addHabit = async () => {
+    const title = newHabit.trim();
+    if (!title || addingHabit) return;
+    setAddingHabit(true); setHabitMsg("");
+    try {
+      const made = await apiFetch(`/habits/${profile.id}`, {
+        method: "POST",
+        body: JSON.stringify({ title }),
+      });
+      setHabits((prev) => [...prev, made]);
+      setNewHabit("");
+      setShowAddHabit(false);
+    } catch (e) {
+      setHabitMsg(e.message || "Could not add that habit");
+    }
+    setAddingHabit(false);
+  };
+
+  const removeHabit = async (h) => {
+    if (!window.confirm(`Stop tracking “${h.title}”? Ratings you've already logged are kept.`)) return;
+    setHabitMsg("");
+    try {
+      await apiFetch(`/habits/${profile.id}/${h.id}`, { method: "DELETE" });
+      setHabits((prev) => prev.filter((x) => String(x.id) !== String(h.id)));
+    } catch (e) {
+      setHabitMsg(e.message || "Could not remove that habit");
+    }
+  };
+
+  // A few starters, so an empty list isn't a blank page to stare at.
+  const HABIT_SUGGESTIONS = [
+    "8 hours sleep", "2L water", "10k steps", "Hit protein target",
+    "No alcohol", "Stretch 10 mins", "Log every meal", "Outside for 30 mins",
+  ];
+  const unusedSuggestions = HABIT_SUGGESTIONS.filter(
+    (sg) => !habits.some((h) => String(h.title).toLowerCase() === sg.toLowerCase())
+  );
+
   return (
     <div>
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontFamily: "Bebas Neue", fontSize: 28, letterSpacing: 2, color: T.text }}>WELLBEING</div>
         <div style={{ fontFamily: "DM Sans", fontSize: 13, color: T.muted, marginTop: 4 }}>
-          Rate today's habits, and log your weight and mood
+          Track habits you or your coach set, and log your weight and mood
         </div>
       </div>
 
       {/* Habits */}
       <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
-        <div style={{ fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 2, color: T.text, marginBottom: 10 }}>TODAY'S HABITS</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 10 }}>
+          <span style={{ fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 2, color: T.text }}>TODAY'S HABITS</span>
+          <button
+            type="button"
+            onClick={() => { setShowAddHabit((v) => !v); setHabitMsg(""); }}
+            style={{
+              background: showAddHabit ? T.surface : "none",
+              border: `1px solid ${T.accent}55`, color: T.accent,
+              borderRadius: 8, padding: "5px 11px",
+              fontFamily: "DM Sans", fontSize: 11, fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            {showAddHabit ? "Cancel" : "+ Add habit"}
+          </button>
+        </div>
+
+        {/* Add your own */}
+        {showAddHabit && (
+          <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, marginBottom: 12 }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: unusedSuggestions.length ? 10 : 0 }}>
+              <input
+                value={newHabit}
+                onChange={(e) => { setNewHabit(e.target.value.slice(0, 140)); setHabitMsg(""); }}
+                onKeyDown={(e) => e.key === "Enter" && addHabit()}
+                placeholder="e.g. 8 hours sleep"
+                autoFocus
+                style={{
+                  flex: 1, background: T.bg, border: `1px solid ${T.border}`, borderRadius: 10,
+                  padding: "10px 12px", color: T.text, fontFamily: "DM Sans", fontSize: 13, outline: "none",
+                }}
+              />
+              <button
+                type="button"
+                onClick={addHabit}
+                disabled={addingHabit || !newHabit.trim()}
+                style={{
+                  background: newHabit.trim() ? T.accent : T.border,
+                  color: newHabit.trim() ? T.bg : T.muted,
+                  border: "none", borderRadius: 10, padding: "10px 16px",
+                  fontFamily: "Bebas Neue", fontSize: 14, letterSpacing: 1.2,
+                  cursor: newHabit.trim() && !addingHabit ? "pointer" : "default",
+                }}
+              >
+                {addingHabit ? "…" : "ADD"}
+              </button>
+            </div>
+            {unusedSuggestions.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {unusedSuggestions.slice(0, 6).map((sg) => (
+                  <button
+                    key={sg}
+                    type="button"
+                    onClick={() => setNewHabit(sg)}
+                    style={{
+                      background: T.bg, border: `1px solid ${T.border}`, color: T.muted,
+                      borderRadius: 7, padding: "5px 9px",
+                      fontFamily: "DM Sans", fontSize: 10.5, cursor: "pointer",
+                    }}
+                  >
+                    {sg}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {habitMsg && (
+          <div style={{
+            background: `${T.danger}18`, border: `1px solid ${T.danger}44`, borderRadius: 10,
+            padding: "9px 12px", marginBottom: 12, fontFamily: "DM Sans", fontSize: 11.5, color: T.danger,
+          }}>
+            {habitMsg}
+          </div>
+        )}
+
         {loading ? (
           <div style={{ color: T.muted, fontSize: 12 }}>Loading…</div>
         ) : habits.length === 0 ? (
-          <div style={{ color: T.muted, fontSize: 12, fontFamily: "DM Sans" }}>
-            No habits set yet — your coach will add them here.
+          <div style={{ color: T.muted, fontSize: 12, fontFamily: "DM Sans", lineHeight: 1.7 }}>
+            {profile?.coachId
+              ? "No habits set yet — your coach will add them here, and you can add your own with “+ Add habit”."
+              : "Nothing tracked yet. Add a habit above and rate it each day — red, amber or green."}
           </div>
         ) : (
           habits.map((h) => {
@@ -7549,8 +7671,17 @@ function WellbeingTab({ profile }) {
             return (
               <div key={h.id} style={{ padding: "10px 0", borderBottom: `1px solid ${T.border}30` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                  <span style={{ fontFamily: "DM Sans", fontSize: 14, color: T.text, flex: 1, minWidth: 140 }}>{h.title}</span>
-                  <div style={{ display: "flex", gap: 6 }}>
+                  <span style={{ fontFamily: "DM Sans", fontSize: 14, color: T.text, flex: 1, minWidth: 140 }}>
+                    {h.title}
+                    {h.selfAdded === false && (
+                      <span style={{
+                        marginLeft: 7, fontFamily: "DM Sans", fontSize: 8.5, color: T.coachGreen,
+                        border: `1px solid ${T.coachGreen}55`, borderRadius: 5,
+                        padding: "1px 5px", letterSpacing: 0.5, verticalAlign: "middle",
+                      }}>COACH</span>
+                    )}
+                  </span>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                     {RAG.map((r) => (
                       <button
                         key={r.k}
@@ -7570,6 +7701,19 @@ function WellbeingTab({ profile }) {
                         {r.label}
                       </button>
                     ))}
+                    {h.canDelete && (
+                      <button
+                        type="button"
+                        onClick={() => removeHabit(h)}
+                        title="Stop tracking this habit"
+                        style={{
+                          background: "none", border: "none", color: T.muted,
+                          fontSize: 16, lineHeight: 1, cursor: "pointer", padding: "0 2px",
+                        }}
+                      >
+                        ×
+                      </button>
+                    )}
                   </div>
                 </div>
                 {/* last 7 days mini history */}
@@ -7595,6 +7739,9 @@ function WellbeingTab({ profile }) {
         )}
       </div>
 
+      {/* Calories and macros — self-set while there's no coach */}
+      <MyTargetsCard profile={profile} onSaved={onTargetsSaved} />
+
       {/* Apple Health (steps, sleep, activity) */}
       <HealthCard profileId={profile?.id} />
 
@@ -7613,6 +7760,378 @@ function WellbeingTab({ profile }) {
    bests are what percentage-based programming resolves against, so a 1RM
    logged here changes what "{80% Back Squat}" shows in a session.
 ────────────────────────────────────────────────────────────────────────────── */
+/* ── My Targets: calories and macros a solo user sets for themselves ─────────
+   Anyone can open an account without a coach, and those accounts had no way to
+   get targets at all — every macro readout sat at zero. This card writes the
+   same weekly macro_plans rows a coach would, so the diary, dashboard rings and
+   food log all work identically.
+
+   Once a coach links the account the coach owns the plan: the server refuses a
+   self-write from a coached athlete, and this card turns read-only to match.
+────────────────────────────────────────────────────────────────────────────── */
+const TARGET_DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
+
+// Calories implied by the macros, using the standard 4/4/9 energy values.
+function caloriesFromMacros(p, c, f) {
+  return Math.round(Number(p || 0) * 4 + Number(c || 0) * 4 + Number(f || 0) * 9);
+}
+
+function MyTargetsCard({ profile, onSaved }) {
+  const profileId = profile?.id;
+  const hasCoach = !!profile?.coachId;
+
+  const [open, setOpen] = useState(false);
+  const [perDay, setPerDay] = useState(false);     // one set for the week, or seven
+  const [rows, setRows] = useState({});            // { MON: {calories, protein, carbs, fat} }
+  const [day, setDay] = useState(() => {
+    const js = new Date().getDay();
+    return TARGET_DAYS[js === 0 ? 6 : js - 1];
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+
+  const blank = { calories: "", protein: "", carbs: "", fat: "" };
+
+  useEffect(() => {
+    if (!profileId) { setLoading(false); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await apiFetch(`/macro-plans/${profileId}`);
+        if (cancelled) return;
+        const next = {};
+        (Array.isArray(data) ? data : []).forEach((r) => {
+          if (!r?.day_of_week) return;
+          next[r.day_of_week] = {
+            calories: String(r.calories ?? ""),
+            protein: String(r.protein_g ?? ""),
+            carbs: String(r.carbs_g ?? ""),
+            fat: String(r.fat_g ?? ""),
+          };
+        });
+        setRows(next);
+        // If the seven days aren't all the same, the plan is genuinely per-day.
+        const distinct = new Set(
+          TARGET_DAYS.map((d) => JSON.stringify(next[d] || blank))
+        );
+        setPerDay(distinct.size > 1);
+      } catch (e) {
+        if (!cancelled) setErr(e.message || "Could not load your targets");
+      }
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
+    /* eslint-disable-next-line */
+  }, [profileId]);
+
+  // In single-value mode MON is the source of truth and is copied across.
+  const editDay = perDay ? day : "MON";
+  const cur = rows[editDay] || blank;
+
+  const setField = (k, v) => {
+    const clean = v.replace(/[^\d]/g, "").slice(0, 5);
+    setRows((prev) => ({ ...prev, [editDay]: { ...(prev[editDay] || blank), [k]: clean } }));
+    setMsg(""); setErr("");
+  };
+
+  const n = (v) => (v === "" || v === null ? 0 : Number(v));
+  const macroCals = caloriesFromMacros(cur.protein, cur.carbs, cur.fat);
+  const stated = n(cur.calories);
+  const drift = stated > 0 ? macroCals - stated : 0;
+  const mismatched = stated > 0 && Math.abs(drift) > 50;
+
+  const pct = (grams, perGram) =>
+    macroCals > 0 ? Math.round((n(grams) * perGram * 100) / macroCals) : 0;
+
+  // Rewrite calories to whatever the macros actually add up to.
+  const matchCalories = () => {
+    if (macroCals <= 0) return;
+    setRows((prev) => ({ ...prev, [editDay]: { ...(prev[editDay] || blank), calories: String(macroCals) } }));
+    setMsg(""); setErr("");
+  };
+
+  const copyToAllDays = () => {
+    const src = rows[editDay] || blank;
+    const next = {};
+    TARGET_DAYS.forEach((d) => { next[d] = { ...src }; });
+    setRows(next);
+    setMsg("Copied to every day.");
+    setTimeout(() => setMsg(""), 2000);
+  };
+
+  const save = async () => {
+    setErr(""); setMsg("");
+    const source = perDay ? rows : null;
+    const one = rows[editDay] || blank;
+
+    if (!perDay && (!one.calories || !one.protein || !one.carbs || !one.fat)) {
+      setErr("Fill in calories and all three macros.");
+      return;
+    }
+
+    const plans = TARGET_DAYS.map((d) => {
+      const r = (source ? source[d] : one) || one;
+      return {
+        dayOfWeek: d,
+        calories: n(r.calories),
+        protein_g: n(r.protein),
+        carbs_g: n(r.carbs),
+        fat_g: n(r.fat),
+      };
+    });
+
+    if (plans.some((pl) => !pl.calories)) {
+      setErr("Every day needs a calorie figure — use “Copy to every day” if they're the same.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const res = await apiFetch(`/macro-plans/${profileId}`, {
+        method: "PUT",
+        body: JSON.stringify({ plans }),
+      });
+      if (Array.isArray(res?.plans)) {
+        const next = {};
+        res.plans.forEach((r) => {
+          next[r.day_of_week] = {
+            calories: String(r.calories ?? ""),
+            protein: String(r.protein_g ?? ""),
+            carbs: String(r.carbs_g ?? ""),
+            fat: String(r.fat_g ?? ""),
+          };
+        });
+        setRows(next);
+      }
+      setMsg("Targets saved.");
+      setTimeout(() => setMsg(""), 2600);
+      onSaved?.();
+    } catch (e) {
+      setErr(e.message || "Could not save your targets");
+    }
+    setSaving(false);
+  };
+
+  if (!profileId || loading) return null;
+
+  const summary = rows[editDay] || blank;
+  const inputStyleT = {
+    width: "100%", background: T.surface, border: `1px solid ${T.border}`,
+    borderRadius: 10, padding: "11px 12px", color: T.text,
+    fontFamily: "JetBrains Mono", fontSize: 15, outline: "none", boxSizing: "border-box",
+  };
+  const labelStyleT = {
+    fontFamily: "DM Sans", fontSize: 10, color: T.muted,
+    letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 5,
+  };
+
+  return (
+    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
+      <div
+        onClick={() => setOpen((v) => !v)}
+        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
+      >
+        <span style={{ fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 2, color: T.text }}>
+          🎯 MY TARGETS
+        </span>
+        <span style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted }}>
+          {hasCoach ? "set by your coach" : summary.calories ? `${summary.calories} kcal` : "not set"} {open ? "▲" : "▼"}
+        </span>
+      </div>
+
+      {/* Always-visible summary */}
+      {summary.calories ? (
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          {[
+            { k: "calories", label: "KCAL", v: summary.calories, col: T.accent },
+            { k: "protein", label: "PROTEIN", v: `${summary.protein}g`, col: "#60a5fa" },
+            { k: "carbs", label: "CARBS", v: `${summary.carbs}g`, col: "#fbbf24" },
+            { k: "fat", label: "FAT", v: `${summary.fat}g`, col: "#f472b6" },
+          ].map((x) => (
+            <div key={x.k} style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 6px", textAlign: "center" }}>
+              <div style={{ fontFamily: "Bebas Neue", fontSize: 17, color: x.col, lineHeight: 1.2 }}>{x.v}</div>
+              <div style={{ fontFamily: "DM Sans", fontSize: 8.5, color: T.muted, letterSpacing: 0.6 }}>{x.label}</div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, marginTop: 10, lineHeight: 1.6 }}>
+          {hasCoach
+            ? "Your coach hasn't set your targets yet."
+            : "Set your calories and macros and the whole diary starts tracking against them."}
+        </div>
+      )}
+
+      {open && (
+        <div style={{ marginTop: 16 }}>
+          {hasCoach ? (
+            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14, fontFamily: "DM Sans", fontSize: 12, color: T.muted, lineHeight: 1.7 }}>
+              Your coach sets these for you now. Message them in your inbox to have your plan changed.
+            </div>
+          ) : (
+            <>
+              {/* Same every day, or different per day */}
+              <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+                {[
+                  { v: false, label: "Same every day" },
+                  { v: true, label: "Different per day" },
+                ].map((o) => (
+                  <button
+                    key={String(o.v)}
+                    type="button"
+                    onClick={() => setPerDay(o.v)}
+                    style={{
+                      flex: 1,
+                      background: perDay === o.v ? `${T.accent}1f` : T.surface,
+                      border: `1px solid ${perDay === o.v ? T.accent : T.border}`,
+                      color: perDay === o.v ? T.accent : T.text,
+                      borderRadius: 10, padding: "9px 8px",
+                      fontFamily: "DM Sans", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                    }}
+                  >{o.label}</button>
+                ))}
+              </div>
+
+              {perDay && (
+                <div style={{ display: "flex", gap: 4, marginBottom: 14, overflowX: "auto", paddingBottom: 2 }}>
+                  {TARGET_DAYS.map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => setDay(d)}
+                      style={{
+                        flex: "1 0 auto", minWidth: 44,
+                        background: day === d ? `${T.accent}22` : T.surface,
+                        border: `1px solid ${day === d ? T.accent : T.border}`,
+                        color: day === d ? T.accent : T.muted,
+                        borderRadius: 9, padding: "7px 4px",
+                        fontFamily: "DM Sans", fontSize: 10.5, cursor: "pointer",
+                      }}
+                    >{d}</button>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={labelStyleT}>Calories {perDay ? `(${editDay})` : "per day"}</label>
+                <input
+                  value={cur.calories}
+                  onChange={(e) => setField("calories", e.target.value)}
+                  inputMode="numeric"
+                  placeholder="2400"
+                  style={inputStyleT}
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                {[
+                  { k: "protein", label: "Protein (g)", ph: "180", per: 4 },
+                  { k: "carbs", label: "Carbs (g)", ph: "260", per: 4 },
+                  { k: "fat", label: "Fat (g)", ph: "80", per: 9 },
+                ].map((m) => (
+                  <div key={m.k} style={{ flex: 1 }}>
+                    <label style={labelStyleT}>{m.label}</label>
+                    <input
+                      value={cur[m.k]}
+                      onChange={(e) => setField(m.k, e.target.value)}
+                      inputMode="numeric"
+                      placeholder={m.ph}
+                      style={inputStyleT}
+                    />
+                    <div style={{ fontFamily: "JetBrains Mono", fontSize: 9, color: T.muted, marginTop: 3, textAlign: "center" }}>
+                      {macroCals > 0 ? `${pct(cur[m.k], m.per)}%` : "—"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Macros vs stated calories — arithmetic, not advice */}
+              {macroCals > 0 && (
+                <div style={{
+                  background: mismatched ? `${T.warn}14` : `${T.surface}`,
+                  border: `1px solid ${mismatched ? T.warn + "55" : T.border}`,
+                  borderRadius: 10, padding: "10px 12px", marginBottom: 12,
+                  fontFamily: "DM Sans", fontSize: 11, color: T.muted, lineHeight: 1.6,
+                }}>
+                  Your macros add up to <strong style={{ color: T.text }}>{macroCals} kcal</strong>.
+                  {mismatched && (
+                    <>
+                      {" "}That's {Math.abs(drift)} kcal {drift > 0 ? "more" : "less"} than the {stated} you've set.{" "}
+                      <span
+                        onClick={matchCalories}
+                        style={{ color: T.accent, cursor: "pointer", textDecoration: "underline" }}
+                      >Use {macroCals} instead</span>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* A very low figure is worth a quiet word, not a block */}
+              {stated > 0 && stated < 1200 && (
+                <div style={{
+                  background: `${T.accent}10`, border: `1px solid ${T.accent}33`,
+                  borderRadius: 10, padding: "10px 12px", marginBottom: 12,
+                  fontFamily: "DM Sans", fontSize: 11, color: T.muted, lineHeight: 1.65,
+                }}>
+                  That's a low daily target. It's worth running numbers this low past a doctor
+                  or registered dietitian before you train on them.
+                </div>
+              )}
+
+              {err && (
+                <div style={{ background: `${T.danger}18`, border: `1px solid ${T.danger}44`, borderRadius: 10, padding: "10px 12px", marginBottom: 12, fontFamily: "DM Sans", fontSize: 11.5, color: T.danger }}>
+                  {err}
+                </div>
+              )}
+              {msg && (
+                <div style={{ fontFamily: "DM Sans", fontSize: 11.5, color: "#22c55e", marginBottom: 12 }}>
+                  {msg}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  onClick={save}
+                  disabled={saving}
+                  type="button"
+                  style={{
+                    flex: 2, minWidth: 140,
+                    background: T.accent, color: T.bg, border: "none", borderRadius: 11,
+                    padding: "12px 18px", fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 1.5,
+                    cursor: saving ? "default" : "pointer",
+                  }}
+                >
+                  {saving ? "SAVING…" : "SAVE TARGETS"}
+                </button>
+                {perDay && (
+                  <button
+                    onClick={copyToAllDays}
+                    type="button"
+                    style={{
+                      flex: 1, minWidth: 120, background: "none", border: `1px solid ${T.border}`,
+                      borderRadius: 11, padding: "12px 14px", color: T.text,
+                      fontFamily: "DM Sans", fontSize: 11.5, cursor: "pointer",
+                    }}
+                  >
+                    Copy to every day
+                  </button>
+                )}
+              </div>
+
+              <div style={{ fontFamily: "DM Sans", fontSize: 10.5, color: T.muted, marginTop: 10, lineHeight: 1.6 }}>
+                These feed your dashboard rings, the food log and your weekly totals. If a coach
+                takes you on later they'll take over your plan, and everything you've logged stays put.
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BenchmarksCard({ profileId }) {
   const [types, setTypes] = useState([]);
   const [results, setResults] = useState([]);
@@ -8059,9 +8578,10 @@ function SoloModeBanner({ profile }) {
           YOU'RE FLYING SOLO
         </div>
         <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, lineHeight: 1.6 }}>
-          Your diary, barcode scanner, shopping list and wellbeing tracking all work right now.
-          Macro targets, check-ins and training programming appear as soon as a coach links your
-          account — give them the email you signed up with and nothing you've logged is lost.
+          Your diary, barcode scanner, shopping list and wellbeing tracking all work right now, and
+          you can set your own calories and macros under Wellbeing → My Targets. Check-ins and
+          training programming arrive if a coach links your account — give them the email you
+          signed up with and nothing you've logged is lost.
         </div>
       </div>
       <button
@@ -14006,6 +14526,9 @@ export default function App() {
   profileIdRef.current = profile?.id;
 
   const [macroGoalsByDay, setMacroGoalsByDay] = useState({}); // { MON: {...}, ... }
+  // Bumped when a self-managed user saves their own targets, so the rings and
+  // food log update immediately instead of waiting out the 30-second poll.
+  const [macroRefresh, setMacroRefresh] = useState(0);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -14060,7 +14583,7 @@ export default function App() {
     fetchMacroGoals(); // initial load
     const interval = setInterval(fetchMacroGoals, 30 * 1000); // poll every 30s
     return () => clearInterval(interval);
-  }, [profile?.id]);
+  }, [profile?.id, macroRefresh]);
 
   // When the user switches day, point the active macro goals at that day's
   // targets (or the average fallback) so every macro readout reflects the day.
@@ -14820,7 +15343,10 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
           />
         )}
         {tab === "tracker" && (
-          <WellbeingTab profile={profile} />
+          <WellbeingTab
+            profile={profile}
+            onTargetsSaved={() => setMacroRefresh((n) => n + 1)}
+          />
         )}
         {tab === "list" && (
           <ShoppingList items={shoppingList} setItems={setShoppingList} athleteId={profile?.id} />
