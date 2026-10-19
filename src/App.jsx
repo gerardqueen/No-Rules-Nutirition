@@ -443,7 +443,14 @@ function scaleMacros(item, grams, portionLabel) {
   const u = item.u === "ml" ? "ml" : "g";
   // When a named portion is in play ("2 x 1 slice"), show it alongside the
   // weight so the log reads naturally and still records the exact amount.
-  const suffix = portionLabel ? ` (${portionLabel} · ${grams}${u})` : ` (${grams}${u})`;
+  //
+  // A menu item whose weight nobody published is the exception: its macros are
+  // per serving and the gram figure is only a scaling base, so printing it
+  // would assert a weight we don't actually know ("1/4 chicken · 100g").
+  // noWeight items show the portion alone.
+  const suffix = item.noWeight
+    ? (portionLabel ? ` (${portionLabel})` : "")
+    : portionLabel ? ` (${portionLabel} · ${grams}${u})` : ` (${grams}${u})`;
   return {
     name: item.n + suffix,
     calories: Math.round(item.c * r),
@@ -510,6 +517,10 @@ function LoginScreen({ onLoggedIn }) {
   const [suPass2, setSuPass2] = useState("");
   const [marketingOptIn, setMarketingOptIn] = useState(false);
   const [signupOpen, setSignupOpen] = useState(true);
+  // What they're here for. Recorded at signup so a coach can see what someone
+  // wants before taking them on; it doesn't hide anything in the app.
+  const [wantNutrition, setWantNutrition] = useState(true);
+  const [wantProgramming, setWantProgramming] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -537,6 +548,8 @@ function LoginScreen({ onLoggedIn }) {
           email: em,
           password,
           marketingOptIn,
+          wantsNutrition: wantNutrition,
+          wantsProgramming: wantProgramming,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -862,6 +875,50 @@ function LoginScreen({ onLoggedIn }) {
                     fontSize: 13,
                   }}
                 />
+              </div>
+
+              {/* What they're after. Nutrition is preselected because that's what
+                  the app does out of the box; neither can be left off. */}
+              <div style={{ marginBottom: 16 }}>
+                <label
+                  style={{
+                    fontFamily: "DM Sans", fontSize: 11, color: T.muted,
+                    letterSpacing: 1, textTransform: "uppercase",
+                    display: "block", marginBottom: 7,
+                  }}
+                >
+                  What are you here for?
+                </label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {[
+                    { k: "n", label: "Nutrition", on: wantNutrition && !wantProgramming },
+                    { k: "p", label: "Programming", on: wantProgramming && !wantNutrition },
+                    { k: "b", label: "Both", on: wantNutrition && wantProgramming },
+                  ].map((o) => (
+                    <button
+                      key={o.k}
+                      type="button"
+                      onClick={() => {
+                        setWantNutrition(o.k !== "p");
+                        setWantProgramming(o.k !== "n");
+                      }}
+                      style={{
+                        flex: 1,
+                        background: o.on ? `${T.accent}1f` : T.surface,
+                        border: `1px solid ${o.on ? T.accent : T.border}`,
+                        color: o.on ? T.accent : T.text,
+                        borderRadius: 10, padding: "10px 6px",
+                        fontFamily: "DM Sans", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                      }}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ fontFamily: "DM Sans", fontSize: 10.5, color: T.muted, marginTop: 6, lineHeight: 1.55 }}>
+                  You get the whole app either way — this just tells a coach what you're
+                  after, and you can change it any time.
+                </div>
               </div>
 
               {/* Marketing opt-in. Unticked by default — nothing is sent unless
@@ -7739,6 +7796,9 @@ function WellbeingTab({ profile, onTargetsSaved }) {
         )}
       </div>
 
+      {/* What this account is signed up for */}
+      <MyPlanCard profile={profile} onChanged={onTargetsSaved} />
+
       {/* Calories and macros — self-set while there's no coach */}
       <MyTargetsCard profile={profile} onSaved={onTargetsSaved} />
 
@@ -7760,6 +7820,114 @@ function WellbeingTab({ profile, onTargetsSaved }) {
    bests are what percentage-based programming resolves against, so a 1RM
    logged here changes what "{80% Back Squat}" shows in a session.
 ────────────────────────────────────────────────────────────────────────────── */
+/* ── My Plan: which services this account is signed up for ───────────────────
+   Nutrition, programming, or both. This doesn't hide anything in the app —
+   everyone gets the whole thing — it records what the person is after, which
+   is what decides the tabs a coach sees for them in the CMS.
+
+   A solo signup sets their own. Once a coach takes them on the coach owns it,
+   because it reflects what the client is paying for, so this turns read-only
+   to match what the server will allow.
+────────────────────────────────────────────────────────────────────────────── */
+function MyPlanCard({ profile, onChanged }) {
+  const profileId = profile?.id;
+  const hasCoach = !!profile?.coachId;
+
+  const [nutrition, setNutrition] = useState(profile?.nutritionEnabled !== false);
+  const [programming, setProgramming] = useState(!!profile?.programmingEnabled);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    setNutrition(profile?.nutritionEnabled !== false);
+    setProgramming(!!profile?.programmingEnabled);
+  }, [profile?.nutritionEnabled, profile?.programmingEnabled]);
+
+  const choose = async (n, p) => {
+    if (hasCoach || saving) return;
+    if (!n && !p) return;                       // the server refuses this too
+    const prevN = nutrition, prevP = programming;
+    setNutrition(n); setProgramming(p);
+    setSaving(true); setMsg("");
+    try {
+      await apiFetch(`/athletes/${profileId}/services`, {
+        method: "PATCH",
+        body: JSON.stringify({ nutrition: n, programming: p }),
+      });
+      setMsg("Saved.");
+      setTimeout(() => setMsg(""), 2000);
+      onChanged?.();
+    } catch (e) {
+      setNutrition(prevN); setProgramming(prevP);
+      setMsg(e.message || "Could not save that");
+    }
+    setSaving(false);
+  };
+
+  if (!profileId) return null;
+
+  const label = nutrition && programming ? "Nutrition + programming" : programming ? "Programming" : "Nutrition";
+  const options = [
+    { k: "n", label: "Nutrition", n: true, p: false },
+    { k: "p", label: "Programming", n: false, p: true },
+    { k: "b", label: "Both", n: true, p: true },
+  ];
+
+  return (
+    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+        <span style={{ fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 2, color: T.text }}>
+          📋 MY PLAN
+        </span>
+        <span style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted }}>
+          {hasCoach ? "set by your coach" : label}
+        </span>
+      </div>
+
+      <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, marginBottom: 12, lineHeight: 1.65 }}>
+        {hasCoach
+          ? `You're set up for ${label.toLowerCase()}. Your coach changes this — message them in your inbox.`
+          : "Tells a coach what you're after. You keep the whole app either way."}
+      </div>
+
+      {!hasCoach && (
+        <>
+          <div style={{ display: "flex", gap: 8 }}>
+            {options.map((o) => {
+              const on = nutrition === o.n && programming === o.p;
+              return (
+                <button
+                  key={o.k}
+                  type="button"
+                  onClick={() => choose(o.n, o.p)}
+                  disabled={saving}
+                  style={{
+                    flex: 1,
+                    background: on ? `${T.accent}1f` : T.surface,
+                    border: `1px solid ${on ? T.accent : T.border}`,
+                    color: on ? T.accent : T.text,
+                    borderRadius: 10, padding: "11px 6px",
+                    fontFamily: "DM Sans", fontSize: 12, fontWeight: 600,
+                    cursor: saving ? "default" : "pointer",
+                    opacity: saving ? 0.6 : 1,
+                  }}
+                >
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
+          {msg && (
+            <div style={{ fontFamily: "DM Sans", fontSize: 11, color: msg === "Saved." ? "#22c55e" : T.danger, marginTop: 9 }}>
+              {msg}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ── My Targets: calories and macros a solo user sets for themselves ─────────
    Anyone can open an account without a coach, and those accounts had no way to
    get targets at all — every macro readout sat at zero. This card writes the
@@ -9058,7 +9226,15 @@ function Dashboard({
           </div>
 
           {/* Recent coach check-ins (scrollable history) */}
-          <ProgrammingCard profileId={profileId} enabled={!!profile?.programming_enabled} />
+          {/* /auth/me returns programmingEnabled (camelCase). This read was
+              snake_case, so it was always undefined and the training card
+              never rendered on the dashboard for anyone — programming was
+              only reachable through the calendar day view. Both spellings are
+              accepted now in case an older payload is in play. */}
+          <ProgrammingCard
+            profileId={profileId}
+            enabled={profile?.programmingEnabled === true || profile?.programming_enabled === true}
+          />
 
           <RecentCheckIns profileId={profileId} onNavigate={onNavigate} />
 
@@ -9378,6 +9554,21 @@ function WeeklyPlanner({
   const [foodSearchResults, setFoodSearchResults] = useState([]);
   const [onlineResults, setOnlineResults] = useState([]); // OpenFoodFacts results
   const [onlineSearching, setOnlineSearching] = useState(false);
+
+  // Eating out. OFF is organised around barcodes, so a counter-served menu item
+  // isn't in it — these come from our own restaurants tables. A brand match is
+  // shown above everything else, because someone typing "Nando's" wants that
+  // menu, not a jar of its sauce.
+  const [brandResults, setBrandResults] = useState([]);
+  const [openBrand, setOpenBrand] = useState(null);       // { id, name, attribution }
+  const [brandItems, setBrandItems] = useState([]);
+  const [brandLoading, setBrandLoading] = useState(false);
+  const [brandQuery, setBrandQuery] = useState("");       // filter within a menu
+  const [brandErr, setBrandErr] = useState("");
+  const [showAddMenuItem, setShowAddMenuItem] = useState(false);
+  const [newItem, setNewItem] = useState({ name: "", category: "", calories: "", protein: "", carbs: "", fat: "", servingLabel: "" });
+  const [savingItem, setSavingItem] = useState(false);
+  const brandSeq = useRef(0);
   const [savedMeals, setSavedMeals] = useState([]); // localStorage-backed quick-add meals
   const [recentFoods, setRecentFoods] = useState([]); // localStorage-backed recent items
   const [showCopyMeal, setShowCopyMeal] = useState(false); // copy-from-another-day panel
@@ -10307,6 +10498,91 @@ function WeeklyPlanner({
     resetPicker();
   };
 
+  // ── Debounced brand search (restaurants and retailers we hold ourselves) ───
+  useEffect(() => {
+    const q = foodSearch.trim();
+    if (q.length < 2) { setBrandResults([]); return; }
+    const seq = ++brandSeq.current;
+    const t = setTimeout(async () => {
+      try {
+        const rows = await apiFetch(`/restaurants?q=${encodeURIComponent(q)}`);
+        if (seq !== brandSeq.current) return;
+        setBrandResults(Array.isArray(rows) ? rows.filter((r) => r.itemCount > 0) : []);
+      } catch {
+        if (seq === brandSeq.current) setBrandResults([]);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [foodSearch]);
+
+  const loadBrand = async (brand) => {
+    setOpenBrand(brand);
+    setBrandItems([]);
+    setBrandQuery("");
+    setBrandErr("");
+    setShowAddMenuItem(false);
+    setBrandLoading(true);
+    try {
+      const data = await apiFetch(`/restaurants/${brand.id}/items`);
+      setOpenBrand(data?.restaurant || brand);
+      setBrandItems(Array.isArray(data?.items) ? data.items : []);
+    } catch (e) {
+      setBrandErr(e.message || "Could not load that menu");
+    }
+    setBrandLoading(false);
+  };
+
+  // A menu item's figures are per SERVING, while the picker scales per 100
+  // units. When a gram weight is known we convert; when it isn't ("1 burger")
+  // we treat the serving as the 100-unit base so one serving gives exactly the
+  // stated macros and the stepper counts whole servings.
+  const menuItemToFood = (it, brandName) => {
+    const g = Number(it.servingG) > 0 ? Number(it.servingG) : 100;
+    const k = 100 / g;
+    return {
+      n: `${it.name} (${brandName})`,
+      // No published weight — see the note in scaleMacros.
+      noWeight: !(Number(it.servingG) > 0),
+      c: Math.round(Number(it.calories || 0) * k),
+      p: Math.round(Number(it.protein || 0) * k * 10) / 10,
+      b: Math.round(Number(it.carbs || 0) * k * 10) / 10,
+      f: Math.round(Number(it.fat || 0) * k * 10) / 10,
+      s: [[it.servingLabel || "serving", g]],
+      u: "g",
+      source: "restaurant",
+    };
+  };
+
+  const addMenuItem = async () => {
+    if (!openBrand || savingItem) return;
+    const nm = newItem.name.trim();
+    const cal = parseFloat(newItem.calories);
+    if (nm.length < 2) { setBrandErr("Give the item a name."); return; }
+    if (!Number.isFinite(cal)) { setBrandErr("Enter the calories."); return; }
+    setSavingItem(true); setBrandErr("");
+    try {
+      const made = await apiFetch(`/restaurants/${openBrand.id}/items`, {
+        method: "POST",
+        body: JSON.stringify({
+          name: nm,
+          category: newItem.category.trim() || "General",
+          calories: cal,
+          protein: parseFloat(newItem.protein) || 0,
+          carbs: parseFloat(newItem.carbs) || 0,
+          fat: parseFloat(newItem.fat) || 0,
+          servingLabel: newItem.servingLabel.trim() || "serving",
+        }),
+      });
+      setBrandItems((prev) => [...prev.filter((x) => x.id !== made.id), made]);
+      setNewItem({ name: "", category: "", calories: "", protein: "", carbs: "", fat: "", servingLabel: "" });
+      setShowAddMenuItem(false);
+    } catch (e) {
+      setBrandErr(e.message || "Could not add that item");
+    }
+    setSavingItem(false);
+  };
+
   // ── Debounced OpenFoodFacts online search (appends to local results) ────────
   useEffect(() => {
     const q = foodSearch.trim();
@@ -10863,6 +11139,184 @@ function WeeklyPlanner({
         </div>
       )}
 
+      {/* ── Restaurant menu browser ─────────────────────────────────────────
+          Opened from a brand result in the food picker. Sits above the picker
+          (1100) but below the scanner (1500) so the layering stays consistent
+          with every other overlay in here. */}
+      {openBrand && (
+        <div
+          style={{
+            position: "fixed", inset: 0, background: "#000000e6",
+            zIndex: 1250, display: "flex", flexDirection: "column",
+            paddingTop: "max(12px, env(safe-area-inset-top))",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: `1px solid ${T.border}` }}>
+            <button
+              onClick={() => setOpenBrand(null)}
+              type="button"
+              style={{ background: "none", border: "none", color: T.accent, fontSize: 15, fontFamily: "DM Sans", cursor: "pointer", padding: 0 }}
+            >
+              ‹ Back
+            </button>
+            <div style={{ flex: 1, minWidth: 0, textAlign: "center" }}>
+              <div style={{ fontFamily: "Bebas Neue", fontSize: 19, letterSpacing: 1.5, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {openBrand.name}
+              </div>
+            </div>
+            <button
+              onClick={() => { setShowAddMenuItem((v) => !v); setBrandErr(""); }}
+              type="button"
+              style={{ background: "none", border: `1px solid ${T.accent}55`, color: T.accent, borderRadius: 8, padding: "5px 10px", fontFamily: "DM Sans", fontSize: 11, cursor: "pointer" }}
+            >
+              {showAddMenuItem ? "Cancel" : "+ Add"}
+            </button>
+          </div>
+
+          <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px", WebkitOverflowScrolling: "touch" }}>
+            {/* Add a missing item */}
+            {showAddMenuItem && (
+              <div style={{ background: T.card, border: `1px solid ${T.accent}44`, borderRadius: 12, padding: 14, marginBottom: 14 }}>
+                <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.muted, marginBottom: 10, lineHeight: 1.6 }}>
+                  Add something you ate here. Figures per serving, off the menu or the packaging.
+                </div>
+                <input
+                  value={newItem.name}
+                  onChange={(e) => setNewItem((p2) => ({ ...p2, name: e.target.value }))}
+                  placeholder="Item name"
+                  style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 9, padding: "10px 12px", color: T.text, fontFamily: "DM Sans", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }}
+                />
+                <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                  <input
+                    value={newItem.category}
+                    onChange={(e) => setNewItem((p2) => ({ ...p2, category: e.target.value }))}
+                    placeholder="Category"
+                    style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 9, padding: "10px 12px", color: T.text, fontFamily: "DM Sans", fontSize: 12, outline: "none", boxSizing: "border-box" }}
+                  />
+                  <input
+                    value={newItem.servingLabel}
+                    onChange={(e) => setNewItem((p2) => ({ ...p2, servingLabel: e.target.value }))}
+                    placeholder="e.g. 1 burger"
+                    style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 9, padding: "10px 12px", color: T.text, fontFamily: "DM Sans", fontSize: 12, outline: "none", boxSizing: "border-box" }}
+                  />
+                </div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                  {[
+                    { k: "calories", ph: "kcal" },
+                    { k: "protein", ph: "P" },
+                    { k: "carbs", ph: "C" },
+                    { k: "fat", ph: "F" },
+                  ].map((fl) => (
+                    <input
+                      key={fl.k}
+                      value={newItem[fl.k]}
+                      onChange={(e) => setNewItem((p2) => ({ ...p2, [fl.k]: e.target.value.replace(/[^\d.]/g, "") }))}
+                      placeholder={fl.ph}
+                      inputMode="decimal"
+                      style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 9, padding: "10px 8px", color: T.text, fontFamily: "JetBrains Mono", fontSize: 13, outline: "none", textAlign: "center", boxSizing: "border-box" }}
+                    />
+                  ))}
+                </div>
+                <button
+                  onClick={addMenuItem}
+                  disabled={savingItem}
+                  type="button"
+                  style={{ width: "100%", background: T.accent, color: T.bg, border: "none", borderRadius: 10, padding: "11px", fontFamily: "Bebas Neue", fontSize: 15, letterSpacing: 1.5, cursor: savingItem ? "default" : "pointer" }}
+                >
+                  {savingItem ? "SAVING…" : "ADD TO MENU"}
+                </button>
+              </div>
+            )}
+
+            {brandErr && (
+              <div style={{ background: `${T.danger}18`, border: `1px solid ${T.danger}44`, borderRadius: 10, padding: "10px 12px", marginBottom: 12, fontFamily: "DM Sans", fontSize: 11.5, color: T.danger }}>
+                {brandErr}
+              </div>
+            )}
+
+            {/* Filter within the menu */}
+            {brandItems.length > 6 && (
+              <input
+                value={brandQuery}
+                onChange={(e) => setBrandQuery(e.target.value)}
+                placeholder={`Search ${openBrand.name}…`}
+                style={{ width: "100%", background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "11px 13px", color: T.text, fontFamily: "DM Sans", fontSize: 13, outline: "none", marginBottom: 12, boxSizing: "border-box" }}
+              />
+            )}
+
+            {brandLoading ? (
+              <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted }}>Loading menu…</div>
+            ) : brandItems.length === 0 ? (
+              <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, lineHeight: 1.7 }}>
+                Nothing here yet. Use “+ Add” to put in what you ate — it'll be here for
+                everyone next time.
+              </div>
+            ) : (
+              (() => {
+                const q = brandQuery.trim().toLowerCase();
+                const shown = q
+                  ? brandItems.filter((i) => String(i.name).toLowerCase().includes(q))
+                  : brandItems;
+                if (shown.length === 0) {
+                  return <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted }}>Nothing matched “{brandQuery}”.</div>;
+                }
+                const byCat = shown.reduce((acc, i) => {
+                  const k = i.category || "General";
+                  (acc[k] = acc[k] || []).push(i);
+                  return acc;
+                }, {});
+                return Object.keys(byCat).sort().map((cat) => (
+                  <div key={cat} style={{ marginBottom: 16 }}>
+                    <div style={{ fontFamily: "DM Sans", fontSize: 10, color: T.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 7 }}>
+                      {cat}
+                    </div>
+                    {byCat[cat].map((it) => (
+                      <button
+                        key={it.id}
+                        onClick={() => {
+                          setOpenBrand(null);
+                          selectFoodItem(menuItemToFood(it, openBrand.name));
+                        }}
+                        type="button"
+                        style={{
+                          width: "100%", textAlign: "left", background: T.card,
+                          border: `1px solid ${T.border}`, borderRadius: 11,
+                          padding: "11px 13px", marginBottom: 6, cursor: "pointer",
+                          display: "flex", alignItems: "center", gap: 10,
+                        }}
+                      >
+                        <span style={{ flex: 1, minWidth: 0 }}>
+                          <span style={{ display: "block", fontFamily: "DM Sans", fontSize: 13.5, color: T.text }}>
+                            {it.name}
+                            {!it.verified && (
+                              <span
+                                title="Added by a user — not checked against official figures"
+                                style={{ marginLeft: 6, fontFamily: "DM Sans", fontSize: 8, color: T.warn, border: `1px solid ${T.warn}55`, borderRadius: 4, padding: "1px 4px", verticalAlign: "middle" }}
+                              >UNVERIFIED</span>
+                            )}
+                          </span>
+                          <span style={{ display: "block", fontFamily: "JetBrains Mono", fontSize: 9.5, color: T.muted, marginTop: 2 }}>
+                            {Math.round(it.calories)} kcal · {Math.round(it.protein)}p {Math.round(it.carbs)}c {Math.round(it.fat)}f
+                            {it.servingLabel ? ` · ${it.servingLabel}` : ""}
+                          </span>
+                        </span>
+                        <span style={{ color: T.accent, fontSize: 20, lineHeight: 1 }}>+</span>
+                      </button>
+                    ))}
+                  </div>
+                ));
+              })()
+            )}
+
+            {openBrand.attribution && (
+              <div style={{ fontFamily: "DM Sans", fontSize: 9.5, color: T.muted, marginTop: 8, lineHeight: 1.6 }}>
+                {openBrand.attribution}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {showCameraScanner && (
         <BarcodeCameraScanner
           onClose={() => setShowCameraScanner(false)}
@@ -11399,6 +11853,42 @@ function WeeklyPlanner({
                               </div>
                             );
                           })}
+                        </div>
+                      )}
+
+                      {/* Eating out — brands we hold menus for, shown first
+                          because typing a chain name means you want its menu */}
+                      {brandResults.length > 0 && (
+                        <div style={{ marginBottom: 14 }}>
+                          <div style={{ fontFamily: "DM Sans", fontSize: 11, color: T.coachGreen, marginBottom: 8, letterSpacing: 0.5 }}>
+                            EATING OUT
+                          </div>
+                          {brandResults.map((b) => (
+                            <button
+                              key={b.id}
+                              onClick={() => loadBrand(b)}
+                              style={{
+                                width: "100%", textAlign: "left",
+                                background: T.surface,
+                                border: `1px solid ${T.coachGreen}44`,
+                                borderRadius: 12, padding: "12px 14px", marginBottom: 6,
+                                cursor: "pointer", display: "flex",
+                                alignItems: "center", gap: 10,
+                              }}
+                              type="button"
+                            >
+                              <span style={{ fontSize: 18 }}>{b.kind === "retailer" ? "🏪" : "🍽"}</span>
+                              <span style={{ flex: 1, minWidth: 0 }}>
+                                <span style={{ display: "block", fontFamily: "DM Sans", fontSize: 14, color: T.text, fontWeight: 600 }}>
+                                  {b.name}
+                                </span>
+                                <span style={{ display: "block", fontFamily: "DM Sans", fontSize: 10.5, color: T.muted }}>
+                                  {b.itemCount} item{b.itemCount === 1 ? "" : "s"} · browse menu
+                                </span>
+                              </span>
+                              <span style={{ color: T.coachGreen, fontSize: 18 }}>›</span>
+                            </button>
+                          ))}
                         </div>
                       )}
 
