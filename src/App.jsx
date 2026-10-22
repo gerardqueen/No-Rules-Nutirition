@@ -4,6 +4,9 @@ import FOOD_DB from "./foodDb";
 // ✅ Live backend config + auth helpers
 const API_BASE = import.meta.env.VITE_API_URL || 'https://no-rules-api-production.up.railway.app';
 const TOKEN_KEY = 'nrn_token';
+// Shown with beta feedback so a report can be tied to a build. Bump this when
+// you cut a TestFlight build so responses are attributable.
+const APP_VERSION = '1.6.0';
 const getToken = () => localStorage.getItem(TOKEN_KEY) || '';
 const authHeaders = (extra = {}) => {
   const t = getToken();
@@ -436,6 +439,59 @@ function useBenchmarkBests(profileId) {
     return () => { cancelled = true; };
   }, [profileId]);
   return bests;
+}
+
+/* ── Linkify: make URLs in message text tappable ─────────────────────────────
+   Message bodies render as plain text, so a link a coach sends — a form, an
+   article, a YouTube video — arrived as an unclickable string that a tester
+   would have to retype. This splits the text and renders the URLs as real
+   anchors, leaving everything else exactly as typed.
+
+   No dangerouslySetInnerHTML: the text is split and the pieces rendered as
+   React children, so message content can never inject markup.
+────────────────────────────────────────────────────────────────────────────── */
+// Splitting needs the global flag; testing a piece must not use it. A
+// /g regex keeps lastIndex between calls, and while split's alternating
+// output happens to reset it each time, that is far too subtle an invariant
+// to leave a later edit standing on. The anchored non-global copy is simply
+// correct.
+const URL_SPLIT_RE = /((?:https?:\/\/|www\.)[^\s<>()]+)/gi;
+const URL_TEST_RE = /^(?:https?:\/\/|www\.)[^\s<>()]+$/i;
+
+function Linkify({ text, color }) {
+  const raw = String(text ?? "");
+  if (!raw) return null;
+
+  const parts = raw.split(URL_SPLIT_RE);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (!URL_TEST_RE.test(part)) return part;
+        // Trailing punctuation is almost always sentence punctuation rather
+        // than part of the address, so it stays outside the link.
+        const m = part.match(/^(.*?)([.,;:!?)\]]*)$/);
+        const url = m ? m[1] : part;
+        const tail = m ? m[2] : "";
+        const href = /^www\./i.test(url) ? `https://${url}` : url;
+        return (
+          <span key={i}>
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              // The bubble itself toggles reactions on tap, so a link tap must
+              // not do both.
+              onClick={(e) => e.stopPropagation()}
+              style={{ color: color || "inherit", textDecoration: "underline", wordBreak: "break-all" }}
+            >
+              {url}
+            </a>
+            {tail}
+          </span>
+        );
+      })}
+    </>
+  );
 }
 
 function scaleMacros(item, grams, portionLabel) {
@@ -1188,9 +1244,307 @@ function LoginScreen({ onLoggedIn }) {
 }
 
 // ── Profile Dropdown ──────────────────────────────────────────────────────────
+/* ── Account: change your email address or password ──────────────────────────
+   Email is the login identifier, so changing it is deliberately a three-step
+   affair: current password, a code sent to the NEW address, then the switch.
+   The old address gets told a change was requested, so if someone else starts
+   one the real owner sees it.
+────────────────────────────────────────────────────────────────────────────── */
+function AccountModal({ profile, startOn, onClose, onEmailChanged }) {
+  const [pane, setPane] = useState(startOn === "password" ? "password" : "email");
+
+  // Email change
+  const [newEmail, setNewEmail] = useState("");
+  const [curPass, setCurPass] = useState("");
+  const [code, setCode] = useState("");
+  const [stage, setStage] = useState("request");   // request | confirm | done
+  const [sentTo, setSentTo] = useState("");
+
+  // Password change
+  const [pwCur, setPwCur] = useState("");
+  const [pwNew, setPwNew] = useState("");
+  const [pwNew2, setPwNew2] = useState("");
+
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");
+
+  const inputS = {
+    width: "100%", background: T.surface, border: `1px solid ${T.border}`,
+    borderRadius: 10, padding: "12px 14px", color: T.text,
+    fontFamily: "DM Sans", fontSize: 13, outline: "none",
+    boxSizing: "border-box", marginBottom: 10,
+  };
+  const labelS = {
+    fontFamily: "DM Sans", fontSize: 10.5, color: T.muted, letterSpacing: 1,
+    textTransform: "uppercase", display: "block", marginBottom: 5,
+  };
+
+  const requestChange = async () => {
+    setErr(""); setMsg("");
+    const em = newEmail.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(em)) { setErr("Enter a valid email address."); return; }
+    if (!curPass) { setErr("Enter your current password."); return; }
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/me/email/request`, {
+        method: "POST",
+        body: JSON.stringify({ newEmail: em, currentPassword: curPass }),
+      });
+      setSentTo(r?.sentTo || em);
+      setStage("confirm");
+      setCurPass("");
+      setMsg(`We've sent a 6-digit code to ${r?.sentTo || em}.`);
+    } catch (e) { setErr(e.message || "Could not start the change"); }
+    setBusy(false);
+  };
+
+  const confirmChange = async () => {
+    setErr(""); setMsg("");
+    if (code.replace(/\D/g, "").length !== 6) { setErr("Enter the 6-digit code."); return; }
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/me/email/confirm`, {
+        method: "POST",
+        body: JSON.stringify({ code: code.replace(/\D/g, "") }),
+      });
+      // A fresh token comes back carrying the new address.
+      if (r?.token) { try { localStorage.setItem(TOKEN_KEY, r.token); } catch {} }
+      setStage("done");
+      setMsg(`Your email address is now ${r?.email || sentTo}.`);
+      onEmailChanged?.(r?.email || sentTo);
+    } catch (e) { setErr(e.message || "Could not confirm the change"); }
+    setBusy(false);
+  };
+
+  const changePassword = async () => {
+    setErr(""); setMsg("");
+    if (!pwCur) { setErr("Enter your current password."); return; }
+    if (pwNew.length < 8) { setErr("New password must be at least 8 characters."); return; }
+    if (pwNew !== pwNew2) { setErr("New passwords don't match."); return; }
+    setBusy(true);
+    try {
+      await apiFetch(`/me/password`, {
+        method: "POST",
+        body: JSON.stringify({ currentPassword: pwCur, newPassword: pwNew }),
+      });
+      setPwCur(""); setPwNew(""); setPwNew2("");
+      setMsg("Password changed.");
+    } catch (e) { setErr(e.message || "Could not change the password"); }
+    setBusy(false);
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, background: "#000000e0", zIndex: 1300,
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 18,
+      }}
+      onClick={(e) => e.target === e.currentTarget && !busy && onClose()}
+    >
+      <div style={{ width: "100%", maxWidth: 420, maxHeight: "90vh", overflowY: "auto", background: T.card, border: `1px solid ${T.border}`, borderRadius: 18, padding: 22 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <span style={{ fontFamily: "Bebas Neue", fontSize: 20, letterSpacing: 2, color: T.text }}>ACCOUNT</span>
+          <button onClick={onClose} type="button" style={{ background: "none", border: "none", color: T.muted, fontSize: 22, lineHeight: 1, cursor: "pointer" }}>×</button>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+          {[
+            { k: "email", label: "Email address" },
+            { k: "password", label: "Password" },
+          ].map((t) => (
+            <button
+              key={t.k}
+              type="button"
+              onClick={() => { setPane(t.k); setErr(""); setMsg(""); }}
+              style={{
+                flex: 1,
+                background: pane === t.k ? `${T.accent}1f` : T.surface,
+                border: `1px solid ${pane === t.k ? T.accent : T.border}`,
+                color: pane === t.k ? T.accent : T.text,
+                borderRadius: 10, padding: "9px 8px",
+                fontFamily: "DM Sans", fontSize: 12, fontWeight: 600, cursor: "pointer",
+              }}
+            >{t.label}</button>
+          ))}
+        </div>
+
+        {err && (
+          <div style={{ background: `${T.danger}18`, border: `1px solid ${T.danger}44`, borderRadius: 10, padding: "10px 12px", marginBottom: 12, fontFamily: "DM Sans", fontSize: 12, color: T.danger }}>
+            {err}
+          </div>
+        )}
+        {msg && (
+          <div style={{ background: "#22c55e18", border: "1px solid #22c55e44", borderRadius: 10, padding: "10px 12px", marginBottom: 12, fontFamily: "DM Sans", fontSize: 12, color: "#22c55e" }}>
+            {msg}
+          </div>
+        )}
+
+        {pane === "email" && (
+          <>
+            <div style={{ fontFamily: "DM Sans", fontSize: 11.5, color: T.muted, marginBottom: 14, lineHeight: 1.65 }}>
+              Currently <span style={{ color: T.text, fontFamily: "JetBrains Mono", fontSize: 11 }}>{profile?.email}</span>.
+              We'll send a code to the new address to check it works before switching.
+            </div>
+
+            {stage === "request" && (
+              <>
+                <label style={labelS}>New email address</label>
+                <input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="you@example.com" type="email" autoComplete="email" style={inputS} />
+                <label style={labelS}>Current password</label>
+                <input value={curPass} onChange={(e) => setCurPass(e.target.value)} onKeyDown={(e) => e.key === "Enter" && requestChange()} placeholder="••••••••" type="password" autoComplete="current-password" style={inputS} />
+                <button
+                  onClick={requestChange}
+                  disabled={busy}
+                  type="button"
+                  style={{ width: "100%", background: T.accent, color: T.bg, border: "none", borderRadius: 11, padding: "13px", fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 1.5, cursor: busy ? "default" : "pointer" }}
+                >
+                  {busy ? "SENDING…" : "SEND CODE"}
+                </button>
+              </>
+            )}
+
+            {stage === "confirm" && (
+              <>
+                <label style={labelS}>6-digit code</label>
+                <input
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  onKeyDown={(e) => e.key === "Enter" && confirmChange()}
+                  placeholder="123456"
+                  inputMode="numeric"
+                  style={{ ...inputS, fontFamily: "JetBrains Mono", fontSize: 19, letterSpacing: 7, textAlign: "center" }}
+                />
+                <button
+                  onClick={confirmChange}
+                  disabled={busy}
+                  type="button"
+                  style={{ width: "100%", background: T.accent, color: T.bg, border: "none", borderRadius: 11, padding: "13px", fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 1.5, cursor: busy ? "default" : "pointer" }}
+                >
+                  {busy ? "CHECKING…" : "CONFIRM NEW EMAIL"}
+                </button>
+                <button
+                  onClick={() => { setStage("request"); setCode(""); setErr(""); setMsg(""); }}
+                  type="button"
+                  style={{ width: "100%", background: "none", border: "none", color: T.muted, fontFamily: "DM Sans", fontSize: 11.5, cursor: "pointer", marginTop: 10, textDecoration: "underline" }}
+                >
+                  Use a different address
+                </button>
+              </>
+            )}
+
+            {stage === "done" && (
+              <div style={{ fontFamily: "DM Sans", fontSize: 12, color: T.muted, lineHeight: 1.7 }}>
+                Sign in with the new address next time. Your plan, diary and history are all unchanged.
+              </div>
+            )}
+          </>
+        )}
+
+        {pane === "password" && (
+          <>
+            <label style={labelS}>Current password</label>
+            <input value={pwCur} onChange={(e) => setPwCur(e.target.value)} placeholder="••••••••" type="password" autoComplete="current-password" style={inputS} />
+            <label style={labelS}>New password (min 8 characters)</label>
+            <input value={pwNew} onChange={(e) => setPwNew(e.target.value)} placeholder="••••••••" type="password" autoComplete="new-password" style={inputS} />
+            <label style={labelS}>Confirm new password</label>
+            <input
+              value={pwNew2}
+              onChange={(e) => setPwNew2(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && changePassword()}
+              placeholder="••••••••"
+              type="password"
+              autoComplete="new-password"
+              style={{ ...inputS, borderColor: pwNew2 && pwNew2 !== pwNew ? `${T.danger}88` : T.border }}
+            />
+            <button
+              onClick={changePassword}
+              disabled={busy}
+              type="button"
+              style={{ width: "100%", background: T.accent, color: T.bg, border: "none", borderRadius: 11, padding: "13px", fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 1.5, cursor: busy ? "default" : "pointer" }}
+            >
+              {busy ? "SAVING…" : "CHANGE PASSWORD"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ProfileMenu({ profile, onLogout, onNavigate }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
+  const [account, setAccount] = useState(null);   // null | "email" | "password"
+
+  // Beta feedback link. The URL and the on/off switch live on the server, so
+  // the form can be swapped or the item retired without shipping a build.
+  const [feedback, setFeedback] = useState({ url: "", enabled: false });
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch("/app-settings")
+      .then((d) => {
+        if (cancelled) return;
+        setFeedback({ url: d?.feedbackUrl || "", enabled: !!d?.feedbackEnabled });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  // Carry a bit of context into the form so a response can be matched to a
+  // tester and a build without having to ask them. Put {email}, {name},
+  // {platform} or {version} in the configured URL and they're filled in.
+  const openFeedback = () => {
+    if (!feedback.url) return;
+
+    const platform = (() => {
+      try {
+        const cap = window.Capacitor;
+        if (cap?.isNativePlatform?.()) return cap.getPlatform ? cap.getPlatform() : "app";
+      } catch {}
+      return "web";
+    })();
+
+    // Google Forms only prefills a multiple-choice answer when the value is
+    // character-for-character one of its options, so the raw platform token
+    // ("ios") selects nothing. These strings must stay identical to the
+    // options on the form — note the en dash, not a hyphen. An iPad reports
+    // "ios" and so reads as iPhone; add an iPad option to the form if that
+    // distinction starts to matter.
+    const PLATFORM_LABELS = {
+      ios: "Mobile app \u2013 iPhone",
+      android: "Mobile app \u2013 Android",
+      web: "Website (norulenutrition.uk)",
+    };
+    const platformLabel = PLATFORM_LABELS[platform] || PLATFORM_LABELS.web;
+
+    // A readable device line for the "what were you doing" box, so a report
+    // arrives with the build and OS already on it rather than relying on the
+    // tester knowing either.
+    const device = (() => {
+      let os = "";
+      try {
+        const ua = navigator.userAgent || "";
+        const ios = ua.match(/OS (\d+)[._](\d+)/);
+        const android = ua.match(/Android (\d+(?:\.\d+)?)/);
+        if (platform === "ios" && ios) os = `iOS ${ios[1]}.${ios[2]}`;
+        else if (platform === "android" && android) os = `Android ${android[1]}`;
+        else if (platform === "web") os = "browser";
+      } catch {}
+      return os ? `App v${APP_VERSION}, ${os}` : `App v${APP_VERSION}`;
+    })();
+
+    const url = feedback.url
+      .replace(/\{email\}/g, encodeURIComponent(profile?.email || ""))
+      .replace(/\{name\}/g, encodeURIComponent(profile?.name || ""))
+      .replace(/\{platformLabel\}/g, encodeURIComponent(platformLabel))
+      .replace(/\{platform\}/g, encodeURIComponent(platform))
+      .replace(/\{device\}/g, encodeURIComponent(device))
+      .replace(/\{version\}/g, encodeURIComponent(APP_VERSION));
+
+    try { window.open(url, "_blank", "noopener"); } catch {}
+    setOpen(false);
+  };
 
   // Marketing emails preference — the tick box from signup, changeable here so
   // the consent isn't a one-shot decision at registration.
@@ -1239,8 +1593,22 @@ function ProfileMenu({ profile, onLogout, onNavigate }) {
         setOpen(false);
       },
     },
-    { icon: "🔔", label: "Notifications", action: () => setOpen(false) },
-    { icon: "🔒", label: "Change Password", action: () => setOpen(false) },
+    // "Notifications" used to sit here doing nothing at all — a control that
+    // looks live and isn't is worse than no control, so it's gone until there
+    // is something behind it.
+    {
+      icon: "✉️",
+      label: "Email address",
+      action: () => { setAccount("email"); setOpen(false); },
+    },
+    {
+      icon: "🔒",
+      label: "Change Password",
+      action: () => { setAccount("password"); setOpen(false); },
+    },
+    ...(feedback.enabled
+      ? [{ icon: "📣", label: "Beta feedback", action: openFeedback, highlight: true }]
+      : []),
     {
       icon: "🛡️",
       label: "Privacy Policy",
@@ -1446,7 +1814,12 @@ function ProfileMenu({ profile, onLogout, onNavigate }) {
             >
               <span style={{ fontSize: 14 }}>{item.icon}</span>
               <span
-                style={{ fontFamily: "DM Sans", fontSize: 13, color: T.text }}
+                style={{
+                  fontFamily: "DM Sans",
+                  fontSize: 13,
+                  color: item.highlight ? T.accent : T.text,
+                  fontWeight: item.highlight ? 600 : 400,
+                }}
               >
                 {item.label}
               </span>
@@ -1541,6 +1914,15 @@ function ProfileMenu({ profile, onLogout, onNavigate }) {
             </button>
           </div>
         </div>
+      )}
+
+      {account && (
+        <AccountModal
+          profile={profile}
+          startOn={account}
+          onClose={() => setAccount(null)}
+          onEmailChanged={() => { /* /auth/me refreshes on the next load */ }}
+        />
       )}
     </div>
   );
@@ -1996,7 +2378,7 @@ function CoachPanel({ plan, selectedDay, profile }) {
                 whiteSpace: "pre-wrap",
               }}
             >
-              {m.content}
+              <Linkify text={m.content} color={m.isCoach ? T.accent : T.bg} />
             </div>
             <span
               style={{
@@ -14462,7 +14844,7 @@ function CoachThreads({ coachId, coachName, selfId }) {
                 borderRadius: 14, padding: "10px 14px", fontFamily: "DM Sans", fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap",
                 cursor: "pointer",
               }}>
-                {m.content}
+                <Linkify text={m.content} color={mine ? T.bg : T.accent} />
               </div>
               {(m.reactions || []).length > 0 && (
                 <div style={{ display: "flex", gap: 4, marginTop: 4, justifyContent: mine ? "flex-end" : "flex-start" }}>
