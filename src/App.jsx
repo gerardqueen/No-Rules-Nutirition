@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import FOOD_DB from "./foodDb";
 
 // ✅ Live backend config + auth helpers
@@ -1334,18 +1335,39 @@ function AccountModal({ profile, startOn, onClose, onEmailChanged }) {
     setBusy(false);
   };
 
-  return (
+  return createPortal(
     <div
       style={{
         position: "fixed", inset: 0, background: "#000000e0", zIndex: 1300,
-        display: "flex", alignItems: "center", justifyContent: "center", padding: 18,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        // A fixed, inset:0 overlay sits outside the app shell's safe-area
+        // padding, and the iOS status bar is translucent here
+        // (apple-mobile-web-app-status-bar-style=black-translucent), so without
+        // these the top of the card — and the × on it — lands under the notch
+        // and cannot be tapped.
+        paddingTop: "calc(env(safe-area-inset-top, 0px) + 18px)",
+        paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 18px)",
+        paddingLeft: 18,
+        paddingRight: 18,
       }}
       onClick={(e) => e.target === e.currentTarget && !busy && onClose()}
     >
-      <div style={{ width: "100%", maxWidth: 420, maxHeight: "90vh", overflowY: "auto", background: T.card, border: `1px solid ${T.border}`, borderRadius: 18, padding: 22 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+      {/* maxHeight is 100% of the padded overlay rather than a vh figure: on
+          iOS a vh unit measures the viewport with the browser chrome hidden, so
+          90vh could be taller than the visible area and push the card's top
+          off screen. 100% can only ever be the space the overlay actually has. */}
+      <div style={{ width: "100%", maxWidth: 420, maxHeight: "100%", overflowY: "auto", background: T.card, border: `1px solid ${T.border}`, borderRadius: 18, padding: 22 }}>
+        {/* Sticky, so the × stays reachable once the on-screen keyboard shrinks
+            the viewport and the card has to scroll. The negative margins let it
+            span the card's padding; the matching padding puts the content back. */}
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          position: "sticky", top: 0, zIndex: 1, background: T.card,
+          margin: "-22px -22px 16px", padding: "22px 22px 14px",
+        }}>
           <span style={{ fontFamily: "Bebas Neue", fontSize: 20, letterSpacing: 2, color: T.text }}>ACCOUNT</span>
-          <button onClick={onClose} type="button" style={{ background: "none", border: "none", color: T.muted, fontSize: 22, lineHeight: 1, cursor: "pointer" }}>×</button>
+          {/* Padding widens the tap target without moving the glyph. */}
+          <button onClick={onClose} type="button" style={{ background: "none", border: "none", color: T.muted, fontSize: 22, lineHeight: 1, cursor: "pointer", padding: "6px 10px", margin: "-6px -10px" }}>×</button>
         </div>
 
         <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
@@ -1468,7 +1490,16 @@ function AccountModal({ profile, startOn, onClose, onEmailChanged }) {
           </>
         )}
       </div>
-    </div>
+    </div>,
+    // Rendered into <body> rather than where the component sits in the tree.
+    // ProfileMenu lives inside the app header, and that header carries
+    // backdropFilter: "blur(12px)". A filter other than none makes an element
+    // the containing block for its position:fixed descendants, so inset:0 was
+    // resolving against the 56px header instead of the viewport: the card was
+    // centred inside the header, overflowed several hundred pixels above it,
+    // and flex centring puts that overflow where nothing can scroll to it —
+    // which is why the close button had no reachable position on screen.
+    document.body
   );
 }
 
@@ -4698,13 +4729,18 @@ function MiniCalendar({ events, setEvents, profileId }) {
           style={{
             position: "fixed", inset: 0, background: "rgba(0,0,0,.65)",
             display: "flex", alignItems: "center", justifyContent: "center",
-            zIndex: 1200, padding: 18,
+            zIndex: 1200,
+            // Same safe-area reasoning as the account card.
+            paddingTop: "calc(env(safe-area-inset-top, 0px) + 18px)",
+            paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 18px)",
+            paddingLeft: 18,
+            paddingRight: 18,
           }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              width: "100%", maxWidth: 460, maxHeight: "82vh", overflowY: "auto",
+              width: "100%", maxWidth: 460, maxHeight: "100%", overflowY: "auto",
               background: T.card, borderRadius: 18,
               border: `1px solid ${T.border}`, padding: 20,
             }}
@@ -9014,11 +9050,11 @@ function RecentCheckIns({ profileId, onNavigate }) {
       {openCheckin && (
         <div
           onClick={() => setOpenCheckin(null)}
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1300, padding: 18 }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1300, paddingTop: "calc(env(safe-area-inset-top, 0px) + 18px)", paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 18px)", paddingLeft: 18, paddingRight: 18 }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{ width: "100%", maxWidth: 460, maxHeight: "82vh", overflowY: "auto", background: T.card, border: `1px solid ${T.border}`, borderRadius: 18, padding: 20 }}
+            style={{ width: "100%", maxWidth: 460, maxHeight: "100%", overflowY: "auto", background: T.card, border: `1px solid ${T.border}`, borderRadius: 18, padding: 20 }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 6 }}>
               <span style={{ fontFamily: "Bebas Neue", fontSize: 12, letterSpacing: 2, color: T.coachGreen }}>
