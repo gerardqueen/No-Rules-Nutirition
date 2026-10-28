@@ -8045,6 +8045,18 @@ function WellbeingTab({ profile, onTargetsSaved }) {
     (sg) => !habits.some((h) => String(h.title).toLowerCase() === sg.toLowerCase())
   );
 
+  // Which sections this account sees. The map rides along on /auth/me, and a
+  // key that isn't in it counts as on — so a tracker added later appears for
+  // everyone without anyone having to switch it on first.
+  // featOverride exists so a solo user toggling a section sees it go straight
+  // away, instead of waiting for the next /auth/me.
+  const [featOverride, setFeatOverride] = useState(null);
+  const feat = featOverride || profile?.features || {};
+  const on = (k) => feat[k] !== false;
+  // A coached client can't change these — their coach owns the hub, and the
+  // server returns 403. The control is hidden rather than shown and refused.
+  const canCustomise = !profile?.coachId;
+
   return (
     <div>
       <div style={{ marginBottom: 16 }}>
@@ -8055,6 +8067,7 @@ function WellbeingTab({ profile, onTargetsSaved }) {
       </div>
 
       {/* Habits */}
+      {on("habits") && (
       <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 10 }}>
           <span style={{ fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 2, color: T.text }}>TODAY'S HABITS</span>
@@ -8213,6 +8226,7 @@ function WellbeingTab({ profile, onTargetsSaved }) {
           })
         )}
       </div>
+      )}
 
       {/* What this account is signed up for */}
       <MyPlanCard profile={profile} onChanged={onTargetsSaved} />
@@ -8220,15 +8234,144 @@ function WellbeingTab({ profile, onTargetsSaved }) {
       {/* Calories and macros — self-set while there's no coach */}
       <MyTargetsCard profile={profile} onSaved={onTargetsSaved} />
 
-      {/* Apple Health (steps, sleep, activity) */}
-      <HealthCard profileId={profile?.id} />
+      {/* Each tracker below is on unless it has been switched off — by the
+          coach for a coached client, or by the person themselves if solo. */}
+      {on("health") && <HealthCard profileId={profile?.id} />}
 
-      {/* Weight + Mood (moved here from the dashboard) */}
-      <WeightTracker onWeightSaved={() => {}} profileId={profile?.id} />
-      <div style={{ height: 16 }} />
-      <MeasurementsTracker profileId={profile?.id} profileSex={profile?.sex || ""} />
-      <BenchmarksCard profileId={profile?.id} />
-      <MoodTracker profileId={profile?.id} />
+      {on("weight") && (
+        <>
+          <WeightTracker onWeightSaved={() => {}} profileId={profile?.id} />
+          <div style={{ height: 16 }} />
+        </>
+      )}
+      {on("measurements") && (
+        <MeasurementsTracker profileId={profile?.id} profileSex={profile?.sex || ""} />
+      )}
+      {on("benchmarks") && <BenchmarksCard profileId={profile?.id} />}
+      {on("mood") && <MoodTracker profileId={profile?.id} />}
+
+      {canCustomise && (
+        <HubCustomiser
+          profileId={profile?.id}
+          features={feat}
+          onChanged={setFeatOverride}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ── Customise hub: a solo account picks its own trackers ────────────────────
+   Shown only to accounts with no coach. Once a coach takes someone on, the
+   coach owns the hub and the server answers 403, so this is hidden rather
+   than offered and then refused.
+
+   The catalog comes from the server, not a list copied into this file, so the
+   app and the CMS can never disagree about what exists or what it's called.
+────────────────────────────────────────────────────────────────────────────── */
+function HubCustomiser({ profileId, features, onChanged }) {
+  const [catalog, setCatalog] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      if (!profileId) return;
+      try {
+        const r = await apiFetch(`/athletes/${profileId}/features`);
+        if (ignore) return;
+        setCatalog(Array.isArray(r?.catalog) ? r.catalog : []);
+        if (r?.features) onChanged?.(r.features);
+      } catch {
+        // No catalog means no control, rather than an error on the hub.
+      }
+    })();
+    return () => { ignore = true; };
+    // onChanged is deliberately out of the deps: it's a setState function and
+    // re-running this on every parent render would refetch on a loop.
+  }, [profileId]);
+
+  if (!catalog.length) return null;
+
+  const toggle = async (key, next) => {
+    setErr("");
+    const prev = features;
+    onChanged?.({ ...features, [key]: next });   // optimistic
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/athletes/${profileId}/features`, {
+        method: "PATCH",
+        body: JSON.stringify({ features: { [key]: next } }),
+      });
+      if (r?.features) onChanged?.(r.features);
+    } catch (e) {
+      onChanged?.(prev);
+      setErr(e.message || "Could not save that change.");
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 18, marginTop: 16 }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: "100%", background: "none", border: "none", padding: 0,
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          cursor: "pointer",
+        }}
+      >
+        <span style={{ fontFamily: "Bebas Neue", fontSize: 16, letterSpacing: 2, color: T.text }}>
+          CUSTOMISE HUB
+        </span>
+        <span style={{ color: T.muted, fontSize: 13 }}>{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open && (
+        <>
+          <div style={{ fontFamily: "DM Sans", fontSize: 11.5, color: T.muted, margin: "10px 0 12px", lineHeight: 1.6 }}>
+            Switch off anything you don't use. Nothing is deleted — turn it back
+            on and your history is still there.
+          </div>
+
+          {err && (
+            <div style={{ background: `${T.danger}18`, border: `1px solid ${T.danger}44`, borderRadius: 10, padding: "9px 11px", marginBottom: 10, fontFamily: "DM Sans", fontSize: 12, color: T.danger }}>
+              {err}
+            </div>
+          )}
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {catalog.map((f) => {
+              const isOn = features?.[f.key] !== false;
+              return (
+                <label
+                  key={f.key}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    fontFamily: "DM Sans", fontSize: 12,
+                    color: isOn ? T.accent : T.muted,
+                    border: `1px solid ${isOn ? T.accent : T.border}`,
+                    borderRadius: 10, padding: "9px 12px",
+                    cursor: busy ? "default" : "pointer",
+                    opacity: busy ? 0.6 : 1,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isOn}
+                    disabled={busy}
+                    onChange={(e) => toggle(f.key, e.target.checked)}
+                  />
+                  {f.label}
+                </label>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }
