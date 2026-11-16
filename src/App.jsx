@@ -196,6 +196,51 @@ function dayKeyToDate(dayKey) {
   d.setDate(d.getDate() + diff);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+
+// How far back a missed day can still be filled in.
+const BACKFILL_DAYS = 14;
+
+// The date a day key refers to in the week `offset` weeks from this one:
+// 0 is this week, -1 last week. dayKeyToDate above is the offset-0 case and is
+// left alone, so every existing caller keeps its behaviour. Without this, a day
+// key only ever meant a date inside the current Monday-to-Sunday week, which is
+// why on a Monday there was no way to name yesterday.
+function dayKeyToDateInWeek(dayKey, offset) {
+  const targetIdx = DAYS.indexOf(dayKey);
+  if (targetIdx < 0) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const daysSinceMon = (today.getDay() + 6) % 7;
+  const d = new Date(today);
+  d.setDate(today.getDate() - daysSinceMon + offset * 7 + targetIdx);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Writable: today and the BACKFILL_DAYS days before it. A missed day can be
+// caught up; history a coach has already reviewed cannot quietly change weeks
+// later. Future dates are never writable — those are the coach's plan, not a log.
+function isLoggableDate(iso) {
+  if (!iso) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const d = new Date(iso + "T00:00:00");
+  if (Number.isNaN(d.getTime())) return false;
+  const daysAgo = Math.round((today - d) / 86400000);
+  return daysAgo >= 0 && daysAgo <= BACKFILL_DAYS;
+}
+
+// An entry is a backfill when it was typed in on a later day than the one it is
+// logged against. Derived from created_at rather than a stored flag, so every
+// path that stamps a time — picker, scanner, copy-meal — marks correctly
+// without having to know this feature exists.
+function isBackfilled(item, dateISO) {
+  if (!item?.created_at || !dateISO) return false;
+  const made = new Date(item.created_at);
+  if (Number.isNaN(made.getTime())) return false;
+  const madeISO = `${made.getFullYear()}-${String(made.getMonth() + 1).padStart(2, "0")}-${String(made.getDate()).padStart(2, "0")}`;
+  return madeISO > dateISO;
+}
+
 function dateToISO(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
@@ -10219,6 +10264,10 @@ function WeeklyPlanner({
                 carbs: Number(f.carbs_g ?? f.carbs ?? 0),
                 fat: Number(f.fat_g ?? f.fat ?? 0),
                 meal,
+                // Carried through so an edit to this day doesn't strip the
+                // stamp off every other entry when the day is written back.
+                source: f.source || "manual",
+                created_at: f.created_at || null,
               });
             });
           });
@@ -10254,19 +10303,110 @@ function WeeklyPlanner({
   const emptyWeek = () => { const e = {}; DAYS.forEach((dk) => { e[dk] = {}; MEALS.forEach((m) => { e[dk][m] = []; }); }); return e; };
   const viewPlan = viewingPast ? (pastPlan || emptyWeek()) : plan;
 
-  // Copy a whole meal from any previously logged date into the current slot.
-  const copyLoggedMeal = (dateISO, meal) => {
-    const items = historyByDate?.[dateISO]?.[meal] || [];
-    if (!items.length) return;
+  // Which real date the selected day is, given the week on screen, and whether
+  // it can still be written to. weekOffset > 0 is the coach's plan preview and
+  // is never writable.
+  const editingDateISO = dayKeyToDateInWeek(selectedDay, weekOffset);
+  // The current week stays exactly as editable as it was, future days included,
+  // so planning ahead still works. Past weeks are the new part, and only inside
+  // the backfill window. Future weeks are the coach's plan and stay read-only.
+  const canEditSelected =
+    weekOffset === 0 || (weekOffset < 0 && isLoggableDate(editingDateISO));
+
+  // A past day is written straight through rather than through the debounced
+  // plan effect, because that effect only ever saves the current week: it maps
+  // day keys with dayKeyToDate, which always lands inside this week. Routing a
+  // past edit through it would file yesterday's breakfast under this week's
+  // Sunday, silently.
+  const savePastDay = async (dayKey, weekPlan, offset) => {
+    const dateStr = dayKeyToDateInWeek(dayKey, offset);
+    if (!dateStr || !profile?.id) return;
+    const dayPlan = (weekPlan || {})[dayKey] || {};
+    const foods = [];
+    let cal = 0, pro = 0, carb = 0, fat = 0;
+    MEALS.forEach((meal) => {
+      (dayPlan[meal] || []).forEach((f) => {
+        cal += Number(f.calories || 0);
+        pro += Number(f.protein || 0);
+        carb += Number(f.carbs || 0);
+        fat += Number(f.fat || 0);
+        foods.push({
+          name: f.name || "",
+          calories: Math.round(f.calories || 0),
+          protein_g: Math.round(f.protein || 0),
+          carbs_g: Math.round(f.carbs || 0),
+          fat_g: Math.round(f.fat || 0),
+          meal,
+          source: f.source || "manual",
+          created_at: f.created_at || null,
+        });
+      });
+    });
+    try {
+      // Sent even when empty, so removing the last item clears the day rather
+      // than leaving the old row behind.
+      await apiFetch(`/food-logs/${profile.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ date: dateStr, foods }),
+      });
+      await apiFetch(`/daily-totals/${profile.id}`, {
+        method: "POST",
+        body: JSON.stringify({
+          date: dateStr,
+          calories: Math.round(cal),
+          protein_g: Math.round(pro),
+          carbs_g: Math.round(carb),
+          fat_g: Math.round(fat),
+          source: "manual",
+        }),
+      });
+    } catch (e) {
+      console.warn("Past day save:", e.message);
+    }
+  };
+
+  // The save is kept out of the state updater: React can run an updater twice,
+  // and a save that fires from inside one would go twice with it.
+  const editPastDay = (dayKey, mutate) => {
+    const base = pastPlan || emptyWeek();
+    const next = { ...base, [dayKey]: { ...(base[dayKey] || {}) } };
+    mutate(next[dayKey]);
+    setPastPlan(next);
+    savePastDay(dayKey, next, weekOffset);
+  };
+
+  // Every route that appends to the selected slot goes through here — the food
+  // picker, the scanner, copy-a-meal and quick-add. One place decides which
+  // week the items land in, so a path added later cannot file a past day into
+  // the current week by forgetting to check.
+  const appendToSelectedSlot = (items) => {
+    const stamped = (items || []).map((i) => ({
+      ...i,
+      created_at: i?.created_at || new Date().toISOString(),
+    }));
+    if (!stamped.length) return;
+    if (weekOffset !== 0) {
+      editPastDay(selectedDay, (day) => {
+        day[selectedMeal] = [...(day[selectedMeal] || []), ...stamped];
+      });
+      return;
+    }
     setPlan((prev) => {
       const next = { ...prev };
       next[selectedDay] = { ...next[selectedDay] };
       next[selectedDay][selectedMeal] = [
         ...next[selectedDay][selectedMeal],
-        ...items.map((i) => ({ ...i })),
+        ...stamped,
       ];
       return next;
     });
+  };
+
+  // Copy a whole meal from any previously logged date into the current slot.
+  const copyLoggedMeal = (dateISO, meal) => {
+    const items = historyByDate?.[dateISO]?.[meal] || [];
+    if (!items.length) return;
+    appendToSelectedSlot(items.map((i) => ({ ...i })));
     setShowCopyMeal(false);
   };
   const offSearchSeq = useRef(0); // stale-query guard for async OFF search
@@ -11030,31 +11170,17 @@ function WeeklyPlanner({
   // Quick-add a whole saved meal into the current slot.
   const quickAddSavedMeal = (meal) => {
     if (!meal || !Array.isArray(meal.items)) return;
-    setPlan((prev) => {
-      const next = { ...prev };
-      next[selectedDay] = { ...next[selectedDay] };
-      next[selectedDay][selectedMeal] = [
-        ...next[selectedDay][selectedMeal],
-        ...meal.items.map((it) => ({ ...it })),
-      ];
-      return next;
-    });
+    appendToSelectedSlot(meal.items.map((it) => ({ ...it })));
     resetPicker();
   };
 
   // ── Copy a meal from another day/slot into the current slot ─────────────────
   const copyMealFrom = (fromDay, fromMeal) => {
-    const items = (plan?.[fromDay]?.[fromMeal]) || [];
+    // Reads from viewPlan, not plan: on a past week the source day is the one
+    // on screen, not the same weekday of the current week.
+    const items = (viewPlan?.[fromDay]?.[fromMeal]) || [];
     if (items.length === 0) return;
-    setPlan((prev) => {
-      const next = { ...prev };
-      next[selectedDay] = { ...next[selectedDay] };
-      next[selectedDay][selectedMeal] = [
-        ...next[selectedDay][selectedMeal],
-        ...items.map((it) => ({ ...it })),
-      ];
-      return next;
-    });
+    appendToSelectedSlot(items.map((it) => ({ ...it })));
     setShowCopyMeal(false);
     resetPicker();
   };
@@ -11186,15 +11312,9 @@ function WeeklyPlanner({
   const addFood = (food) => {
     rememberRecentFood(food);
     rememberPairing(food);
-    setPlan((prev) => {
-      const next = { ...prev };
-      next[selectedDay] = { ...next[selectedDay] };
-      next[selectedDay][selectedMeal] = [
-        ...next[selectedDay][selectedMeal],
-        food,
-      ];
-      return next;
-    });
+    // Stamped on the way in, so a day filled in later is distinguishable from
+    // one logged as it happened.
+    appendToSelectedSlot([food]);
     // Stay in the picker so more foods can be added without reopening it.
     // Only the current selection and search are cleared.
     setJustAdded(food?.name || "Food");
@@ -11213,6 +11333,12 @@ function WeeklyPlanner({
   };
 
   const removeFood = (day, meal, idx) => {
+    if (weekOffset !== 0) {
+      editPastDay(day, (d) => {
+        d[meal] = (d[meal] || []).filter((_, i) => i !== idx);
+      });
+      return;
+    }
     setPlan((prev) => {
       const next = { ...prev };
       next[day] = { ...next[day] };
@@ -11253,7 +11379,9 @@ function WeeklyPlanner({
                 ? "Loading…"
                 : weekOffset > 0
                   ? "Coach's planned meals — preview, read only"
-                  : "Viewing history — read only"}
+                  : canEditSelected
+                    ? "You can still add to this day"
+                    : `Logging closes ${BACKFILL_DAYS} days after the day itself`}
             </div>
           )}
         </div>
@@ -11505,6 +11633,23 @@ function WeeklyPlanner({
                       }}
                     >
                       P:{f.protein}g · C:{f.carbs}g · F:{f.fat}g
+                      {isBackfilled(f, editingDateISO) && (
+                        <span
+                          title="Logged after the day it belongs to"
+                          style={{
+                            marginLeft: 6,
+                            padding: "1px 5px",
+                            borderRadius: 5,
+                            border: `1px solid ${T.border}`,
+                            color: T.muted,
+                            fontSize: 9,
+                            letterSpacing: 0.3,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          added later
+                        </span>
+                      )}
                     </div>
                   </div>
                   <button
@@ -11527,9 +11672,9 @@ function WeeklyPlanner({
                   >
                     + list
                   </button>
-                  {!viewingPast && (
+                  {canEditSelected && (
                   <button
-                    onClick={() => !viewingPast && removeFood(selectedDay, meal, i)}
+                    onClick={() => canEditSelected && removeFood(selectedDay, meal, i)}
                     style={{
                       background: "none",
                       border: "none",
@@ -11547,7 +11692,7 @@ function WeeklyPlanner({
                   )}
                 </div>
               ))}
-              {!viewingPast && (
+              {canEditSelected && (
               <button
                 onClick={() => {
                   setSelectedMeal(meal);
@@ -16098,6 +16243,8 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
                 carbs: Number(f.carbs_g ?? f.carbs ?? 0),
                 fat: Number(f.fat_g ?? f.fat ?? 0),
                 meal: f.meal || 'Snack',
+                source: f.source || 'manual',
+                created_at: f.created_at || null,
               }));
               foods.forEach(f => {
                 const meal = MEALS.includes(f.meal) ? f.meal : 'Snack';
@@ -16182,6 +16329,7 @@ If the page requires login or is private, return ONLY: {"profileFound":false}`,
               fat_g: Math.round(f.fat || 0),
               meal: meal,
               source: f.source || 'manual',
+              created_at: f.created_at || null,
             });
           });
         });
